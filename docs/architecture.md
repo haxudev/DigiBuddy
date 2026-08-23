@@ -83,11 +83,21 @@ The response map is stored under the hosted session workspace so session resume 
 
 ## Configuration overlay and profiles
 
-`config_store.py` reads four documents — `models.json`, `mcp.json`, `profiles.json`, and `catalogue.json` — from Azure Blob (`DIGIBUDDY_CONFIG_URI`) or a directory (`DIGIBUDDY_CONFIG_DIR`), behind a short TTL cache.
+`config_store.py` reads five documents — `models.json`, `mcp.json`, `profiles.json`, `skills.json`, and `catalogue.json` — from Azure Blob (`DIGIBUDDY_CONFIG_URI`) or a directory (`DIGIBUDDY_CONFIG_DIR`), behind a short TTL cache.
 
 At each turn boundary the adapter re-reads the overlay, resolves the requested profile from `metadata.profile`, and fingerprints the resulting model settings and profile. A changed fingerprint restarts the Codex engine, so administrative changes apply without a redeploy. A restricted profile gets a filtered view of the payload, with `DIGIBUDDY_SKILLS_ROOT` and `DIGIBUDDY_TOOLS_ROOT` pointed at it.
 
 At startup the runtime publishes `catalogue.json`, describing the skills, tools, and MCP servers the image actually ships, so the admin console cannot drift from the deployed image.
+
+## Skills plane
+
+An agent's most useful capabilities arrive faster than the image does, so skills have a second, centralised source alongside the ones baked into `src/skills/`.
+
+An administrator uploads a skill bundle — a zip with `SKILL.md` at its root — through the admin console. The console validates the archive, hashes it, and stores it in the **same blob container as the configuration documents**, at `bundles/<name>/<sha256>.zip`. This deliberately adds no Azure service: the container and its managed identity already exist. The `skills.json` registry then names the bundle, and because the console always derives that path from the name and digest, an entry can never point at another blob.
+
+Each hosted agent, at the same turn boundary where it re-reads the overlay, installs the enabled skills its profile allows into `$CODEX_HOME/skills` — the only global skills root the Foundry container leaves intact. It re-verifies the SHA-256 and re-checks every archive member, because the store, not the console, is the trust boundary. Extraction is staged and renamed, so a rejected bundle never leaves a half-installed skill, and one broken bundle does not stop the healthy ones.
+
+Packaged skills win: an upload that shares a name with a reviewed, image-baked skill is refused rather than allowed to shadow it. The deployed set feeds `runtime_fingerprint`, so deploying, disabling or withdrawing a skill replaces the Codex process instead of silently serving a stale one.
 
 ## Agent payload
 

@@ -205,3 +205,21 @@
   color: #98413f;
   font-size: 13px;
 }
+
+.upload {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px dashed #d3dade;
+  border-radius: 10px;
+  color: #46545c;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.version {
+  color: #5b6a72;
+  font-size: 12px;
+  font-weight: 500;
+}

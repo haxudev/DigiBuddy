@@ -160,7 +160,7 @@ The route reads the Easy Auth `x-ms-client-principal` header and matches the cal
 
 ### `GET`
 
-Returns all four documents. `models.json` is redacted: `api_key` is removed and replaced with a boolean `api_key_set`.
+Returns all five documents. `models.json` is redacted: `api_key` is removed and replaced with a boolean `api_key_set`.
 
 ### `PUT`
 
@@ -174,7 +174,7 @@ Returns all four documents. `models.json` is redacted: `api_key` is removed and 
 | `mcp.json` | Server names match `[A-Za-z0-9._-]+`; URLs must be HTTPS |
 | `profiles.json` | Names match `[a-z0-9-]+` and must be unique |
 
-`catalogue.json` is published by the runtime and is not writable. Each successful write is logged with the document name and the caller, without values.
+`catalogue.json` is published by the runtime and is not writable. `skills.json` is writable only through `/api/admin/skills`, so that a registry entry can never name a bundle the store does not hold. Each successful write is logged with the document name and the caller, without values.
 
 ### Store configuration
 
@@ -186,3 +186,35 @@ Returns all four documents. `models.json` is redacted: `api_key` is removed and 
 | `ADMIN_ALLOW_ANONYMOUS` | `true` to allow anonymous access outside production |
 
 The hosted agent must be pointed at the same store for admin changes to reach it.
+
+## Web UI (`/api/admin/skills`)
+
+The centralised skills plane. A skill is uploaded once, deployed to the shared store, and loaded by every hosted agent whose profile assembles it. All methods use the same authentication and status codes as `/api/admin/config`.
+
+### `GET`
+
+Returns `{ "skills": [...] }`, the deployed registry.
+
+### `POST`
+
+`multipart/form-data` with the bundle attached as `bundle`, plus optional `version` and `description` fields. The bundle is a zip holding `SKILL.md` at its root, either flat or under a single directory that names the skill.
+
+The console rejects an archive that is not a zip, is larger than 32 MB, expands beyond 128 MB, holds more than 2000 entries, contains a symlink or an unsafe path, or has no `SKILL.md`. It then stores the bytes at `bundles/<name>/<sha256>.zip` before the registry names them, and returns `{ "skill", "skills", "entries" }`.
+
+### `PATCH`
+
+```json
+{ "name": "seo-optimizer", "enabled": false, "description": "…" }
+```
+
+Disabling a skill withdraws it from every agent without deleting the bundle.
+
+### `DELETE`
+
+`?name=seo-optimizer` removes the entry and deletes its bundle.
+
+Every deploy, enable, disable and withdrawal is logged with the skill name and the calling administrator.
+
+### How a deployed skill reaches an agent
+
+The runtime reads `skills.json`, downloads each enabled bundle its profile allows, verifies the SHA-256 against the registry, and extracts it into `$CODEX_HOME/skills`. Extraction is staged and renamed, so a rejected bundle never leaves a partial skill. A skill baked into the image always wins over an upload of the same name, and the deployed set feeds the runtime fingerprint so a change replaces the Codex process rather than serving a stale skill.

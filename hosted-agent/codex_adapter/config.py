@@ -19,6 +19,11 @@ from .config_store import (
     ConfigStore,
     NullConfigStore,
 )
+from .skills import (
+    install_deployed_skills,
+    load_registry,
+    registry_fingerprint,
+)
 from .profiles import (
     DEFAULT_PROFILE,
     REASONING_EFFORTS,
@@ -282,6 +287,9 @@ def build_catalogue(
         if tools_root.is_dir()
         else []
     )
+    skills.update(
+        skill.name for skill in load_registry(store) if skill.enabled
+    )
     mcp_servers = sorted(load_mcp_servers(settings, store))
     return Catalogue(
         skills=tuple(sorted(skills)),
@@ -423,6 +431,7 @@ def runtime_fingerprint(
     ).hex()
     parts = [
         render_codex_config(settings, store, profile, reasoning_effort),
+        registry_fingerprint(load_registry(store)),
         load_instructions(settings, profile),
         profile_fingerprint(profile),
         secret_digest,
@@ -455,9 +464,16 @@ def _link_selection(
 
 
 def install_global_skills(
-    settings: RuntimeSettings, profile: AgentProfile | None = None
+    settings: RuntimeSettings,
+    profile: AgentProfile | None = None,
+    store: ConfigStore | None = None,
 ) -> int:
-    """Publish the profile's immutable build-time skills into Codex's global root."""
+    """Publish the profile's skills into Codex's global root.
+
+    Both sources land in the same directory so Codex discovers them uniformly:
+    the immutable build-time skills the image ships, and the ones an
+    administrator deployed through the console.
+    """
     source = settings.skills_source
     target = settings.codex_home / "skills"
     if not source.is_dir():
@@ -489,6 +505,20 @@ def install_global_skills(
         installed += 1
 
     logger.info("Installed %d global Codex skills into %s", installed, target)
+    if store is not None:
+        installed += install_deployed_skills(
+            store,
+            load_registry(store),
+            target,
+            allows=active.allows_skill,
+            reserved=frozenset(
+                candidate.name
+                for root in (settings.payload_root / "skills", source)
+                if root.is_dir()
+                for candidate in root.iterdir()
+                if candidate.is_dir() and (candidate / "SKILL.md").is_file()
+            ),
+        )
     return installed
 
 
@@ -501,7 +531,7 @@ def prepare_codex_environment(
     active = profile or DEFAULT_PROFILE
     settings.workspace.mkdir(parents=True, exist_ok=True)
     settings.codex_home.mkdir(parents=True, exist_ok=True)
-    install_global_skills(settings, active)
+    install_global_skills(settings, active, store)
     config_path = settings.codex_home / "config.toml"
     config_path.write_text(
         render_codex_config(settings, store, active, reasoning_effort),

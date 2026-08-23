@@ -34,6 +34,17 @@ type Profile = {
   reasoning_effort: string;
 };
 
+type DeployedSkill = {
+  name: string;
+  version: string;
+  description: string;
+  sha256: string;
+  size: number;
+  enabled: boolean;
+  uploaded_at: string;
+  uploaded_by: string;
+};
+
 type NamedServer = McpServer & { name: string };
 
 const EFFORTS = ["minimal", "low", "medium", "high"];
@@ -62,6 +73,7 @@ type ConfigPayload = {
   "mcp.json"?: { servers?: Record<string, McpServer> };
   "profiles.json"?: { profiles?: Profile[] };
   "catalogue.json"?: Partial<Catalogue>;
+  "skills.json"?: { skills?: DeployedSkill[] };
 };
 
 async function fetchConfig(): Promise<ConfigPayload> {
@@ -122,7 +134,7 @@ function Selector({
 }
 
 export default function Admin() {
-  const [tab, setTab] = useState<"models" | "mcp" | "profiles">("models");
+  const [tab, setTab] = useState<"models" | "mcp" | "skills" | "profiles">("models");
   const [catalogue, setCatalogue] = useState<Catalogue>({
     skills: [],
     tools: [],
@@ -131,6 +143,7 @@ export default function Admin() {
   const [models, setModels] = useState<Models>(emptyModels);
   const [servers, setServers] = useState<NamedServer[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [skills, setSkills] = useState<DeployedSkill[]>([]);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -146,6 +159,7 @@ export default function Admin() {
           ),
         );
         setProfiles(payload["profiles.json"]?.profiles ?? []);
+        setSkills(payload["skills.json"]?.skills ?? []);
         setCatalogue({
           skills: [],
           tools: [],
@@ -184,6 +198,34 @@ export default function Admin() {
     }
   }
 
+  async function callSkills(
+    init: RequestInit,
+    failureMessage: string,
+    query = "",
+  ) {
+    setBusy(true);
+    setError("");
+    setStatus("");
+    try {
+      const response = await fetch(`/api/admin/skills${query}`, init);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || failureMessage);
+      setSkills(payload.skills ?? []);
+      setStatus("Skills updated. They apply from the next turn.");
+      await load();
+    } catch (callError) {
+      setError(callError instanceof Error ? callError.message : failureMessage);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function upload(file: File) {
+    const body = new FormData();
+    body.append("bundle", file);
+    await callSkills({ method: "POST", body }, "Unable to deploy the bundle.");
+  }
+
   function updateProfile(index: number, patch: Partial<Profile>) {
     setProfiles((current) =>
       current.map((profile, position) =>
@@ -191,6 +233,15 @@ export default function Admin() {
       ),
     );
   }
+
+  // A skill deployed a moment ago is assignable before the runtime has had a
+  // chance to republish its catalogue.
+  const assignableSkills = [
+    ...new Set([
+      ...catalogue.skills,
+      ...skills.filter((skill) => skill.enabled).map((skill) => skill.name),
+    ]),
+  ].sort();
 
   return (
     <main className={styles.shell}>
@@ -204,7 +255,7 @@ export default function Admin() {
         </header>
 
         <div className={styles.tabs} role="tablist">
-          {(["models", "mcp", "profiles"] as const).map((name) => (
+          {(["models", "mcp", "skills", "profiles"] as const).map((name) => (
             <button
               key={name}
               role="tab"
@@ -216,7 +267,9 @@ export default function Admin() {
                 ? "Model access"
                 : name === "mcp"
                   ? "Remote MCP"
-                  : "Agent profiles"}
+                  : name === "skills"
+                    ? "Skills"
+                    : "Agent profiles"}
             </button>
           ))}
         </div>
@@ -433,6 +486,86 @@ export default function Admin() {
           </section>
         )}
 
+        {tab === "skills" && (
+          <section className={styles.panel}>
+            <h2>Deployed skills</h2>
+            <p className={styles.hint}>
+              Upload a skill bundle — a zip holding <code>SKILL.md</code> and its
+              references — and every profile that assembles it loads it on the next
+              turn, without rebuilding the image. Uploading the same skill again
+              replaces it. Skills baked into the image cannot be shadowed.
+            </p>
+            <label className={styles.upload}>
+              Skill bundle (.zip)
+              <input
+                type="file"
+                accept=".zip,.skill,application/zip"
+                disabled={busy}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) void upload(file);
+                }}
+              />
+            </label>
+            {skills.length === 0 && (
+              <p className={styles.hint}>No skills have been deployed yet.</p>
+            )}
+            {skills.map((skill) => (
+              <div className={styles.row} key={skill.name}>
+                <div className={styles.rowHeader}>
+                  <strong>
+                    {skill.name} <span className={styles.version}>v{skill.version}</span>
+                  </strong>
+                  <button
+                    className={styles.remove}
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      void callSkills(
+                        { method: "DELETE" },
+                        "Unable to withdraw the skill.",
+                        `?name=${encodeURIComponent(skill.name)}`,
+                      )
+                    }
+                  >
+                    Withdraw
+                  </button>
+                </div>
+                {skill.description && <p>{skill.description}</p>}
+                <p className={styles.hint}>
+                  {Math.max(1, Math.round(skill.size / 1024))} KB · {skill.sha256.slice(0, 12)} ·
+                  uploaded {skill.uploaded_at.slice(0, 10)} by {skill.uploaded_by}
+                </p>
+                <div className={styles.checks}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={skill.enabled}
+                      disabled={busy}
+                      onChange={(event) =>
+                        void callSkills(
+                          {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              name: skill.name,
+                              enabled: event.target.checked,
+                            }),
+                          },
+                          "Unable to update the skill.",
+                        )
+                      }
+                    />
+                    Enabled
+                  </label>
+                </div>
+              </div>
+            ))}
+            {status && <span className={styles.status}>{status}</span>}
+          </section>
+        )}
+
         {tab === "profiles" && (
           <section className={styles.panel}>
             <h2>Agent profiles</h2>
@@ -524,7 +657,7 @@ export default function Admin() {
                 </label>
                 <Selector
                   label="Skills"
-                  available={catalogue.skills}
+                  available={assignableSkills}
                   selection={profile.skills}
                   onChange={(skills) => updateProfile(index, { skills })}
                 />
