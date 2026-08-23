@@ -112,8 +112,8 @@ def _safe_members(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
             raise ValueError(f"bundle contains a symlink: {name}")
         if name.startswith("/") or "\\" in name:
             raise ValueError(f"bundle contains an unsafe path: {name}")
-        parts = Path(name).parts
-        if any(part in ("..", ".") for part in parts):
+        parts = name.split("/")
+        if any(part in ("", "..", ".") for part in parts):
             raise ValueError(f"bundle contains an unsafe path: {name}")
         total += member.file_size
         if total > MAX_EXTRACTED_BYTES:
