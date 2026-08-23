@@ -414,7 +414,7 @@ class ReleaseRunnerTests(unittest.TestCase):
                     f"haeronclaw-webui:{self.tag}",
                     "-f",
                     "Dockerfile",
-                    "webui",
+                    ".",
                 ],
                 stdout="webui build ok\n",
             )
@@ -526,6 +526,16 @@ class ReleaseRunnerTests(unittest.TestCase):
         self.assertTrue(
             self.commands.seen(("az", "webapp", "config", "container")),
             "expected a Web App image update command",
+        )
+        self.assertEqual(
+            next(
+                call["cwd"]
+                for call in self.commands.calls
+                if call["args"][:5]
+                == ("az", "acr", "build", "--registry", "haxureg")
+                and f"haeronclaw-webui:{self.tag}" in call["args"]
+            ),
+            str(self.worktree / "webui"),
         )
         self.assertTrue(
             self.commands.seen(("az", "webapp", "config", "container", "show")),

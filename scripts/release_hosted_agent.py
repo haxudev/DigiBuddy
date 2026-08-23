@@ -150,7 +150,7 @@ class ReleaseRunner:
             hosted_digest = self._build_acr_image(
                 repository=self.config.hosted_image_repository,
                 dockerfile="hosted-agent/Dockerfile",
-                context=".",
+                working_directory=".",
                 tag=image_tag,
             )
             result["image_digest"] = hosted_digest
@@ -160,7 +160,7 @@ class ReleaseRunner:
                 webui_digest = self._build_acr_image(
                     repository=self.config.webui_image_repository,
                     dockerfile="Dockerfile",
-                    context="webui",
+                    working_directory="webui",
                     tag=image_tag,
                 )
                 result["webui_image_digest"] = webui_digest
@@ -272,7 +272,7 @@ class ReleaseRunner:
             raise ReleaseError("Local Hosted Agent image is missing the required bundled maturity assets.")
 
     def _build_acr_image(
-        self, *, repository: str, dockerfile: str, context: str, tag: str
+        self, *, repository: str, dockerfile: str, working_directory: str, tag: str
     ) -> str:
         self._run_checked(
             [
@@ -285,8 +285,9 @@ class ReleaseRunner:
                 f"{repository}:{tag}",
                 "-f",
                 dockerfile,
-                context,
-            ]
+                ".",
+            ],
+            cwd=self.root / working_directory,
         )
         metadata = self._command_json(
             [
