@@ -1,9 +1,9 @@
 FOUNDRY_AGENT_ENDPOINT=https://your-foundry-endpoint/responses
-FOUNDRY_AGENT_API_KEY=replace-at-deploy-time
-FOUNDRY_AUTH_MODE=api-key
+FOUNDRY_AGENT_API_KEY=
+FOUNDRY_AUTH_MODE=bearer
 FOUNDRY_AGENT_NAME=digibuddy-codex
-FOUNDRY_AGENT_VERSION=1
-CODEX_MODEL_NAME=gpt-5.2-codex
+FOUNDRY_AGENT_VERSION=2
+CODEX_MODEL_NAME=gpt-5.6-luna
 AGENT_ENDPOINT_ALLOWLIST=services.ai.azure.com,openai.azure.com
 
 # Shared runtime configuration store. Set exactly one, and point the hosted

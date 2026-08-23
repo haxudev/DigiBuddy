@@ -135,6 +135,10 @@ azd env set CODEX_MODEL_NAME "gpt-5.2-codex"
 azd up
 ```
 
+The Codex sandbox has outbound network access by default
+(`CODEX_NETWORK_ACCESS=true`), which requires
+`CODEX_SANDBOX=workspace-write`. Set it to `false` to disable sandbox egress.
+
 Then deploy `webui/Dockerfile` to Web App for Containers or another OCI host and set `FOUNDRY_AGENT_ENDPOINT`. See [Quickstart](docs/quickstart.md) and [Architecture](docs/architecture.md).
 
 For routine updates after initial provisioning, use the repository release

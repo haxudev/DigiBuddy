@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   assertAllowedEndpoint,
   latestUserText,
+  resolveAuthHeaders,
   resolveConnection,
   responseText,
 } from "./agent-proxy.ts";
@@ -38,6 +39,46 @@ test("resolves server defaults without exposing them to the client", () => {
   );
   assert.equal(connection.apiKey, "server-key");
   assert.equal(connection.model, "gpt-5.2-codex");
+});
+
+test("uses managed identity when bearer authentication has no static token", async () => {
+  const connection = resolveConnection(
+    {},
+    {
+      NODE_ENV: "production",
+      FOUNDRY_AGENT_ENDPOINT:
+        "https://demo.services.ai.azure.com/api/projects/app/responses",
+      FOUNDRY_AUTH_MODE: "bearer",
+      CODEX_MODEL_NAME: "gpt-5.6-luna",
+    },
+  );
+  const headers = await resolveAuthHeaders(connection, {
+    async getToken(scope) {
+      assert.equal(scope, "https://ai.azure.com/.default");
+      return { token: "managed-token" };
+    },
+  });
+  assert.deepEqual(headers, { Authorization: "Bearer managed-token" });
+});
+
+test("does not let a request opt into the server managed identity", async () => {
+  const connection = resolveConnection(
+    { connection: { authMode: "bearer" } },
+    {
+      NODE_ENV: "production",
+      FOUNDRY_AGENT_ENDPOINT:
+        "https://demo.services.ai.azure.com/api/projects/app/responses",
+      CODEX_MODEL_NAME: "gpt-5.6-luna",
+    },
+  );
+  await assert.rejects(
+    resolveAuthHeaders(connection, {
+      async getToken() {
+        throw new Error("managed identity must not be called");
+      },
+    }),
+    /explicit access token/,
+  );
 });
 
 test("extracts the most recent user message and response output", () => {

@@ -26,6 +26,10 @@ from .profiles import (
 MODEL_API_KEY_ENV = "DIGIBUDDY_MODEL_API_KEY"
 logger = logging.getLogger(__name__)
 
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+_FALSE_VALUES = {"0", "false", "no", "off"}
+_NETWORK_CAPABLE_SANDBOX = "workspace-write"
+
 
 @dataclass(frozen=True)
 class RuntimeSettings:
@@ -35,12 +39,25 @@ class RuntimeSettings:
     model_provider: str
     approval_policy: str
     sandbox: str
+    network_access: bool
     workspace: Path
     codex_home: Path
     instructions_path: Path
     payload_root: Path
     skills_source: Path
     reasoning_effort: str = "high"
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    value = raw.strip().lower()
+    if value in _TRUE_VALUES:
+        return True
+    if value in _FALSE_VALUES:
+        return False
+    raise RuntimeError(f"{name} must be a boolean value, got {raw!r}")
 
 
 def load_settings() -> RuntimeSettings:
@@ -52,6 +69,7 @@ def load_settings() -> RuntimeSettings:
         model_provider=os.environ.get("CODEX_MODEL_PROVIDER", "digibuddy").strip(),
         approval_policy=os.environ.get("CODEX_APPROVAL_POLICY", "never").strip(),
         sandbox=os.environ.get("CODEX_SANDBOX", "workspace-write").strip(),
+        network_access=_env_flag("CODEX_NETWORK_ACCESS", True),
         workspace=Path(os.environ.get("CODEX_WORKSPACE", "/workspace")).resolve(),
         codex_home=Path(
             os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))
@@ -78,6 +96,13 @@ def validate_settings(settings: RuntimeSettings) -> None:
         raise RuntimeError("CODEX_MODEL_PROVIDER must not be empty")
     if not settings.workspace.is_absolute() or not settings.codex_home.is_absolute():
         raise RuntimeError("CODEX_WORKSPACE and CODEX_HOME must be absolute paths")
+    if settings.network_access and settings.sandbox != _NETWORK_CAPABLE_SANDBOX:
+        logger.warning(
+            "CODEX_NETWORK_ACCESS is enabled but CODEX_SANDBOX=%s ignores it; "
+            "set CODEX_SANDBOX=%s to grant the sandbox network egress",
+            settings.sandbox,
+            _NETWORK_CAPABLE_SANDBOX,
+        )
     if settings.model_endpoint:
         parsed = urlparse(settings.model_endpoint)
         local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1"}
@@ -260,9 +285,18 @@ def render_codex_config(
         f"model_reasoning_effort = {json.dumps(effective_reasoning_effort(settings, profile))}",
     ]
     if settings.model_endpoint:
+        lines.append(f"model_provider = {json.dumps(settings.model_provider)}")
+    if settings.sandbox == _NETWORK_CAPABLE_SANDBOX:
         lines.extend(
             [
-                f"model_provider = {json.dumps(settings.model_provider)}",
+                "",
+                "[sandbox_workspace_write]",
+                f"network_access = {json.dumps(settings.network_access)}",
+            ]
+        )
+    if settings.model_endpoint:
+        lines.extend(
+            [
                 "",
                 f"[model_providers.{settings.model_provider}]",
                 'name = "DigiBuddy configured provider"',

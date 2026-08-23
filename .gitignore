@@ -116,3 +116,6 @@ la-bgdiag.txt
 la-diag.txt
 la-m365.txt
 la-ppt-window.txt
+
+# Global Codex skill pack staged by scripts/sync-agent-skills.sh
+hosted-agent/skills/

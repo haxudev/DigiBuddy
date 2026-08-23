@@ -1,3 +1,4 @@
+import { ManagedIdentityCredential } from "@azure/identity";
 import type { Message } from "@ag-ui/core";
 
 export type ConnectionSettings = {
@@ -8,12 +9,46 @@ export type ConnectionSettings = {
   agentName: string;
   agentVersion: string;
   profile: string;
+  useManagedIdentity: boolean;
 };
 
 type Environment = Record<string, string | undefined>;
 
+type TokenCredential = {
+  getToken(scope: string): Promise<{ token: string } | null>;
+};
+
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+export async function resolveAuthHeaders(
+  connection: ConnectionSettings,
+  credential?: TokenCredential,
+): Promise<Record<string, string>> {
+  if (connection.authMode === "api-key") {
+    return connection.apiKey ? { "api-key": connection.apiKey } : {};
+  }
+  if (connection.apiKey) {
+    return { Authorization: `Bearer ${connection.apiKey}` };
+  }
+  if (!connection.useManagedIdentity) {
+    throw new Error("Bearer authentication requires an explicit access token.");
+  }
+
+  const clientId = stringValue(process.env.AZURE_CLIENT_ID);
+  const managedIdentity =
+    credential ||
+    (clientId
+      ? new ManagedIdentityCredential(clientId)
+      : new ManagedIdentityCredential());
+  const accessToken = await managedIdentity.getToken(
+    "https://ai.azure.com/.default",
+  );
+  if (!accessToken?.token) {
+    throw new Error("Managed identity did not return a Foundry access token.");
+  }
+  return { Authorization: `Bearer ${accessToken.token}` };
 }
 
 export function resolveConnection(
@@ -50,6 +85,10 @@ export function resolveConnection(
       "1",
     // Selecting an agent profile. Blank means "the runtime default".
     profile: stringValue(raw.profile) || stringValue(environment.DIGIBUDDY_PROFILE),
+    useManagedIdentity:
+      environmentAuthMode === "bearer" &&
+      !stringValue(raw.apiKey) &&
+      !stringValue(environment.FOUNDRY_AGENT_API_KEY),
   } satisfies ConnectionSettings;
 
   if (!connection.endpoint) {

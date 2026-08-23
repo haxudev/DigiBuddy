@@ -66,3 +66,8 @@ docker run --rm -p 3000:3000 \
 The image listens on port `3000` and uses Next.js standalone output. It can run on Azure Web App for Containers or any OCI-compatible container service.
 
 For production, place secrets in the hosting platform configuration, leave the UI key field blank, and restrict `AGENT_ENDPOINT_ALLOWLIST` to approved endpoint suffixes.
+
+On Azure App Service, set `FOUNDRY_AUTH_MODE=bearer` and leave
+`FOUNDRY_AGENT_API_KEY` empty. The server uses the Web App's managed identity
+to acquire a Foundry access token; grant that identity the `Foundry User` role
+on the target project.

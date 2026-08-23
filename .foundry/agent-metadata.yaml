@@ -1,0 +1,7 @@
+defaultEnvironment: prod
+environments:
+  prod:
+    projectEndpoint: https://haxuaifoundryaiservice.services.ai.azure.com/api/projects/haxuaifoundryaiservice-agent
+    agentName: haeronclaw-codex
+    azureContainerRegistry: haxureg.azurecr.io
+    testCases: []

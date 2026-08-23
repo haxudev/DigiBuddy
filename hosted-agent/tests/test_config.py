@@ -1,5 +1,6 @@
 import json
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from codex_adapter.config import (
     RuntimeSettings,
     apply_model_overrides,
     build_catalogue,
+    install_global_skills,
     load_instructions,
     load_mcp_servers,
     load_profiles,
@@ -26,6 +28,7 @@ def settings(**overrides):
         "model_provider": "digibuddy",
         "approval_policy": "never",
         "sandbox": "workspace-write",
+        "network_access": True,
         "workspace": Path("/workspace"),
         "codex_home": Path("/tmp/codex"),
         "instructions_path": Path("/tmp/AGENTS.md"),
@@ -83,6 +86,58 @@ class RuntimeSettingsTests(unittest.TestCase):
     def test_endpoint_requires_key(self):
         with self.assertRaisesRegex(RuntimeError, "CODEX_MODEL_API_KEY"):
             validate_settings(settings(model_api_key=""))
+
+    def test_workspace_write_sandbox_grants_network_access(self):
+        parsed = tomllib.loads(render_codex_config(settings()))
+
+        self.assertTrue(parsed["sandbox_workspace_write"]["network_access"])
+        self.assertEqual(parsed["model_provider"], "digibuddy")
+        self.assertEqual(
+            parsed["model_providers"]["digibuddy"]["wire_api"], "responses"
+        )
+
+    def test_network_access_can_be_disabled(self):
+        parsed = tomllib.loads(render_codex_config(settings(network_access=False)))
+
+        self.assertFalse(parsed["sandbox_workspace_write"]["network_access"])
+
+    def test_non_workspace_write_sandbox_omits_network_table(self):
+        parsed = tomllib.loads(render_codex_config(settings(sandbox="read-only")))
+
+        self.assertNotIn("sandbox_workspace_write", parsed)
+
+
+class GlobalSkillInstallTests(unittest.TestCase):
+    def test_skills_are_published_under_codex_home(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / "pack"
+            for index in range(11):
+                skill = source / f"skill-{index}"
+                skill.mkdir(parents=True)
+                (skill / "SKILL.md").write_text("x", encoding="utf-8")
+            (source / "notes").mkdir()
+            (source / "notes" / "README.md").write_text("x", encoding="utf-8")
+            codex_home = Path(root) / "codex"
+            codex_home.mkdir()
+            current = settings(skills_source=source, codex_home=codex_home)
+
+            self.assertEqual(install_global_skills(current), 11)
+            self.assertEqual(install_global_skills(current), 11)
+            self.assertTrue(
+                (codex_home / "skills" / "skill-0" / "SKILL.md").is_file()
+            )
+            self.assertFalse((codex_home / "skills" / "notes").exists())
+
+    def test_missing_skill_pack_is_reported(self):
+        with tempfile.TemporaryDirectory() as root:
+            codex_home = Path(root) / "codex"
+            codex_home.mkdir()
+            current = settings(
+                skills_source=Path(root) / "absent", codex_home=codex_home
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "missing"):
+                install_global_skills(current)
 
 
 class ModelOverrideTests(unittest.TestCase):

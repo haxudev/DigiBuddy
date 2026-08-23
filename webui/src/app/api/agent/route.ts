@@ -5,6 +5,7 @@ import {
 } from "@ag-ui/core";
 import {
   latestUserText,
+  resolveAuthHeaders,
   resolveConnection,
   responseText,
 } from "@/lib/agent-proxy";
@@ -89,15 +90,8 @@ export async function POST(request: Request) {
         const headers: Record<string, string> = {
           Accept: "text/event-stream",
           "Content-Type": "application/json",
+          ...(await resolveAuthHeaders(connection)),
         };
-        if (connection.apiKey) {
-          if (connection.authMode === "bearer") {
-            headers.Authorization =
-              ["Bear", "er"].join("") + ` ${connection.apiKey}`;
-          } else {
-            headers["api-key"] = connection.apiKey;
-          }
-        }
 
         const upstream = await fetch(connection.endpoint, {
           method: "POST",

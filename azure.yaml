@@ -34,6 +34,8 @@ services:
         value: ${CODEX_APPROVAL_POLICY=never}
       - name: CODEX_SANDBOX
         value: ${CODEX_SANDBOX=workspace-write}
+      - name: CODEX_NETWORK_ACCESS
+        value: ${CODEX_NETWORK_ACCESS=true}
       - name: DIGIBUDDY_CONFIG_URI
         value: ${DIGIBUDDY_CONFIG_URI=}
     container:
