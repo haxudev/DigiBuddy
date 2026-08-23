@@ -2,9 +2,29 @@
   display: grid;
   grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(300px, 420px);
   height: 100vh;
+  /* Keeps the console genuinely full screen once mobile browser chrome hides. */
+  height: 100dvh;
   overflow: hidden;
   background: #f3f5f7;
   color: #182028;
+}
+
+/*
+ * The slots are invisible on wide screens: their children are the real grid
+ * columns. Narrow screens turn them into off-canvas drawers.
+ */
+.navSlot,
+.panelSlot {
+  display: contents;
+}
+
+.backdrop {
+  display: none;
+  border: 0;
+}
+
+.drawerButton {
+  display: none;
 }
 
 .formGrid {
@@ -174,25 +194,98 @@
 }
 
 .error {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
   margin: 0 clamp(20px, 4vw, 56px) 12px;
-  padding: 10px 12px;
-  color: #9e2f2f;
-  background: #fff0f0;
-  border: 1px solid #f3cece;
-  border-radius: 8px;
+  padding: 12px 14px;
+  color: #7f2626;
+  background: #fff5f4;
+  border: 1px solid #f2cdc8;
+  border-left: 3px solid #c0392b;
+  border-radius: 10px;
   font-size: 13px;
+}
+
+.errorIcon {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  color: #fff;
+  background: #c0392b;
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.error strong {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 13px;
+}
+
+.error p {
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.error button {
+  padding: 0 6px;
+  color: #9e2f2f;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .composer {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 12px;
+  gap: 8px;
   margin: 0 clamp(20px, 4vw, 56px) 24px;
   padding: 10px;
   background: #fff;
   border: 1px solid #d8dfe2;
   border-radius: 14px;
   box-shadow: 0 12px 36px rgb(22 38 45 / 9%);
+}
+
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 4px;
+  list-style: none;
+}
+
+.attachments li {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  max-width: 220px;
+  padding: 3px 4px 3px 10px;
+  color: #33454a;
+  background: #eef4f4;
+  border-radius: 20px;
+  font-size: 12px;
+}
+
+.attachments li span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.attachments li button {
+  padding: 0 4px;
+  color: #66787d;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
 }
 
 .composer textarea {
@@ -206,16 +299,65 @@
   line-height: 1.5;
 }
 
-.composer button {
-  align-self: end;
+.composerControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.fileInput {
+  display: none;
+}
+
+.effort {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: #66787d;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.effort select {
+  height: 32px;
+  padding: 0 8px;
+  color: #33454a;
+  background: #fff;
+  border: 1px solid #d8dfe2;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.composer button[type="submit"] {
   min-width: 104px;
-  height: 42px;
+  height: 40px;
+  margin-left: auto;
   color: #fff;
   background: #176f65;
   border: 0;
   border-radius: 9px;
   cursor: pointer;
+  font: inherit;
   font-weight: 700;
+}
+
+.ghostButton {
+  height: 32px;
+  padding: 0 12px;
+  color: #33454a;
+  background: #eef4f4;
+  border: 1px solid #dde5e7;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.ghostButton:hover {
+  background: #e4eeee;
 }
 
 .composer button:disabled {
@@ -226,36 +368,104 @@
 @media (max-width: 1180px) {
   .shell {
     grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) minmax(0, 320px);
   }
 
-  .chat {
-    grid-row: 1;
+  /* The deliverable panel becomes a drawer over the conversation. */
+  .panelSlot {
+    display: block;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    width: min(420px, 92vw);
+    transform: translateX(100%);
+    transition: transform 0.22s ease;
   }
 
-  .shell > :last-child {
-    grid-column: 1 / -1;
-    border-top: 1px solid #dde5e7;
+  .shell[data-panel="open"] .panelSlot {
+    transform: translateX(0);
+  }
+
+  .panelSlot > * {
+    height: 100%;
+    box-shadow: -18px 0 44px rgb(22 38 45 / 16%);
+  }
+
+  .shell[data-panel="open"] .backdrop,
+  .shell[data-nav="open"] .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 15;
+    background: rgb(16 27 32 / 42%);
+    cursor: pointer;
+  }
+
+  .chatHeader button.drawerButton:last-child {
+    display: inline-flex;
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 860px) {
   .shell {
-    height: auto;
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(560px, 78vh) minmax(0, 320px);
-    overflow: visible;
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .chat {
-    grid-row: auto;
+  .navSlot {
+    display: block;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 20;
+    width: min(300px, 88vw);
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
   }
 
-  .shell > :last-child {
-    grid-column: auto;
+  .shell[data-nav="open"] .navSlot {
+    transform: translateX(0);
   }
 
-  .composer {
-    grid-template-columns: 1fr;
+  .navSlot > * {
+    height: 100%;
+    box-shadow: 18px 0 44px rgb(22 38 45 / 22%);
+  }
+
+  .drawerButton {
+    display: inline-flex;
+    flex: none;
+    gap: 4px;
+    align-items: center;
+    height: 32px;
+    padding: 0 10px;
+    margin-right: 10px;
+    color: #33454a;
+    background: #eef4f4;
+    border: 1px solid #dde5e7;
+    border-radius: 8px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+  }
+
+  .chatHeader > .drawerButton {
+    margin-right: 0;
+  }
+
+  .protocol {
+    display: none;
+  }
+
+  .formGrid {
+    max-height: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .navSlot,
+  .panelSlot {
+    transition: none;
   }
 }

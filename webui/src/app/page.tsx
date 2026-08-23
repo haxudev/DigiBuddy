@@ -12,9 +12,18 @@ import {
 import { HttpAgent, type Message } from "@ag-ui/client";
 import Link from "next/link";
 import ArtifactPanel from "@/components/ArtifactPanel";
+import ActivityTrail from "@/components/ActivityTrail";
 import AskUserCard from "@/components/AskUserCard";
 import Markdown from "@/components/Markdown";
 import SessionSidebar from "@/components/SessionSidebar";
+import {
+  ACTIVITY_EVENT_NAME,
+  isActivityEvent,
+  reduceActivity,
+  settleActivity,
+  type ActivityEntry,
+} from "@/lib/activity";
+import { REASONING_EFFORTS, type TurnAttachment } from "@/lib/agent-proxy";
 import { extractArtifacts, type Artifact } from "@/lib/artifacts";
 import { splitMessage } from "@/lib/ask-user";
 import {
@@ -61,6 +70,31 @@ const emptyConnection: Connection = {
   profile: "",
 };
 
+const EFFORT_LABELS: Record<string, string> = {
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+};
+
+/** What the composer will accept, matching the formats Codex can open. */
+const ATTACHMENT_ACCEPT =
+  "image/*,.pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.csv,.txt,.md,.json";
+
+function readAsDataUrl(file: File): Promise<TurnAttachment> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.onload = () =>
+      resolve({
+        filename: file.name,
+        mimeType: file.type,
+        data: String(reader.result ?? ""),
+      });
+    reader.readAsDataURL(file);
+  });
+}
+
 function messageText(message: Message): string {
   if (typeof message.content === "string") {
     return message.content;
@@ -95,8 +129,16 @@ export default function Home() {
   const [error, setError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [profiles, setProfiles] = useState<ProfileOption[]>([]);
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [attachments, setAttachments] = useState<TurnAttachment[]>([]);
+  const [reasoningEffort, setReasoningEffort] = useState("");
+  // On phones and tablets the sidebar and the deliverable panel slide over the
+  // conversation instead of squeezing it.
+  const [navOpen, setNavOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
   const agentRef = useRef<HttpAgent | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Sessions live in browser storage: the Responses API keeps each transcript
   // server side behind a response id, but the console needs its own history.
@@ -126,6 +168,14 @@ export default function Home() {
     agentRef.current = agent;
 
     const subscription = agent.subscribe({
+      onCustomEvent: ({ event }) => {
+        // Thinking and tool rows arrive out of band so they never enter the
+        // transcript the console stores and mines for deliverables.
+        if (event.name !== ACTIVITY_EVENT_NAME) return;
+        if (!isActivityEvent(event.value)) return;
+        const activityEvent = event.value;
+        setActivity((current) => reduceActivity(current, activityEvent));
+      },
       onMessagesChanged: ({ messages: nextMessages }) => {
         const stored = toStoredMessages(nextMessages as Message[]);
         updateSession(activeId, (item) => ({
@@ -171,7 +221,7 @@ export default function Home() {
   useEffect(() => {
     const transcript = transcriptRef.current;
     if (transcript) transcript.scrollTop = transcript.scrollHeight;
-  }, [messages]);
+  }, [messages, activity]);
 
   const artifacts = useMemo<Artifact[]>(
     () =>
@@ -188,21 +238,47 @@ export default function Home() {
       if (!text || !agent || isRunning) return;
 
       setError("");
+      setActivity([]);
       setIsRunning(true);
       agent.addMessage({ id: crypto.randomUUID(), role: "user", content: text });
 
+      // Files belong to the turn that sends them, so the tray empties as soon
+      // as the request is on its way.
+      const files = attachments;
+      setAttachments([]);
+
       try {
-        await agent.runAgent({ forwardedProps: { connection } });
+        await agent.runAgent({
+          forwardedProps: {
+            connection,
+            attachments: files,
+            reasoningEffort,
+          },
+        });
       } catch (runError) {
         setError(
           runError instanceof Error ? runError.message : "Agent request failed",
         );
       } finally {
+        setActivity(settleActivity);
         setIsRunning(false);
       }
     },
-    [connection, isRunning],
+    [attachments, connection, isRunning, reasoningEffort],
   );
+
+  async function addFiles(list: FileList | null) {
+    const files = Array.from(list ?? []);
+    if (!files.length) return;
+    try {
+      const read = await Promise.all(files.map(readAsDataUrl));
+      setAttachments((current) => [...current, ...read]);
+    } catch (readError) {
+      setError(
+        readError instanceof Error ? readError.message : "Could not read the file.",
+      );
+    }
+  }
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -214,6 +290,10 @@ export default function Home() {
   function selectSession(sessionId: string) {
     setSelectedId(sessionId);
     setError("");
+    setNavOpen(false);
+    // Activity describes one run, so it never follows the reader to another
+    // session.
+    setActivity([]);
   }
 
   function createNewSession() {
@@ -236,7 +316,12 @@ export default function Home() {
   }
 
   return (
-    <main className={styles.shell}>
+    <main
+      className={styles.shell}
+      data-nav={navOpen ? "open" : "closed"}
+      data-panel={panelOpen ? "open" : "closed"}
+    >
+      <div className={styles.navSlot}>
       <SessionSidebar
         sessions={sessions}
         activeId={activeId}
@@ -330,14 +415,41 @@ export default function Home() {
           </p>
         </div>
       </SessionSidebar>
+      </div>
+
+      <button
+        type="button"
+        className={styles.backdrop}
+        aria-label="Close panel"
+        onClick={() => {
+          setNavOpen(false);
+          setPanelOpen(false);
+        }}
+      />
 
       <section className={styles.chat}>
         <header className={styles.chatHeader}>
           <div>
+            <button
+              type="button"
+              className={styles.drawerButton}
+              onClick={() => setNavOpen(true)}
+              aria-label="Show sessions"
+            >
+              ☰
+            </button>
             <span className={styles.statusDot} />
             {activeSession?.title ?? "Codex Hosted Agent"}
           </div>
           <span className={styles.protocol}>Responses · AG-UI stream</span>
+          <button
+            type="button"
+            className={styles.drawerButton}
+            onClick={() => setPanelOpen(true)}
+            aria-label="Show deliverables"
+          >
+            ▤ {artifacts.length || ""}
+          </button>
         </header>
 
         <div className={styles.messages} aria-live="polite" ref={transcriptRef}>
@@ -378,11 +490,45 @@ export default function Home() {
               ),
             )
           )}
+          <ActivityTrail entries={activity} running={isRunning} />
         </div>
 
-        {error && <div className={styles.error}>{error}</div>}
+        {error && (
+          <div className={styles.error} role="alert">
+            <span className={styles.errorIcon} aria-hidden="true">
+              !
+            </span>
+            <div>
+              <strong>The agent could not finish this turn</strong>
+              <p>{error}</p>
+            </div>
+            <button type="button" onClick={() => setError("")} aria-label="Dismiss">
+              ×
+            </button>
+          </div>
+        )}
 
         <form className={styles.composer} onSubmit={submit}>
+          {attachments.length > 0 && (
+            <ul className={styles.attachments}>
+              {attachments.map((attachment, index) => (
+                <li key={`${attachment.filename}-${index}`}>
+                  <span>{attachment.filename}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${attachment.filename}`}
+                    onClick={() =>
+                      setAttachments((current) =>
+                        current.filter((_, position) => position !== index),
+                      )
+                    }
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           <textarea
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
@@ -395,13 +541,49 @@ export default function Home() {
             placeholder="Describe the coding outcome you need…"
             rows={3}
           />
-          <button disabled={!prompt.trim() || isRunning} type="submit">
-            {isRunning ? "Running…" : "Run task"}
-          </button>
+          <div className={styles.composerControls}>
+            <input
+              ref={fileInputRef}
+              className={styles.fileInput}
+              type="file"
+              multiple
+              accept={ATTACHMENT_ACCEPT}
+              onChange={(event) => {
+                void addFiles(event.target.files);
+                event.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              className={styles.ghostButton}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              Attach files
+            </button>
+            <label className={styles.effort}>
+              Thinking
+              <select
+                value={reasoningEffort}
+                onChange={(event) => setReasoningEffort(event.target.value)}
+              >
+                <option value="">Default</option>
+                {REASONING_EFFORTS.map((effort) => (
+                  <option key={effort} value={effort}>
+                    {EFFORT_LABELS[effort]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button disabled={!prompt.trim() || isRunning} type="submit">
+              {isRunning ? "Running…" : "Run task"}
+            </button>
+          </div>
         </form>
       </section>
 
-      <ArtifactPanel artifacts={artifacts} />
+      <div className={styles.panelSlot}>
+        <ArtifactPanel artifacts={artifacts} />
+      </div>
     </main>
   );
 }
