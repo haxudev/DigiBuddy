@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import logging
 import math
@@ -414,11 +413,14 @@ def runtime_fingerprint(
     reasoning_effort: str = "",
 ) -> str:
     """Fingerprint every input that requires replacing the Codex process."""
-    secret_digest = hmac.new(
-        _FINGERPRINT_KEY,
+    secret_digest = hashlib.scrypt(
         settings.model_api_key.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+        salt=_FINGERPRINT_KEY,
+        n=2**14,
+        r=8,
+        p=1,
+        dklen=32,
+    ).hex()
     parts = [
         render_codex_config(settings, store, profile, reasoning_effort),
         load_instructions(settings, profile),
