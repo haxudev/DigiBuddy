@@ -224,9 +224,7 @@ export async function POST(request: Request) {
         if (!messageStarted) {
           throw new Error("Hosted Agent completed without assistant output.");
         }
-        if (messageStarted) {
-          emit({ type: EventType.TEXT_MESSAGE_END, messageId });
-        }
+        emit({ type: EventType.TEXT_MESSAGE_END, messageId });
         emit({
           type: EventType.STATE_SNAPSHOT,
           snapshot: {
