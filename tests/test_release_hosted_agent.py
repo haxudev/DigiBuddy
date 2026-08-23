@@ -484,7 +484,14 @@ class ReleaseRunnerTests(unittest.TestCase):
         )
         self.commands.add(
             ["az", "webapp", "config", "container", "show", "--resource-group", "rg-brand-intel", "--name", "haeronclaw-haxu", "-o", "json"],
-            stdout=json.dumps({"DOCKER_CUSTOM_IMAGE_NAME": "DOCKER|haxureg.azurecr.io/haeronclaw-webui:old"}),
+            stdout=json.dumps(
+                [
+                    {
+                        "name": "DOCKER_CUSTOM_IMAGE_NAME",
+                        "value": "DOCKER|haxureg.azurecr.io/haeronclaw-webui:old",
+                    }
+                ]
+            ),
         )
         self.commands.add(
             [
@@ -665,7 +672,14 @@ class ReleaseRunnerTests(unittest.TestCase):
         )
         self.commands.add(
             ["az", "webapp", "config", "container", "show", "--resource-group", "rg-brand-intel", "--name", "haeronclaw-haxu", "-o", "json"],
-            stdout=json.dumps({"DOCKER_CUSTOM_IMAGE_NAME": "DOCKER|haxureg.azurecr.io/haeronclaw-webui:old"}),
+            stdout=json.dumps(
+                [
+                    {
+                        "name": "DOCKER_CUSTOM_IMAGE_NAME",
+                        "value": "DOCKER|haxureg.azurecr.io/haeronclaw-webui:old",
+                    }
+                ]
+            ),
         )
         self.commands.add(
             [

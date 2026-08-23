@@ -186,12 +186,27 @@ class ReleaseRunner:
 
             token = self._azure_access_token()
             source_version = self._load_source_version(token)
-            version_id = self._create_agent_version(token, source_version, hosted_image)
+            created_new_version = _version_image(source_version) != hosted_image
+            if created_new_version:
+                version_id = self._create_agent_version(
+                    token, source_version, hosted_image
+                )
+            else:
+                version_id = _version_identity(source_version)
+                if not version_id:
+                    raise ReleaseError(
+                        "Existing active Agent image has no version identifier."
+                    )
             try:
-                self._wait_for_version_active(token, version_id)
+                if created_new_version:
+                    self._wait_for_version_active(token, version_id)
                 response_payload = self._verify_agent_endpoint(token, source_version)
             except Exception as exc:
-                rollback_detail = self._delete_failed_version(token, version_id)
+                rollback_detail = (
+                    self._delete_failed_version(token, version_id)
+                    if created_new_version
+                    else ""
+                )
                 message = str(exc)
                 if rollback_detail:
                     message = f"{message} {rollback_detail}".strip()
@@ -917,11 +932,31 @@ def _environment_value(version: Mapping[str, Any], name: str) -> str:
     return ""
 
 
-def _extract_webapp_container_image(payload: Mapping[str, Any]) -> str:
-    linux_fx = _string_value(payload.get("DOCKER_CUSTOM_IMAGE_NAME"))
-    if not linux_fx:
-        site_config = _as_mapping(payload.get("siteConfig")) or {}
-        linux_fx = _string_value(site_config.get("linuxFxVersion"))
+def _version_image(version: Mapping[str, Any]) -> str:
+    container = _as_mapping(_definition(version).get("container_configuration"))
+    return _string_value(container.get("image")) if container else ""
+
+
+def _extract_webapp_container_image(payload: Any) -> str:
+    if isinstance(payload, Sequence) and not isinstance(
+        payload, (str, bytes, bytearray)
+    ):
+        for entry in payload:
+            if (
+                isinstance(entry, Mapping)
+                and entry.get("name") == "DOCKER_CUSTOM_IMAGE_NAME"
+            ):
+                return _extract_webapp_container_image(entry.get("value"))
+        return ""
+    if isinstance(payload, str):
+        linux_fx = payload
+    elif isinstance(payload, Mapping):
+        linux_fx = _string_value(payload.get("DOCKER_CUSTOM_IMAGE_NAME"))
+        if not linux_fx:
+            site_config = _as_mapping(payload.get("siteConfig")) or {}
+            linux_fx = _string_value(site_config.get("linuxFxVersion"))
+    else:
+        return ""
     prefix = "DOCKER|"
     if linux_fx.startswith(prefix):
         return linux_fx[len(prefix) :]
