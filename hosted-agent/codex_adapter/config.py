@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 from dataclasses import dataclass, replace
@@ -23,6 +24,7 @@ from .profiles import (
 )
 
 MODEL_API_KEY_ENV = "DIGIBUDDY_MODEL_API_KEY"
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,7 @@ class RuntimeSettings:
     codex_home: Path
     instructions_path: Path
     payload_root: Path
+    skills_source: Path
     reasoning_effort: str = "high"
 
 
@@ -58,6 +61,9 @@ def load_settings() -> RuntimeSettings:
         ).resolve(),
         payload_root=Path(
             os.environ.get("DIGIBUDDY_PAYLOAD_ROOT", "/opt/digibuddy")
+        ).resolve(),
+        skills_source=Path(
+            os.environ.get("CODEX_SKILLS_SOURCE", str(root / "skills"))
         ).resolve(),
         reasoning_effort=os.environ.get("CODEX_REASONING_EFFORT", "high").strip(),
     )
@@ -197,16 +203,15 @@ def build_catalogue(
     settings: RuntimeSettings, store: ConfigStore | None = None
 ) -> Catalogue:
     """Everything this image ships, so the admin console cannot drift from it."""
-    skills_root = settings.payload_root / "skills"
-    skills = (
-        sorted(
+    skills = set()
+    for skills_root in (settings.payload_root / "skills", settings.skills_source):
+        if not skills_root.is_dir():
+            continue
+        skills.update(
             entry.name
             for entry in skills_root.iterdir()
             if entry.is_dir() and (entry / "SKILL.md").is_file()
         )
-        if skills_root.is_dir()
-        else []
-    )
     tools_root = settings.payload_root / "tools"
     tools = (
         sorted(
@@ -220,7 +225,9 @@ def build_catalogue(
     servers = _read_mcp_document(settings, store).get("servers")
     mcp_servers = sorted(servers) if isinstance(servers, dict) else []
     return Catalogue(
-        skills=tuple(skills), tools=tuple(tools), mcp_servers=tuple(mcp_servers)
+        skills=tuple(sorted(skills)),
+        tools=tuple(tools),
+        mcp_servers=tuple(mcp_servers),
     )
 
 
@@ -335,6 +342,32 @@ def _link_selection(
             (target / entry.name).symlink_to(entry, target_is_directory=entry.is_dir())
 
 
+def install_global_skills(settings: RuntimeSettings) -> int:
+    """Copy the immutable build-time skill bundle into Codex's global root."""
+    source = settings.skills_source
+    target = settings.codex_home / "skills"
+    if not source.is_dir():
+        raise RuntimeError(f"packaged global skill directory is missing: {source}")
+
+    installed = 0
+    target.mkdir(parents=True, exist_ok=True)
+    for candidate in sorted(source.iterdir()):
+        if not (candidate / "SKILL.md").is_file():
+            continue
+        destination = target / candidate.name
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.copytree(candidate, destination)
+        installed += 1
+
+    if installed != 11:
+        raise RuntimeError(
+            f"expected 11 packaged global skills, found {installed} in {source}"
+        )
+    logger.info("Installed %d global Codex skills into %s", installed, target)
+    return installed
+
+
 def prepare_codex_environment(
     settings: RuntimeSettings,
     store: ConfigStore | None = None,
@@ -343,6 +376,7 @@ def prepare_codex_environment(
     active = profile or DEFAULT_PROFILE
     settings.workspace.mkdir(parents=True, exist_ok=True)
     settings.codex_home.mkdir(parents=True, exist_ok=True)
+    install_global_skills(settings)
     config_path = settings.codex_home / "config.toml"
     config_path.write_text(render_codex_config(settings, store, active), encoding="utf-8")
     config_path.chmod(0o600)
@@ -381,6 +415,7 @@ __all__ = [
     "build_catalogue",
     "effective_model",
     "effective_reasoning_effort",
+    "install_global_skills",
     "load_instructions",
     "load_mcp_servers",
     "load_profiles",

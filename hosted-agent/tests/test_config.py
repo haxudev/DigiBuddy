@@ -30,6 +30,7 @@ def settings(**overrides):
         "codex_home": Path("/tmp/codex"),
         "instructions_path": Path("/tmp/AGENTS.md"),
         "payload_root": Path("/opt/digibuddy"),
+        "skills_source": Path("/tmp/global-skills"),
     }
     values.update(overrides)
     return RuntimeSettings(**values)
@@ -60,6 +61,7 @@ def payload(directory, *, skills=(), tools=(), servers=None, profiles=None):
     instructions.write_text("runtime guardrails", encoding="utf-8")
     return settings(
         payload_root=root,
+        skills_source=Path(__file__).resolve().parents[1] / "skills",
         instructions_path=instructions,
         workspace=base / "workspace",
         codex_home=base / "codex",
@@ -104,6 +106,31 @@ class ModelOverrideTests(unittest.TestCase):
 
 
 class McpCatalogueTests(unittest.TestCase):
+    def test_local_agent_maturity_server_keeps_its_fixed_package_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory,
+                servers={
+                    "agent-maturity": {
+                        "command": "python",
+                        "args": ["-m", "agent_maturity.mcp"],
+                        "env": {
+                            "PYTHONPATH": (
+                                "/app/hosted-agent/vendor/agent-maturity"
+                            )
+                        },
+                    }
+                },
+            )
+
+            server = load_mcp_servers(configured)["agent-maturity"]
+            self.assertEqual(server["command"], "python")
+            self.assertEqual(server["args"], ["-m", "agent_maturity.mcp"])
+            self.assertEqual(
+                server["env"]["PYTHONPATH"],
+                "/app/hosted-agent/vendor/agent-maturity",
+            )
+
     def test_disabled_and_plaintext_servers_are_skipped(self):
         with tempfile.TemporaryDirectory() as directory:
             configured = payload(
@@ -207,9 +234,28 @@ class CatalogueTests(unittest.TestCase):
 
             catalogue = build_catalogue(configured)
 
-            self.assertEqual(catalogue.skills, ("docx", "pptx"))
+            self.assertTrue({"docx", "pptx", "superclarity"} <= set(catalogue.skills))
             self.assertEqual(catalogue.tools, ("azure_blob",))
             self.assertEqual(catalogue.mcp_servers, ("learn",))
+
+    def test_catalogue_includes_packaged_global_skills(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(directory, skills=["docx"])
+            global_skills = Path(directory) / "global-skills"
+            skill = global_skills / "superclarity"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text("# superclarity", encoding="utf-8")
+            configured = settings(
+                **{
+                    **configured.__dict__,
+                    "skills_source": global_skills,
+                }
+            )
+
+            self.assertEqual(
+                build_catalogue(configured).skills,
+                ("docx", "superclarity"),
+            )
 
 
 class ProfileSourceTests(unittest.TestCase):

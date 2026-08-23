@@ -1,3 +1,5 @@
+FROM node:22.14.0-bookworm-slim AS node-runtime
+
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -12,8 +14,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git nodejs npm \
+    && apt-get install -y --no-install-recommends ca-certificates curl git \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 20 || (major === 20 && minor < 10)) process.exit(1)'
 
 COPY hosted-agent/requirements.txt /app/requirements.txt
 COPY src/requirements.txt /app/payload-requirements.txt
@@ -33,7 +41,11 @@ COPY hosted-agent /app/hosted-agent
 
 RUN useradd --create-home --shell /bin/bash agent \
     && mkdir -p /workspace /home/agent/.codex \
+    && test "$(find /app/hosted-agent/skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l)" -eq 11 \
+    && PYTHONPATH=/app/hosted-agent/vendor/agent-maturity python -c "import agent_maturity.mcp" \
     && chown -R agent:agent /workspace /home/agent /app/hosted-agent /opt/digibuddy
+
+ENV HOME=/home/agent
 
 USER agent
 WORKDIR /app/hosted-agent

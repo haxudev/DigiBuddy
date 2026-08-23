@@ -73,6 +73,14 @@ class SkillBundleTests(unittest.TestCase):
         self.assertIn("haxudev/superclarity@", provenance)
         self.assertIn("haxudev/agent-maturity-assessment@", provenance)
 
+    def test_superclarity_is_the_default_workflow_entry(self):
+        instructions = (HOSTED_AGENT / "AGENTS.md").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "load the `superclarity` skill first",
+            " ".join(instructions.split()),
+        )
+
     def test_agent_maturity_package_is_self_contained(self):
         package_root = VENDOR / "agent-maturity"
         environment = os.environ.copy()

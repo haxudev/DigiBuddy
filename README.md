@@ -72,6 +72,25 @@ The Codex sandbox exposes only a shell — there is no tool registry. Capabiliti
 
 At startup the adapter concatenates `hosted-agent/AGENTS.md` with `src/AGENTS.md` into the Codex base instructions, and renders `src/mcp.json` into `[mcp_servers.*]` blocks of the generated Codex `config.toml`.
 
+### Bundled workflow and assessment skills
+
+The image contains immutable snapshots of Superclarity and Agent Maturity.
+Superclarity is the default entry for multi-step, ambiguous, or consequential
+work. Agent Maturity includes its zero-dependency Python runtime and is
+registered as the local `agent-maturity` stdio MCP server.
+
+Azure startup does not clone repositories or install these tools. To update the
+locked snapshots deliberately:
+
+```bash
+scripts/sync-agent-skills.sh
+scripts/sync-agent-skills.sh --check
+```
+
+The first command materializes the commits in
+`hosted-agent/skill-sources.lock`; the second detects drift between those
+commits and the tracked Docker build context.
+
 ### Tools
 
 Every payload tool is a Python module invoked from the shell:

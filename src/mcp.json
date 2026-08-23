@@ -7,6 +7,13 @@
 		"cloud-pricing": {
 			"url": "https://<your-cloud-pricing-service>.azurewebsites.net/mcp",
 			"type": "http"
+		},
+		"agent-maturity": {
+			"command": "python",
+			"args": ["-m", "agent_maturity.mcp"],
+			"env": {
+				"PYTHONPATH": "/app/hosted-agent/vendor/agent-maturity"
+			}
 		}
 	},
 	"inputs": []
