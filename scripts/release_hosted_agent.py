@@ -93,6 +93,7 @@ class ReleaseOptions:
     fast: bool = False
     build_only: bool = False
     skip_webui: bool = False
+    reuse_tag: str | None = None
     activation_timeout_seconds: int = 600
     activation_poll_seconds: int = 10
     webui_timeout_seconds: int = 300
@@ -111,6 +112,7 @@ class ReleaseRunner:
         fast: bool = False,
         build_only: bool = False,
         skip_webui: bool = False,
+        reuse_tag: str | None = None,
         activation_timeout_seconds: int = 600,
         activation_poll_seconds: int = 10,
         webui_timeout_seconds: int = 300,
@@ -125,6 +127,7 @@ class ReleaseRunner:
             fast=fast,
             build_only=build_only,
             skip_webui=skip_webui,
+            reuse_tag=reuse_tag,
             activation_timeout_seconds=activation_timeout_seconds,
             activation_poll_seconds=activation_poll_seconds,
             webui_timeout_seconds=webui_timeout_seconds,
@@ -133,7 +136,9 @@ class ReleaseRunner:
         self._image_tag: str | None = None
 
     def run(self) -> dict[str, object]:
-        image_tag = make_image_tag(self._git_head_sha(), self.clock())
+        image_tag = self.options.reuse_tag or make_image_tag(
+            self._git_head_sha(), self.clock()
+        )
         self._image_tag = image_tag
         hosted_image = self.config.hosted_image(image_tag)
         webui_image = self.config.webui_image(image_tag)
@@ -147,22 +152,32 @@ class ReleaseRunner:
             if not self.options.fast:
                 self._validate_local_agent_image()
 
-            hosted_digest = self._build_acr_image(
-                repository=self.config.hosted_image_repository,
-                dockerfile="hosted-agent/Dockerfile",
-                working_directory=".",
-                tag=image_tag,
-            )
+            if self.options.reuse_tag:
+                hosted_digest = self._acr_image_digest(
+                    self.config.hosted_image_repository, image_tag
+                )
+            else:
+                hosted_digest = self._build_acr_image(
+                    repository=self.config.hosted_image_repository,
+                    dockerfile="hosted-agent/Dockerfile",
+                    working_directory=".",
+                    tag=image_tag,
+                )
             result["image_digest"] = hosted_digest
 
             webui_digest: str | None = None
             if not self.options.skip_webui:
-                webui_digest = self._build_acr_image(
-                    repository=self.config.webui_image_repository,
-                    dockerfile="Dockerfile",
-                    working_directory="webui",
-                    tag=image_tag,
-                )
+                if self.options.reuse_tag:
+                    webui_digest = self._acr_image_digest(
+                        self.config.webui_image_repository, image_tag
+                    )
+                else:
+                    webui_digest = self._build_acr_image(
+                        repository=self.config.webui_image_repository,
+                        dockerfile="Dockerfile",
+                        working_directory="webui",
+                        tag=image_tag,
+                    )
                 result["webui_image_digest"] = webui_digest
 
             if self.options.build_only:
@@ -289,6 +304,9 @@ class ReleaseRunner:
             ],
             cwd=self.root / working_directory,
         )
+        return self._acr_image_digest(repository, tag)
+
+    def _acr_image_digest(self, repository: str, tag: str) -> str:
         metadata = self._command_json(
             [
                 "az",
@@ -327,7 +345,11 @@ class ReleaseRunner:
 
     def _load_source_version(self, token: str) -> Mapping[str, Any]:
         payload = self._json_request("GET", self.config.versions_url(), token=token)
-        versions = payload.get("value") if isinstance(payload, Mapping) else payload
+        versions = (
+            payload.get("data", payload.get("value"))
+            if isinstance(payload, Mapping)
+            else payload
+        )
         if not isinstance(versions, Sequence) or isinstance(versions, (str, bytes, bytearray)):
             raise ReleaseError("Foundry versions response did not contain a version list.")
         try:
@@ -675,6 +697,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fast", action="store_true", help="Skip local Docker validation but keep release gates.")
     parser.add_argument("--build-only", action="store_true", help="Build immutable ACR images and stop before Foundry or Web App rollout.")
     parser.add_argument("--skip-webui", action="store_true", help="Release only the Hosted Agent; skip the Web UI image and Web App rollout.")
+    parser.add_argument("--reuse-tag", help="Reuse both existing ACR images from a prior interrupted release instead of rebuilding.")
     parser.add_argument("--release-root", default=str(defaults.release_root), help="Directory for non-secret release receipts.")
     parser.add_argument("--account-name", default=defaults.account_name)
     parser.add_argument("--project-name", default=defaults.project_name)
@@ -708,6 +731,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         fast=args.fast,
         build_only=args.build_only,
         skip_webui=args.skip_webui,
+        reuse_tag=args.reuse_tag,
         activation_timeout_seconds=args.activation_timeout_seconds,
         activation_poll_seconds=args.activation_poll_seconds,
         webui_timeout_seconds=args.webui_timeout_seconds,
@@ -799,6 +823,8 @@ def _version_timestamp(version: Mapping[str, Any]) -> datetime:
         raw = version.get(key)
         if isinstance(raw, datetime):
             return _ensure_utc(raw)
+        if isinstance(raw, (int, float)):
+            return datetime.fromtimestamp(raw, tz=timezone.utc)
         if isinstance(raw, str):
             parsed = _parse_datetime(raw)
             if parsed is not None:

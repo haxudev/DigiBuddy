@@ -435,7 +435,7 @@ class ReleaseRunnerTests(unittest.TestCase):
             )
 
     def _add_common_http(self) -> None:
-        self.http.add_json("GET", self.versions_url, {"value": [self._source_version()]})
+        self.http.add_json("GET", self.versions_url, {"data": [self._source_version()]})
         self.http.add_json(
             "POST",
             self.versions_url,
