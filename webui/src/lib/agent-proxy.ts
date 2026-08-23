@@ -207,6 +207,23 @@ export function responseTextDelta(streamed: string, payload: unknown): string {
   return streamed ? "" : completed;
 }
 
+export function responseErrorMessage(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
+  const value = payload as Record<string, unknown>;
+  const response =
+    value.response && typeof value.response === "object"
+      ? (value.response as Record<string, unknown>)
+      : {};
+  for (const candidate of [value.error, response.error]) {
+    if (typeof candidate === "string") return candidate;
+    if (candidate && typeof candidate === "object") {
+      const message = (candidate as Record<string, unknown>).message;
+      if (typeof message === "string") return message;
+    }
+  }
+  return "";
+}
+
 export const REASONING_EFFORTS = ["minimal", "low", "medium", "high"] as const;
 
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];

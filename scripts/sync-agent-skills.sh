@@ -68,8 +68,14 @@ clone_locked() {
   mkdir -p "$checkout"
   git -C "$checkout" init --quiet
   git -C "$checkout" remote add origin "https://github.com/$repository.git"
-  git -C "$checkout" fetch --depth 1 --quiet origin "$commit"
-  git -C "$checkout" checkout --detach --quiet FETCH_HEAD
+  if ! git -C "$checkout" fetch --depth 1 --quiet origin "$commit"; then
+    echo "unable to fetch locked skill source $repository@$commit; check GitHub credentials" >&2
+    return 1
+  fi
+  if ! git -C "$checkout" checkout --detach --quiet FETCH_HEAD; then
+    echo "unable to check out locked skill source $repository@$commit" >&2
+    return 1
+  fi
   [[ "$(git -C "$checkout" rev-parse HEAD)" == "$commit" ]] || {
     echo "resolved commit differs for $repository@$commit" >&2
     exit 1

@@ -200,8 +200,13 @@ async def handle_response(
             yield text.emit_delta(event.data["delta"])
 
         elif event.type == "assistant.message.completed":
-            delta = completion_delta(output, event.data["text"])
+            completed_text = event.data["text"]
+            delta = completion_delta(output, completed_text)
             if not delta:
+                if completed_text != output:
+                    logger.warning(
+                        "Codex completed text diverged from its streamed prefix"
+                    )
                 continue
             if text is None:
                 message = stream.add_output_item_message()
@@ -219,6 +224,8 @@ async def handle_response(
         yield call.emit_arguments_done(arguments)
         yield call.emit_done()
 
+    if not output:
+        raise RuntimeError("Codex turn completed without assistant output")
     if text is None:
         message = stream.add_output_item_message()
         yield message.emit_added()

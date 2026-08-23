@@ -7,6 +7,7 @@ import {
   latestUserText,
   resolveAuthHeaders,
   resolveConnection,
+  responseErrorMessage,
   responseText,
   responseTextDelta,
   turnInput,
@@ -33,15 +34,8 @@ function keepAlive(): Uint8Array {
 }
 
 function upstreamError(payload: unknown, status: number): Error {
-  if (payload && typeof payload === "object") {
-    const value = payload as Record<string, unknown>;
-    const error = value.error;
-    if (typeof error === "string") return new Error(error);
-    if (error && typeof error === "object") {
-      const message = (error as Record<string, unknown>).message;
-      if (typeof message === "string") return new Error(message);
-    }
-  }
+  const message = responseErrorMessage(payload);
+  if (message) return new Error(message);
   return new Error(`Hosted Agent request failed with HTTP ${status}.`);
 }
 
@@ -210,7 +204,14 @@ export async function POST(request: Request) {
                 emitText(delta);
               }
               if (eventType === "response.completed") {
-                emitText(responseTextDelta(assistantText, response));
+                const completedText = responseText(response);
+                const delta = responseTextDelta(assistantText, response);
+                if (!delta && completedText && completedText !== assistantText) {
+                  console.warn(
+                    "Hosted Agent completed text diverged from its streamed prefix.",
+                  );
+                }
+                emitText(delta);
               }
               if (eventType === "error" || eventType === "response.failed") {
                 throw upstreamError(event, upstream.status);

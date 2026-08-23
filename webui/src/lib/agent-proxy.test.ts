@@ -5,6 +5,7 @@ import {
   latestUserText,
   resolveAuthHeaders,
   resolveConnection,
+  responseErrorMessage,
   responseText,
   responseTextDelta,
   turnInput,
@@ -157,6 +158,16 @@ test("extracts the most recent user message and response output", () => {
       output: [{ content: [{ type: "output_text", text: "done" }] }],
     }),
     "ne",
+  );
+});
+
+test("extracts the nested error from a failed Responses event", () => {
+  assert.equal(
+    responseErrorMessage({
+      type: "response.failed",
+      response: { error: { message: "Codex turn timed out" } },
+    }),
+    "Codex turn timed out",
   );
 });
 

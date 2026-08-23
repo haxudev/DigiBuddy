@@ -38,7 +38,7 @@ hosted-agent/
     ├── config.py              # Runtime/model configuration and profile assembly
     ├── config_store.py        # Blob/file configuration overlay
     ├── profiles.py            # Agent profile parsing
-    ├── responses.py           # Responses event conversion
+    ├── events.py              # Codex event conversion
     └── session_map.py         # Response-to-thread persistence
 
 webui/                         # Independent Next.js + React + AG-UI app
@@ -97,4 +97,3 @@ The Codex sandbox has no tool registry — only a shell. Capabilities are theref
 - **Tools**: each module under `src/tools/` exposes an `argparse` CLI and is invoked as `python -m <tool>`.
 - **Skills**: each `src/skills/<name>/SKILL.md` is read on demand by the agent.
 - **MCP**: `src/mcp.json` is rendered into `[mcp_servers.*]` blocks in the generated Codex `config.toml`.
-

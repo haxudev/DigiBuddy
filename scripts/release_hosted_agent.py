@@ -497,21 +497,30 @@ class ReleaseRunner:
             self._verify_webui_agent(host)
         except Exception as exc:
             rollback_errors: list[str] = []
+            restored_state = False
             if previous_image:
                 try:
                     self._set_webui_image(previous_image)
+                    restored_state = True
                 except Exception as rollback_exc:
                     rollback_errors.append(f"image restore failed: {rollback_exc}")
+            else:
+                rollback_errors.append("previous Web UI image is unavailable")
             try:
                 if had_previous_version:
                     self._set_webui_agent_version(previous_version)
                 else:
                     self._delete_webui_agent_version()
+                restored_state = True
             except Exception as rollback_exc:
                 rollback_errors.append(f"Agent version restore failed: {rollback_exc}")
-            if previous_image and not rollback_errors:
+            if restored_state:
                 try:
                     self._restart_webapp()
+                except Exception as rollback_exc:
+                    rollback_errors.append(f"Web App restart failed: {rollback_exc}")
+            if previous_image and not rollback_errors:
+                try:
                     self._wait_for_http_ready(
                         f"https://{host}{self.config.webui_ready_path}",
                         timeout_seconds=self.options.webui_timeout_seconds,

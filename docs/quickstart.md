@@ -4,6 +4,7 @@
 
 - Azure Developer CLI with the `azure.ai.agents` extension
 - Docker for local image validation
+- Git credentials with read access to the repositories in `hosted-agent/skill-sources.lock`
 - A model endpoint, key, and model deployment name compatible with Codex
 
 ## Deploy the Hosted Agent

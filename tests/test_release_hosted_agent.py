@@ -667,6 +667,93 @@ class ReleaseRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ReleaseError, "Agent version is not configured"):
             self._runner(fast=True)._verify_webui_agent(self.web_host)
 
+    def test_missing_previous_image_still_restores_version_and_restarts(self) -> None:
+        self.commands.add(
+            ["az", "webapp", "show", "--resource-group", "rg-brand-intel", "--name", "haeronclaw-haxu", "-o", "json"],
+            stdout=json.dumps({"defaultHostName": self.web_host}),
+        )
+        self.commands.add(
+            ["az", "webapp", "config", "container", "show", "--resource-group", "rg-brand-intel", "--name", "haeronclaw-haxu", "-o", "json"],
+            stdout="[]",
+        )
+        self.commands.add(
+            ["az", "webapp", "config", "appsettings", "list", "--resource-group", "rg-brand-intel", "--name", "haeronclaw-haxu", "-o", "json"],
+            stdout="[]",
+        )
+        self.commands.add(
+            [
+                "az",
+                "webapp",
+                "config",
+                "appsettings",
+                "set",
+                "--resource-group",
+                "rg-brand-intel",
+                "--name",
+                "haeronclaw-haxu",
+                "--settings",
+                "FOUNDRY_AGENT_VERSION=7",
+            ],
+            stdout="version updated\n",
+        )
+        self.commands.add(
+            [
+                "az",
+                "webapp",
+                "config",
+                "container",
+                "set",
+                "--resource-group",
+                "rg-brand-intel",
+                "--name",
+                "haeronclaw-haxu",
+                "--container-image-name",
+                self.webui_image,
+            ],
+            stdout="updated\n",
+        )
+        restart = [
+            "az",
+            "webapp",
+            "restart",
+            "--resource-group",
+            "rg-brand-intel",
+            "--name",
+            "haeronclaw-haxu",
+        ]
+        self.commands.add(restart, stdout="restarted\n")
+        self.commands.add(
+            [
+                "az",
+                "webapp",
+                "config",
+                "appsettings",
+                "delete",
+                "--resource-group",
+                "rg-brand-intel",
+                "--name",
+                "haeronclaw-haxu",
+                "--setting-names",
+                "FOUNDRY_AGENT_VERSION",
+            ],
+            stdout="version restored\n",
+        )
+        self.commands.add(restart, stdout="restarted after restore\n")
+        self.http.add_text("GET", self.web_url, "not ready", status=503)
+
+        with self.assertRaisesRegex(ReleaseError, "previous Web UI image is unavailable"):
+            self._runner(
+                fast=True, webui_timeout_seconds=1
+            )._deploy_webui(self.webui_image, "7")
+
+        self.assertEqual(
+            self.commands.count(("az", "webapp", "restart")),
+            2,
+        )
+        self.assertTrue(
+            self.commands.seen(("az", "webapp", "config", "appsettings", "delete"))
+        )
+
     def test_activation_wait_is_bounded(self) -> None:
         self._add_common_local_commands(fast=True)
         self._add_common_remote_commands(include_webui=False)
