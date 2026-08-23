@@ -7,7 +7,7 @@ from asyncio.subprocess import Process
 from collections.abc import AsyncIterator
 from typing import Any
 
-from .config import RuntimeSettings, prepare_codex_environment
+from .config import RuntimeSettings, load_instructions, prepare_codex_environment
 from .events import RuntimeEvent, translate_notification
 from .session_map import ResponseThreadMap
 
@@ -28,7 +28,7 @@ class CodexRuntime:
         self._loaded_threads: set[str] = set()
         self._pending_notifications: list[dict[str, Any]] = []
         self._thread_map = ResponseThreadMap(
-            settings.codex_home / "haeronclaw-response-threads.json"
+            settings.codex_home / "digibuddy-response-threads.json"
         )
 
     async def stream_turn(
@@ -106,8 +106,8 @@ class CodexRuntime:
             "initialize",
             {
                 "clientInfo": {
-                    "name": "haeronclaw_foundry",
-                    "title": "HaeronClaw Foundry Hosted Agent",
+                    "name": "digibuddy_foundry",
+                    "title": "DigiBuddy Foundry Hosted Agent",
                     "version": "1.0.0",
                 }
             },
@@ -120,9 +120,7 @@ class CodexRuntime:
             "cwd": str(self._settings.workspace),
             "approvalPolicy": self._settings.approval_policy,
             "sandbox": self._settings.sandbox,
-            "baseInstructions": self._settings.instructions_path.read_text(
-                encoding="utf-8"
-            ),
+            "baseInstructions": load_instructions(self._settings),
         }
         if self._settings.model_endpoint:
             params["modelProvider"] = self._settings.model_provider
@@ -143,9 +141,7 @@ class CodexRuntime:
             "cwd": str(self._settings.workspace),
             "approvalPolicy": self._settings.approval_policy,
             "sandbox": self._settings.sandbox,
-            "baseInstructions": self._settings.instructions_path.read_text(
-                encoding="utf-8"
-            ),
+            "baseInstructions": load_instructions(self._settings),
         }
         if self._settings.model_endpoint:
             params["modelProvider"] = self._settings.model_provider

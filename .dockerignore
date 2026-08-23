@@ -1,3 +1,6 @@
 *
 !hosted-agent/
 !hosted-agent/**
+!src/
+!src/**
+src/node_modules/

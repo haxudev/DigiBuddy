@@ -1,8 +1,0 @@
-{
-  "name": "haeronclaw",
-  "private": true,
-  "description": "HaeronClaw hosted agent runtime on Azure Functions",
-  "dependencies": {
-    "m365-cli": "^0.1.2"
-  }
-}

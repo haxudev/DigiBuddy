@@ -1,3 +1,12 @@
+"""Write an RFC 5322 ``.eml`` file to disk. This does NOT send the message.
+
+CLI:
+    python -m create_eml --out /workspace/message.eml --from me@contoso.com \\
+        --to you@contoso.com --subject "Hi" --body "Hello" [--attach FILE ...]
+"""
+
+import argparse
+import asyncio
 from pathlib import Path
 from typing import Optional
 
@@ -12,7 +21,7 @@ class EmlAttachment(BaseModel):
 
 class CreateEmlParams(BaseModel):
     output_path: str = Field(
-        description="Absolute output path under /tmp (e.g. '/tmp/message.eml' or '/tmp/req_x/message.eml')"
+        description="Absolute output path for the .eml file (e.g. '/workspace/message.eml')"
     )
     from_addr: str = Field(description="From email address")
     to_addrs: list[str] = Field(description="Recipient email addresses")
@@ -22,7 +31,7 @@ class CreateEmlParams(BaseModel):
 
 
 async def create_eml(params: CreateEmlParams) -> str:
-    """Create an RFC 5322 .eml file at the given /tmp path (does NOT send it).
+    """Create an RFC 5322 .eml file at the given path (does NOT send it).
 
     This tool only writes a .eml file to disk for offline use or download.
     It does NOT send the email.  To actually send an email, use the m365_cli
@@ -35,8 +44,8 @@ async def create_eml(params: CreateEmlParams) -> str:
     from email.message import EmailMessage
 
     out = Path(params.output_path)
-    if not str(out).startswith("/tmp/"):
-        raise ValueError("output_path must be an absolute path under /tmp")
+    if not out.is_absolute():
+        raise ValueError("output_path must be an absolute path")
     out.parent.mkdir(parents=True, exist_ok=True)
 
     msg = EmailMessage()
@@ -57,3 +66,34 @@ async def create_eml(params: CreateEmlParams) -> str:
 
     out.write_bytes(msg.as_bytes(policy=msg.policy.clone(linesep="\r\n")))
     return str(out)
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = argparse.ArgumentParser(prog="create_eml", description=__doc__)
+    parser.add_argument("--out", required=True, help="Absolute output path for the .eml file")
+    parser.add_argument("--from", dest="from_addr", required=True)
+    parser.add_argument("--to", action="append", required=True, help="Repeat for each recipient")
+    parser.add_argument("--subject", required=True)
+    parser.add_argument("--body", required=True, help="Plain-text body")
+    parser.add_argument("--attach", action="append", default=[], help="Repeat for each file")
+
+    args = parser.parse_args(argv)
+    print(
+        asyncio.run(
+            create_eml(
+                CreateEmlParams(
+                    output_path=args.out,
+                    from_addr=args.from_addr,
+                    to_addrs=args.to,
+                    subject=args.subject,
+                    body_text=args.body,
+                    attachments=[EmlAttachment(path=p) for p in args.attach],
+                )
+            )
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

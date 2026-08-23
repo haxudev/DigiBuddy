@@ -1,7 +1,20 @@
-# OPTIONAL: only needed if a tool requires extra dependencies
+# Python dependencies for the DigiBuddy agent payload (tools and skills).
+# Installed into the Hosted Agent image so Codex can run these tools directly.
 
 # Pydantic for tool parameter validation
 pydantic>=2.0.0
+
+# Azure Blob Storage delivery for generated files (tools/file_upload.py)
+azure-storage-blob>=12.19.0
+
+# Entra ID / managed identity authentication for Blob and Microsoft Graph
+azure-identity>=1.17.0
+
+# Microsoft Authentication Library for the Graph on-behalf-of flow
+msal>=1.30.0
+
+# Async HTTP client for Microsoft Graph and SharePoint calls
+aiohttp>=3.9.0
 
 # Office XML processing dependencies (docx/pptx/xlsx validation and editing)
 Pillow>=10.0.0

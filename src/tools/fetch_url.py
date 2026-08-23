@@ -1,3 +1,13 @@
+"""Fetch a web page and return it as clean Markdown (Jina Reader, HTTP fallback).
+
+CLI:
+    python -m fetch_url <url> [--no-cache] [--timeout 30]
+"""
+
+import argparse
+import asyncio
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -128,3 +138,28 @@ async def fetch_url(params: WebFetchParams) -> str:
         return f"Error fetching URL: HTTP {e.code} {e.reason}"
     except Exception as e:
         return f"Error fetching URL: {e}"
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = argparse.ArgumentParser(prog="fetch_url", description=__doc__)
+    parser.add_argument("url")
+    parser.add_argument("--no-cache", action="store_true", help="Bypass the Jina cache")
+    parser.add_argument("--timeout", type=int, default=30, help="HTTP timeout in seconds")
+
+    args = parser.parse_args(argv)
+    print(
+        asyncio.run(
+            fetch_url(
+                WebFetchParams(
+                    url=args.url,
+                    no_cache=args.no_cache,
+                    timeout_seconds=args.timeout,
+                )
+            )
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

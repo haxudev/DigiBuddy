@@ -1,0 +1,13 @@
+{
+  "name": "digibuddy-agent-payload",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Node CLIs bundled into the DigiBuddy Hosted Agent workspace",
+  "scripts": {
+    "postinstall": "node scripts/apply-m365-cli-patches.mjs"
+  },
+  "dependencies": {
+    "m365-cli": "^0.1.3",
+    "mjml": "^4.15.0"
+  }
+}
