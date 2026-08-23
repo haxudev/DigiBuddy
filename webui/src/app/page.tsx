@@ -126,7 +126,7 @@ export default function Home() {
     <main className={styles.shell}>
       <aside className={styles.settings}>
         <div>
-          <p className={styles.eyebrow}>HaeronClaw</p>
+          <p className={styles.eyebrow}>DigiBuddy</p>
           <h1>Codex Hosted Agent</h1>
           <p className={styles.subtitle}>
             AG-UI console for a Microsoft Foundry hosted coding runtime.

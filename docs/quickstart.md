@@ -37,12 +37,12 @@ Open `http://localhost:3000`, then configure the Foundry Responses endpoint, aut
 
 ```bash
 cd webui
-docker build -t haeronclaw-webui .
+docker build -t digibuddy-webui .
 docker run --rm -p 3000:3000 \
   -e FOUNDRY_AGENT_ENDPOINT="https://your-foundry-endpoint/responses" \
   -e FOUNDRY_AGENT_API_KEY="<agent-key>" \
   -e CODEX_MODEL_NAME="gpt-5.2-codex" \
-  haeronclaw-webui
+  digibuddy-webui
 ```
 
 The image listens on port `3000` and uses Next.js standalone output. Deploy it to Azure Web App for Containers or another OCI-compatible service. In production, restrict `AGENT_ENDPOINT_ALLOWLIST` to approved endpoint suffixes.
@@ -50,19 +50,9 @@ The image listens on port `3000` and uses Next.js standalone output. Deploy it t
 ## Local checks
 
 ```bash
-python -m unittest discover -s hosted-agent/tests -v
-cd webui
+cd hosted-agent && python -m unittest discover -s tests -t . -v
+cd ../webui
 npm test
 npm run lint
 npm run build
 ```
-
-## Legacy Azure Functions path
-
-The previous Azure Functions/ACA implementation remains available for migration scenarios:
-
-```powershell
-./scripts/deploy.ps1 -Mode aca -ResourceGroup <rg-name> -Location eastus2 -Prefix fmaaca -Model github:gpt-5.4 -ImageTag v3
-```
-
-This deploys the legacy APIs, Teams integration, MCP endpoint, and timer features. It is separate from the Hosted Agent deployment above.

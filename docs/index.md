@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: HaeronClaw
+  name: DigiBuddy
   text: Codex runtime on Microsoft Foundry Hosted Agent
   tagline: A coding agent with a Responses 2.0 adapter and a containerized Next.js + React + AG-UI client.
   actions:
@@ -11,7 +11,7 @@ hero:
       link: /quickstart
     - theme: alt
       text: GitHub
-      link: https://github.com/haxudev/haeronclaw
+      link: https://github.com/haxudev/DigiBuddy
 
 features:
   - title: Foundry Hosted Agent
@@ -26,7 +26,7 @@ features:
 
 ## Product Overview
 
-HaeronClaw packages Codex app-server as the Coding Agent Runtime inside Microsoft Foundry Hosted Agent. Foundry owns the service boundary while Codex owns software-engineering execution.
+DigiBuddy packages Codex app-server as the Coding Agent Runtime inside Microsoft Foundry Hosted Agent. Foundry owns the service boundary while Codex owns software-engineering execution.
 
 ::: tip Why this project exists
 Deploy the coding runtime with `azure.yaml`, then connect the standalone `webui/` container to its Foundry Responses endpoint.
@@ -46,8 +46,6 @@ Deploy the coding runtime with `azure.yaml`, then connect the standalone `webui/
 1. Configure the Codex-compatible model with deployment environment variables.
 2. Deploy the Hosted Agent using `azd up`.
 3. Configure and deploy the independent Web UI container.
-
-The earlier Azure Functions/ACA runtime remains under `infra/` as a migration path for Teams, MCP, timer, and enterprise delivery integrations.
 
 ## Next Steps
 

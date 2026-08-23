@@ -26,8 +26,8 @@ What kind of change does this Pull Request introduce?
 *  Get the code
 
 ```
-git clone https://github.com/haxudev/HaeronClaw.git
-cd HaeronClaw
+git clone https://github.com/haxudev/DigiBuddy.git
+cd DigiBuddy
 git checkout [branch-name]
 python -m pip install -r src/requirements.txt
 ```

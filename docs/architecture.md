@@ -2,7 +2,7 @@
 
 ## Runtime boundary
 
-HaeronClaw is a Microsoft Foundry Hosted Agent with Codex app-server as its coding execution engine.
+DigiBuddy is a Microsoft Foundry Hosted Agent with Codex app-server as its coding execution engine.
 
 ```text
 Next.js / React Web UI
@@ -41,9 +41,14 @@ webui/                         # Independent Next.js + React + AG-UI app
 ├── src/lib/agent-proxy.ts     # Validation and response helpers
 └── Dockerfile                 # Generic OCI / Web App for Containers image
 
-src/                           # Agent instructions, skills, tools, and knowledge
-infra/ and teams-app/          # Legacy Azure Functions/ACA delivery path
+src/                           # Agent payload: persona, skills, tools, mcp.json
+├── AGENTS.md                  # Persona and capability catalogue
+├── mcp.json                   # Remote/local MCP server catalogue
+├── skills/                    # <name>/SKILL.md definitions
+└── tools/                     # Python tools with CLI entry points
 ```
+
+The `src/` tree is copied into the image at `/opt/digibuddy` and surfaced to Codex through `DIGIBUDDY_PAYLOAD_ROOT`, `DIGIBUDDY_SKILLS_ROOT`, and `DIGIBUDDY_TOOLS_ROOT`.
 
 ## Session and streaming flow
 
@@ -65,6 +70,12 @@ The response map is stored under the hosted session workspace so session resume 
 - The Web UI only permits approved HTTPS endpoint suffixes in production.
 - Foundry session isolation is the security boundary; the adapter does not implement a separate multi-tenant sandbox.
 
-## Legacy runtime
+## Agent payload
 
-The former Azure Functions on Azure Container Apps runtime remains under `infra/` for migration compatibility, including Teams, MCP, timers, and enterprise delivery integrations. It is not used by the primary Hosted Agent deployment in `azure.yaml`; migrate those integrations explicitly before retiring the legacy path.
+The Codex sandbox has no tool registry — only a shell. Capabilities are therefore delivered as files:
+
+- **Persona**: `src/AGENTS.md` is concatenated with the hosted-agent guardrails in `hosted-agent/AGENTS.md` to form the Codex base instructions.
+- **Tools**: each module under `src/tools/` exposes an `argparse` CLI and is invoked as `python -m <tool>`.
+- **Skills**: each `src/skills/<name>/SKILL.md` is read on demand by the agent.
+- **MCP**: `src/mcp.json` is rendered into `[mcp_servers.*]` blocks in the generated Codex `config.toml`.
+

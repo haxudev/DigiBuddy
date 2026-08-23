@@ -1,7 +1,7 @@
 FOUNDRY_AGENT_ENDPOINT=https://your-foundry-endpoint/responses
 FOUNDRY_AGENT_API_KEY=replace-at-deploy-time
 FOUNDRY_AUTH_MODE=api-key
-FOUNDRY_AGENT_NAME=haeronclaw-codex
+FOUNDRY_AGENT_NAME=digibuddy-codex
 FOUNDRY_AGENT_VERSION=1
 CODEX_MODEL_NAME=gpt-5.2-codex
 AGENT_ENDPOINT_ALLOWLIST=services.ai.azure.com,openai.azure.com

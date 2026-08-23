@@ -16,7 +16,7 @@ from azure.ai.agentserver.responses import (
 from codex_adapter import CodexRuntime, load_settings
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("haeronclaw.hosted_agent")
+logger = logging.getLogger("digibuddy.hosted_agent")
 
 settings = load_settings()
 runtime = CodexRuntime(settings)

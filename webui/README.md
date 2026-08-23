@@ -1,6 +1,6 @@
-# HaeronClaw Web UI
+# DigiBuddy Web UI
 
-Standalone Next.js, React, and AG-UI client for the HaeronClaw Codex Hosted Agent.
+Standalone Next.js, React, and AG-UI client for the DigiBuddy Codex Hosted Agent.
 
 ## Local development
 
@@ -16,12 +16,12 @@ The browser speaks AG-UI only to `/api/agent`. The Next.js route validates the e
 ## Container
 
 ```bash
-docker build -t haeronclaw-webui .
+docker build -t digibuddy-webui .
 docker run --rm -p 3000:3000 \
   -e FOUNDRY_AGENT_ENDPOINT=https://your-foundry-endpoint/responses \
   -e FOUNDRY_AGENT_API_KEY=replace-at-runtime \
   -e CODEX_MODEL_NAME=gpt-5.2-codex \
-  haeronclaw-webui
+  digibuddy-webui
 ```
 
 The image listens on port `3000` and uses Next.js standalone output. It can run on Azure Web App for Containers or any OCI-compatible container service.

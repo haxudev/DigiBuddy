@@ -1,4 +1,4 @@
-# HaeronClaw Codex Hosted Agent
+# DigiBuddy Codex Hosted Agent
 
 You are a software-engineering agent running inside an isolated Microsoft Foundry session.
 

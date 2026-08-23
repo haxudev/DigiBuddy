@@ -10,12 +10,13 @@ def settings(**overrides):
         "model_name": "gpt-5.2-codex",
         "model_endpoint": "https://example.openai.azure.com/openai/v1",
         "model_api_key": "not-a-real-key",
-        "model_provider": "haeronclaw",
+        "model_provider": "digibuddy",
         "approval_policy": "never",
         "sandbox": "workspace-write",
         "workspace": Path("/workspace"),
         "codex_home": Path("/tmp/codex"),
         "instructions_path": Path("/tmp/AGENTS.md"),
+        "payload_root": Path("/opt/digibuddy"),
     }
     values.update(overrides)
     return RuntimeSettings(**values)
@@ -25,7 +26,7 @@ class RuntimeSettingsTests(unittest.TestCase):
     def test_config_references_secret_environment_variable(self):
         rendered = render_codex_config(settings(model_api_key="super-secret"))
 
-        self.assertIn('env_key = "HAERONCLAW_MODEL_API_KEY"', rendered)
+        self.assertIn('env_key = "DIGIBUDDY_MODEL_API_KEY"', rendered)
         self.assertNotIn("super-secret", rendered)
         self.assertIn('wire_api = "responses"', rendered)
 
