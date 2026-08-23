@@ -66,7 +66,7 @@ const emptyConnection: Connection = {
   authMode: "api-key",
   model: "",
   agentName: "",
-  agentVersion: "1",
+  agentVersion: "",
   profile: "",
 };
 
@@ -406,6 +406,7 @@ export default function Home() {
               onChange={(event) =>
                 updateConnection("agentVersion", event.target.value)
               }
+              placeholder="Server default"
             />
           </label>
           <p className={styles.securityNote}>

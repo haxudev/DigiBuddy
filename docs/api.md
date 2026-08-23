@@ -127,7 +127,7 @@ The upstream connection is resolved server-side from environment variables, with
 | `FOUNDRY_AGENT_API_KEY` | API key or bearer token |
 | `FOUNDRY_AUTH_MODE` | `api-key` or `bearer` |
 | `FOUNDRY_AGENT_NAME` | Agent name, e.g. `digibuddy-codex` |
-| `FOUNDRY_AGENT_VERSION` | Agent version, defaults to `1` |
+| `FOUNDRY_AGENT_VERSION` | Agent version; required when `FOUNDRY_AGENT_NAME` is set |
 | `CODEX_MODEL_NAME` | Model name sent as `model` |
 | `AGENT_ENDPOINT_ALLOWLIST` | Extra comma-separated host suffixes accepted as endpoints |
 | `DIGIBUDDY_PROFILE` | Default agent profile when the caller does not pick one |

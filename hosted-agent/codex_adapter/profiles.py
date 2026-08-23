@@ -11,10 +11,14 @@ credentials each profile is granted.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 DEFAULT_PROFILE_NAME = "digibuddy"
+_PROFILE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 REASONING_EFFORTS = frozenset({"minimal", "low", "medium", "high"})
 
@@ -80,7 +84,7 @@ def parse_profiles(document: Any) -> dict[str, AgentProfile]:
         if not isinstance(entry, dict):
             continue
         name = _text(entry.get("name"))
-        if not name:
+        if not _PROFILE_NAME.fullmatch(name):
             continue
         effort = _text(entry.get("reasoning_effort")).lower()
         profiles[name] = AgentProfile(
@@ -110,15 +114,21 @@ def resolve_profile(
 
 
 def profile_fingerprint(profile: AgentProfile) -> str:
-    """Identity of everything that affects the generated Codex configuration."""
-    return "|".join(
-        [
-            profile.name,
-            profile.model_name,
-            profile.reasoning_effort,
-            ",".join(sorted(profile.mcp_servers)) if profile.mcp_servers else "*",
-        ]
-    )
+    """Identity of everything a profile contributes to a Codex process."""
+    document = {
+        "name": profile.name,
+        "display_name": profile.display_name,
+        "description": profile.description,
+        "persona": profile.persona,
+        "skills": profile.skills,
+        "tools": profile.tools,
+        "mcp_servers": profile.mcp_servers,
+        "model_name": profile.model_name,
+        "reasoning_effort": profile.reasoning_effort,
+    }
+    return hashlib.sha256(
+        json.dumps(document, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
 
 
 @dataclass(frozen=True)

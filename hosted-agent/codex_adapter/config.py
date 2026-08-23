@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import math
 import os
+import secrets
 import shutil
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -22,6 +25,7 @@ from .profiles import (
     AgentProfile,
     Catalogue,
     parse_profiles,
+    profile_fingerprint,
 )
 
 MODEL_API_KEY_ENV = "DIGIBUDDY_MODEL_API_KEY"
@@ -30,6 +34,7 @@ logger = logging.getLogger(__name__)
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _FALSE_VALUES = {"0", "false", "no", "off"}
 _NETWORK_CAPABLE_SANDBOX = "workspace-write"
+_FINGERPRINT_KEY = secrets.token_bytes(32)
 
 
 @dataclass(frozen=True)
@@ -47,6 +52,8 @@ class RuntimeSettings:
     payload_root: Path
     skills_source: Path
     reasoning_effort: str = "high"
+    protocol_timeout_seconds: float = 60.0
+    turn_idle_timeout_seconds: float = 300.0
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -59,6 +66,19 @@ def _env_flag(name: str, default: bool) -> bool:
     if value in _FALSE_VALUES:
         return False
     raise RuntimeError(f"{name} must be a boolean value, got {raw!r}")
+
+
+def _env_positive_seconds(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a positive number, got {raw!r}") from exc
+    if not math.isfinite(value) or value <= 0:
+        raise RuntimeError(f"{name} must be a positive number, got {raw!r}")
+    return value
 
 
 def load_settings() -> RuntimeSettings:
@@ -85,6 +105,12 @@ def load_settings() -> RuntimeSettings:
             os.environ.get("CODEX_SKILLS_SOURCE", str(root / "skills"))
         ).resolve(),
         reasoning_effort=os.environ.get("CODEX_REASONING_EFFORT", "high").strip(),
+        protocol_timeout_seconds=_env_positive_seconds(
+            "CODEX_PROTOCOL_TIMEOUT_SECONDS", 60.0
+        ),
+        turn_idle_timeout_seconds=_env_positive_seconds(
+            "CODEX_TURN_IDLE_TIMEOUT_SECONDS", 300.0
+        ),
     )
     validate_settings(settings)
     return settings
@@ -205,7 +231,15 @@ def load_mcp_servers(
         if url:
             # Placeholder and plaintext endpoints are skipped rather than
             # silently shipped into the Codex configuration.
-            if urlparse(url).scheme != "https":
+            parsed = urlparse(url)
+            if (
+                parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or any(marker in url for marker in ("<", ">", "{", "}"))
+            ):
+                logger.warning("Skipping MCP server %s with an invalid HTTPS URL", name)
                 continue
             entry = {"url": url}
             token_env = str(server.get("bearer_token_env_var", "")).strip()
@@ -248,8 +282,7 @@ def build_catalogue(
         if tools_root.is_dir()
         else []
     )
-    servers = _read_mcp_document(settings, store).get("servers")
-    mcp_servers = sorted(servers) if isinstance(servers, dict) else []
+    mcp_servers = sorted(load_mcp_servers(settings, store))
     return Catalogue(
         skills=tuple(sorted(skills)),
         tools=tuple(tools),
@@ -261,7 +294,10 @@ def _render_toml_value(value: Any) -> str:
     if isinstance(value, list):
         return "[" + ", ".join(json.dumps(item) for item in value) + "]"
     if isinstance(value, dict):
-        pairs = ", ".join(f"{key} = {json.dumps(val)}" for key, val in value.items())
+        pairs = ", ".join(
+            f"{json.dumps(str(key))} = {json.dumps(val)}"
+            for key, val in value.items()
+        )
         return "{" + pairs + "}"
     return json.dumps(value)
 
@@ -312,7 +348,7 @@ def render_codex_config(
         lines.extend(
             [
                 "",
-                f"[model_providers.{settings.model_provider}]",
+                f"[model_providers.{json.dumps(settings.model_provider)}]",
                 'name = "DigiBuddy configured provider"',
                 f"base_url = {json.dumps(settings.model_endpoint)}",
                 f"env_key = {json.dumps(MODEL_API_KEY_ENV)}",
@@ -324,7 +360,7 @@ def render_codex_config(
     if any("url" in server for server in servers.values()):
         lines.insert(2, "experimental_use_rmcp_client = true")
     for name, server in servers.items():
-        lines.extend(["", f"[mcp_servers.{name}]"])
+        lines.extend(["", f"[mcp_servers.{json.dumps(name)}]"])
         lines.extend(
             f"{key} = {_render_toml_value(value)}" for key, value in server.items()
         )
@@ -370,6 +406,34 @@ def load_instructions(
     return "\n\n".join(section.strip() for section in sections if section.strip()) + "\n"
 
 
+def runtime_fingerprint(
+    settings: RuntimeSettings,
+    store: ConfigStore | None,
+    profile: AgentProfile,
+    reasoning_effort: str = "",
+) -> str:
+    """Fingerprint every input that requires replacing the Codex process."""
+    secret_digest = hashlib.scrypt(
+        settings.model_api_key.encode("utf-8"),
+        salt=_FINGERPRINT_KEY,
+        n=2**14,
+        r=8,
+        p=1,
+        dklen=32,
+    ).hex()
+    parts = [
+        render_codex_config(settings, store, profile, reasoning_effort),
+        load_instructions(settings, profile),
+        profile_fingerprint(profile),
+        secret_digest,
+        settings.approval_policy,
+        settings.sandbox,
+        str(settings.workspace),
+        str(settings.payload_root),
+    ]
+    return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
+
+
 def _link_selection(
     source: Path, target: Path, allowed: tuple[str, ...] | None, pattern: str
 ) -> None:
@@ -390,28 +454,40 @@ def _link_selection(
             (target / entry.name).symlink_to(entry, target_is_directory=entry.is_dir())
 
 
-def install_global_skills(settings: RuntimeSettings) -> int:
-    """Copy the immutable build-time skill bundle into Codex's global root."""
+def install_global_skills(
+    settings: RuntimeSettings, profile: AgentProfile | None = None
+) -> int:
+    """Publish the profile's immutable build-time skills into Codex's global root."""
     source = settings.skills_source
     target = settings.codex_home / "skills"
     if not source.is_dir():
         raise RuntimeError(f"packaged global skill directory is missing: {source}")
 
-    installed = 0
+    candidates = [
+        candidate
+        for candidate in sorted(source.iterdir())
+        if (candidate / "SKILL.md").is_file()
+    ]
+    if len(candidates) != 11:
+        raise RuntimeError(
+            f"expected 11 packaged global skills, found {len(candidates)} in {source}"
+        )
+
+    if target.is_symlink() or target.is_file():
+        target.unlink()
+    elif target.is_dir():
+        shutil.rmtree(target)
     target.mkdir(parents=True, exist_ok=True)
-    for candidate in sorted(source.iterdir()):
-        if not (candidate / "SKILL.md").is_file():
+
+    active = profile or DEFAULT_PROFILE
+    installed = 0
+    for candidate in candidates:
+        if not active.allows_skill(candidate.name):
             continue
         destination = target / candidate.name
-        if destination.exists():
-            shutil.rmtree(destination)
         shutil.copytree(candidate, destination)
         installed += 1
 
-    if installed != 11:
-        raise RuntimeError(
-            f"expected 11 packaged global skills, found {installed} in {source}"
-        )
     logger.info("Installed %d global Codex skills into %s", installed, target)
     return installed
 
@@ -425,7 +501,7 @@ def prepare_codex_environment(
     active = profile or DEFAULT_PROFILE
     settings.workspace.mkdir(parents=True, exist_ok=True)
     settings.codex_home.mkdir(parents=True, exist_ok=True)
-    install_global_skills(settings)
+    install_global_skills(settings, active)
     config_path = settings.codex_home / "config.toml"
     config_path.write_text(
         render_codex_config(settings, store, active, reasoning_effort),
@@ -474,5 +550,6 @@ __all__ = [
     "load_settings",
     "prepare_codex_environment",
     "render_codex_config",
+    "runtime_fingerprint",
     "validate_settings",
 ]

@@ -1,6 +1,6 @@
 import unittest
 
-from codex_adapter.events import translate_notification
+from codex_adapter.events import completion_delta, tool_arguments, translate_notification
 
 
 class EventTranslationTests(unittest.TestCase):
@@ -14,6 +14,19 @@ class EventTranslationTests(unittest.TestCase):
 
         self.assertEqual(events[0].type, "assistant.message.delta")
         self.assertEqual(events[0].data["delta"], "hello")
+
+    def test_completed_message_recovers_an_absent_delta_stream(self):
+        events = translate_notification(
+            {
+                "method": "item/completed",
+                "params": {"item": {"type": "agentMessage", "text": "hello"}},
+            }
+        )
+
+        self.assertEqual(events[0].type, "assistant.message.completed")
+        self.assertEqual(completion_delta("", events[0].data["text"]), "hello")
+        self.assertEqual(completion_delta("hel", events[0].data["text"]), "lo")
+        self.assertEqual(completion_delta("different", "hello"), "")
 
     def test_translates_failed_turn(self):
         events = translate_notification(
@@ -106,6 +119,12 @@ class EventTranslationTests(unittest.TestCase):
         )
 
         self.assertEqual(events[0].data["summary"], "Called an MCP tool")
+
+    def test_final_tool_summary_becomes_one_valid_argument_document(self):
+        self.assertEqual(
+            tool_arguments({"summary": "src/a.py"}, "Edited files"),
+            '{"summary": "src/a.py"}',
+        )
 
 
 if __name__ == "__main__":

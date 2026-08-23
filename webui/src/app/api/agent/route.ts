@@ -7,7 +7,9 @@ import {
   latestUserText,
   resolveAuthHeaders,
   resolveConnection,
+  responseErrorMessage,
   responseText,
+  responseTextDelta,
   turnInput,
   turnOptions,
 } from "@/lib/agent-proxy";
@@ -21,21 +23,19 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const encoder = new TextEncoder();
+const KEEP_ALIVE_INTERVAL_MS = 15_000;
 
 function sse(event: BaseEvent): Uint8Array {
   return encoder.encode(`data: ${JSON.stringify(event)}\n\n`);
 }
 
+function keepAlive(): Uint8Array {
+  return encoder.encode(": keep-alive\n\n");
+}
+
 function upstreamError(payload: unknown, status: number): Error {
-  if (payload && typeof payload === "object") {
-    const value = payload as Record<string, unknown>;
-    const error = value.error;
-    if (typeof error === "string") return new Error(error);
-    if (error && typeof error === "object") {
-      const message = (error as Record<string, unknown>).message;
-      if (typeof message === "string") return new Error(message);
-    }
-  }
+  const message = responseErrorMessage(payload);
+  if (message) return new Error(message);
   return new Error(`Hosted Agent request failed with HTTP ${status}.`);
 }
 
@@ -55,8 +55,21 @@ export async function POST(request: Request) {
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      let streamOpen = true;
+      const enqueue = (value: Uint8Array) => {
+        if (!streamOpen) return;
+        try {
+          controller.enqueue(value);
+        } catch {
+          streamOpen = false;
+        }
+      };
+      const keepAliveTimer = setInterval(() => {
+        enqueue(keepAlive());
+      }, KEEP_ALIVE_INTERVAL_MS);
       const messageId = crypto.randomUUID();
       let messageStarted = false;
+      let assistantText = "";
       let previousResponseId =
         input.state &&
         typeof input.state === "object" &&
@@ -64,7 +77,24 @@ export async function POST(request: Request) {
           ? input.state.previousResponseId
           : "";
 
-      const emit = (event: BaseEvent) => controller.enqueue(sse(event));
+      const emit = (event: BaseEvent) => enqueue(sse(event));
+      const emitText = (delta: string) => {
+        if (!delta) return;
+        if (!messageStarted) {
+          emit({
+            type: EventType.TEXT_MESSAGE_START,
+            messageId,
+            role: "assistant",
+          });
+          messageStarted = true;
+        }
+        assistantText += delta;
+        emit({
+          type: EventType.TEXT_MESSAGE_CONTENT,
+          messageId,
+          delta,
+        });
+      };
       // Thinking and tool activity travel as AG-UI custom events. Using the
       // standard tool-call events instead would append rows to the message
       // list, which is what the console persists and mines for deliverables.
@@ -131,19 +161,7 @@ export async function POST(request: Request) {
           const text = responseText(payload);
           const responseId =
             payload && typeof payload.id === "string" ? payload.id : "";
-          if (text) {
-            emit({
-              type: EventType.TEXT_MESSAGE_START,
-              messageId,
-              role: "assistant",
-            });
-            messageStarted = true;
-            emit({
-              type: EventType.TEXT_MESSAGE_CONTENT,
-              messageId,
-              delta: text,
-            });
-          }
+          emitText(text);
           if (responseId) previousResponseId = responseId;
         } else {
           if (!upstream.body) throw new Error("Hosted Agent returned no stream.");
@@ -183,20 +201,17 @@ export async function POST(request: Request) {
 
               if (eventType === "response.output_text.delta") {
                 const delta = typeof event.delta === "string" ? event.delta : "";
-                if (!delta) continue;
-                if (!messageStarted) {
-                  emit({
-                    type: EventType.TEXT_MESSAGE_START,
-                    messageId,
-                    role: "assistant",
-                  });
-                  messageStarted = true;
+                emitText(delta);
+              }
+              if (eventType === "response.completed") {
+                const completedText = responseText(response);
+                const delta = responseTextDelta(assistantText, response);
+                if (!delta && completedText && completedText !== assistantText) {
+                  console.warn(
+                    "Hosted Agent completed text diverged from its streamed prefix.",
+                  );
                 }
-                emit({
-                  type: EventType.TEXT_MESSAGE_CONTENT,
-                  messageId,
-                  delta,
-                });
+                emitText(delta);
               }
               if (eventType === "error" || eventType === "response.failed") {
                 throw upstreamError(event, upstream.status);
@@ -206,9 +221,10 @@ export async function POST(request: Request) {
           }
         }
 
-        if (messageStarted) {
-          emit({ type: EventType.TEXT_MESSAGE_END, messageId });
+        if (!messageStarted) {
+          throw new Error("Hosted Agent completed without assistant output.");
         }
+        emit({ type: EventType.TEXT_MESSAGE_END, messageId });
         emit({
           type: EventType.STATE_SNAPSHOT,
           snapshot: {
@@ -232,7 +248,15 @@ export async function POST(request: Request) {
           code: "UPSTREAM_ERROR",
         });
       } finally {
-        controller.close();
+        clearInterval(keepAliveTimer);
+        if (streamOpen) {
+          streamOpen = false;
+          try {
+            controller.close();
+          } catch {
+            // The downstream client already disconnected.
+          }
+        }
       }
     },
   });

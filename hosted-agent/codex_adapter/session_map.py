@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -48,9 +51,11 @@ class ResponseThreadMap:
             return {}
         try:
             value = json.loads(self._path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Could not read response thread map %s: %s", self._path, exc)
             return {}
         if not isinstance(value, dict):
+            logger.warning("Ignoring invalid response thread map %s", self._path)
             return {}
 
         bindings: dict[str, ThreadBinding] = {}

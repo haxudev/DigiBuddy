@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -75,6 +76,19 @@ def tool_summary(item: dict[str, Any]) -> str:
     return fallback
 
 
+def tool_arguments(data: dict[str, Any], fallback: str = "") -> str:
+    """Build one valid function-call argument document from final tool metadata."""
+    summary = _first_text(data.get("summary"), fallback)
+    return json.dumps({"summary": summary}, ensure_ascii=False)
+
+
+def completion_delta(streamed: str, completed: str) -> str:
+    """Return the authoritative suffix when completion contains the streamed prefix."""
+    if completed.startswith(streamed):
+        return completed[len(streamed) :]
+    return completed if not streamed else ""
+
+
 def translate_notification(message: dict[str, Any]) -> list[RuntimeEvent]:
     method = str(message.get("method") or "")
     params = message.get("params")
@@ -102,6 +116,15 @@ def translate_notification(message: dict[str, Any]) -> list[RuntimeEvent]:
     if method in {"item/started", "item/completed"}:
         item = params.get("item") if isinstance(params.get("item"), dict) else {}
         item_type = str(item.get("type") or "")
+        if item_type == "agentMessage":
+            if method != "item/completed":
+                return []
+            text = item.get("text")
+            return (
+                [RuntimeEvent("assistant.message.completed", {"text": text})]
+                if isinstance(text, str) and text
+                else []
+            )
         if item_type == "reasoning":
             # The completed item repeats the whole summary, so it is reported
             # separately and only used when no delta stream arrived.

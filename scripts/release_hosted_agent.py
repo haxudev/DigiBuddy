@@ -218,7 +218,7 @@ class ReleaseRunner:
 
             webapp_host: str | None = None
             if not self.options.skip_webui:
-                webapp_host = self._deploy_webui(webui_image)
+                webapp_host = self._deploy_webui(webui_image, version_id)
                 result["webapp_host"] = webapp_host
 
             receipt = release_receipt(
@@ -254,10 +254,16 @@ class ReleaseRunner:
     def _run_release_gates(self) -> None:
         self._run_checked(["scripts/sync-agent-skills.sh", "--check"])
         self._run_checked(
+            ["python", "-m", "unittest", "tests/test_release_hosted_agent.py"]
+        )
+        self._run_checked(
             ["python", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"],
             cwd=self.root / "hosted-agent",
         )
         self._run_checked(["python", "hosted-agent/tests/probe_maturity_mcp.py"])
+        self._run_checked(["npm", "test"], cwd=self.root / "webui")
+        self._run_checked(["npm", "run", "lint"], cwd=self.root / "webui")
+        self._run_checked(["npm", "run", "build"], cwd=self.root / "webui")
 
     def _validate_local_agent_image(self) -> None:
         self._run_checked(
@@ -428,7 +434,7 @@ class ReleaseRunner:
             )
         return payload
 
-    def _deploy_webui(self, new_image: str) -> str:
+    def _deploy_webui(self, new_image: str, agent_version: str) -> str:
         details = self._command_json(
             [
                 "az",
@@ -461,18 +467,59 @@ class ReleaseRunner:
             ]
         )
         previous_image = _extract_webapp_container_image(container_config)
-        self._set_webui_image(new_image)
-        self._restart_webapp()
+        app_settings = self._command_json(
+            [
+                "az",
+                "webapp",
+                "config",
+                "appsettings",
+                "list",
+                "--resource-group",
+                self.config.webapp_resource_group,
+                "--name",
+                self.config.webapp_name,
+                "-o",
+                "json",
+            ]
+        )
+        had_previous_version, previous_version = _app_setting(
+            app_settings, "FOUNDRY_AGENT_VERSION"
+        )
         try:
+            self._set_webui_agent_version(agent_version)
+            self._set_webui_image(new_image)
+            self._restart_webapp()
             self._wait_for_http_ready(
                 f"https://{host}{self.config.webui_ready_path}",
                 timeout_seconds=self.options.webui_timeout_seconds,
                 failure_message="Timed out waiting for the Web UI to become ready.",
             )
+            self._verify_webui_agent(host)
         except Exception as exc:
+            rollback_errors: list[str] = []
+            restored_state = False
             if previous_image:
-                self._set_webui_image(previous_image)
-                self._restart_webapp()
+                try:
+                    self._set_webui_image(previous_image)
+                    restored_state = True
+                except Exception as rollback_exc:
+                    rollback_errors.append(f"image restore failed: {rollback_exc}")
+            else:
+                rollback_errors.append("previous Web UI image is unavailable")
+            try:
+                if had_previous_version:
+                    self._set_webui_agent_version(previous_version)
+                else:
+                    self._delete_webui_agent_version()
+                restored_state = True
+            except Exception as rollback_exc:
+                rollback_errors.append(f"Agent version restore failed: {rollback_exc}")
+            if restored_state:
+                try:
+                    self._restart_webapp()
+                except Exception as rollback_exc:
+                    rollback_errors.append(f"Web App restart failed: {rollback_exc}")
+            if previous_image and not rollback_errors:
                 try:
                     self._wait_for_http_ready(
                         f"https://{host}{self.config.webui_ready_path}",
@@ -481,11 +528,51 @@ class ReleaseRunner:
                     )
                 except Exception as rollback_exc:
                     raise ReleaseError(
-                        f"Web UI readiness failed and rollback to {previous_image} also failed: {rollback_exc}"
+                        f"Web UI validation failed and rollback to {previous_image} also failed: {rollback_exc}"
                     ) from exc
-                raise ReleaseError(f"Web UI readiness failed; rolled back to {previous_image}") from exc
+                raise ReleaseError(
+                    f"Web UI validation failed; rolled back to {previous_image}"
+                ) from exc
+            if rollback_errors:
+                raise ReleaseError(
+                    f"Web UI validation failed and rollback was incomplete: {'; '.join(rollback_errors)}"
+                ) from exc
             raise
         return host
+
+    def _set_webui_agent_version(self, version: str) -> None:
+        self._run_checked(
+            [
+                "az",
+                "webapp",
+                "config",
+                "appsettings",
+                "set",
+                "--resource-group",
+                self.config.webapp_resource_group,
+                "--name",
+                self.config.webapp_name,
+                "--settings",
+                f"FOUNDRY_AGENT_VERSION={version}",
+            ]
+        )
+
+    def _delete_webui_agent_version(self) -> None:
+        self._run_checked(
+            [
+                "az",
+                "webapp",
+                "config",
+                "appsettings",
+                "delete",
+                "--resource-group",
+                self.config.webapp_resource_group,
+                "--name",
+                self.config.webapp_name,
+                "--setting-names",
+                "FOUNDRY_AGENT_VERSION",
+            ]
+        )
 
     def _set_webui_image(self, image: str) -> None:
         self._run_checked(
@@ -516,6 +603,57 @@ class ReleaseRunner:
                 self.config.webapp_name,
             ]
         )
+
+    def _verify_webui_agent(self, host: str) -> None:
+        smoke_id = self._image_tag or "release"
+        response = self.http_client(
+            "POST",
+            f"https://{host}/api/agent",
+            headers={
+                "Accept": "text/event-stream",
+                "Content-Type": "application/json",
+            },
+            data=json.dumps(
+                {
+                    "threadId": f"release-{smoke_id}",
+                    "runId": f"release-{smoke_id}",
+                    "messages": [
+                        {
+                            "id": f"release-{smoke_id}",
+                            "role": "user",
+                            "content": "Reply with a brief confirmation that DigiBuddy is ready.",
+                        }
+                    ],
+                    "state": {},
+                    "tools": [],
+                    "context": [],
+                    "forwardedProps": {},
+                }
+            ).encode("utf-8"),
+            timeout=self.options.webui_timeout_seconds,
+        )
+        status = int(getattr(response, "status", 0) or 0)
+        if not 200 <= status < 300:
+            raise ReleaseError(
+                f"Web UI Agent smoke test failed with HTTP {status}."
+            )
+        events = _sse_json_events(getattr(response, "body", b""))
+        error_event = next(
+            (event for event in events if event.get("type") == "RUN_ERROR"), None
+        )
+        if error_event is not None:
+            message = _string_value(error_event.get("message")) or "unknown error"
+            raise ReleaseError(f"Web UI Agent smoke test failed: {message}")
+        finished = any(event.get("type") == "RUN_FINISHED" for event in events)
+        output = "".join(
+            _string_value(event.get("delta"))
+            for event in events
+            if event.get("type") == "TEXT_MESSAGE_CONTENT"
+        )
+        if not finished or not output:
+            raise ReleaseError(
+                "Web UI Agent smoke test returned no completed assistant response."
+            )
 
     def _wait_for_http_ready(self, url: str, *, timeout_seconds: int, failure_message: str) -> None:
         remaining = timeout_seconds
@@ -961,6 +1099,42 @@ def _extract_webapp_container_image(payload: Any) -> str:
     if linux_fx.startswith(prefix):
         return linux_fx[len(prefix) :]
     return ""
+
+
+def _app_setting(payload: Any, name: str) -> tuple[bool, str]:
+    if isinstance(payload, Mapping):
+        if name in payload:
+            return True, _string_value(payload.get(name))
+        return False, ""
+    if isinstance(payload, Sequence) and not isinstance(
+        payload, (str, bytes, bytearray)
+    ):
+        for entry in payload:
+            if not isinstance(entry, Mapping):
+                continue
+            if _string_value(entry.get("name")) == name:
+                return True, _string_value(entry.get("value"))
+    return False, ""
+
+
+def _sse_json_events(body: Any) -> list[Mapping[str, Any]]:
+    text = _decode_body(body)
+    events: list[Mapping[str, Any]] = []
+    for block in text.replace("\r\n", "\n").split("\n\n"):
+        data = "\n".join(
+            line[5:].lstrip()
+            for line in block.splitlines()
+            if line.startswith("data:")
+        )
+        if not data or data == "[DONE]":
+            continue
+        try:
+            event = json.loads(data)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, Mapping):
+            events.append(event)
+    return events
 
 
 def _decode_body(body: Any) -> str:

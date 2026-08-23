@@ -12,14 +12,14 @@ from .config import (
     apply_model_overrides,
     build_catalogue,
     effective_model,
-    effective_reasoning_effort,
     load_instructions,
     load_profiles,
     prepare_codex_environment,
+    runtime_fingerprint,
 )
 from .config_store import CATALOGUE_DOCUMENT, ConfigStore, build_config_store
 from .events import RuntimeEvent, translate_notification
-from .profiles import AgentProfile, profile_fingerprint, resolve_profile
+from .profiles import AgentProfile, resolve_profile
 from .session_map import ResponseThreadMap
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,25 @@ logger = logging.getLogger(__name__)
 
 class CodexProtocolError(RuntimeError):
     pass
+
+
+def _server_request_result(method: str) -> dict[str, Any] | None:
+    if method in {
+        "item/commandExecution/requestApproval",
+        "item/fileChange/requestApproval",
+        "applyPatchApproval",
+        "execCommandApproval",
+    }:
+        return {"decision": "decline"}
+    if method == "item/tool/requestUserInput":
+        return {"answers": {}}
+    if method == "mcpServer/elicitation/request":
+        return {"action": "decline", "content": None}
+    if method == "item/permissions/requestApproval":
+        return {"permissions": {}, "scope": "turn"}
+    if method == "item/tool/call":
+        return {"contentItems": [], "success": False}
+    return None
 
 
 class CodexRuntime:
@@ -102,10 +121,9 @@ class CodexRuntime:
                     yield event
 
             while True:
-                if cancellation_signal.is_set():
-                    await self._restart()
+                message = await self._next_turn_message(cancellation_signal)
+                if message is None:
                     return
-                message = await self._read_message()
                 if "method" in message and "id" in message:
                     await self._decline_server_request(message)
                     continue
@@ -130,14 +148,8 @@ class CodexRuntime:
         # take effect without redeploying, and the engine is restarted whenever
         # the rendered Codex configuration would differ.
         settings = apply_model_overrides(self._base_settings, self._store)
-        fingerprint = "|".join(
-            [
-                settings.model_name,
-                settings.model_endpoint,
-                settings.model_provider,
-                effective_reasoning_effort(settings, profile, reasoning_effort),
-                profile_fingerprint(profile),
-            ]
+        fingerprint = runtime_fingerprint(
+            settings, self._store, profile, reasoning_effort
         )
         running = self._process is not None and self._process.returncode is None
         if running and fingerprint == self._active_fingerprint:
@@ -145,12 +157,14 @@ class CodexRuntime:
         if running:
             logger.info("Codex configuration changed; restarting the engine")
             await self._restart()
+        elif self._process is not None:
+            logger.warning("Codex process exited; starting a replacement")
+            await self._restart()
 
         self._settings = settings
         environment = prepare_codex_environment(
             settings, self._store, profile, reasoning_effort
         )
-        self._active_fingerprint = fingerprint
         self._process = await asyncio.create_subprocess_exec(
             "codex",
             "app-server",
@@ -163,17 +177,22 @@ class CodexRuntime:
             cwd=settings.workspace,
         )
         self._stderr_task = asyncio.create_task(self._drain_stderr())
-        await self._request(
-            "initialize",
-            {
-                "clientInfo": {
-                    "name": "digibuddy_foundry",
-                    "title": "DigiBuddy Foundry Hosted Agent",
-                    "version": "1.0.0",
-                }
-            },
-        )
-        await self._send({"method": "initialized", "params": {}})
+        try:
+            await self._request(
+                "initialize",
+                {
+                    "clientInfo": {
+                        "name": "digibuddy_foundry",
+                        "title": "DigiBuddy Foundry Hosted Agent",
+                        "version": "1.0.0",
+                    }
+                },
+            )
+            await self._send({"method": "initialized", "params": {}})
+        except Exception:
+            await self._restart()
+            raise
+        self._active_fingerprint = fingerprint
 
     def _thread_params(self, model: str | None, profile: AgentProfile) -> dict[str, Any]:
         params: dict[str, Any] = {
@@ -212,7 +231,17 @@ class CodexRuntime:
         request_id = self._request_id
         await self._send({"method": method, "id": request_id, "params": params})
         while True:
-            message = await self._read_message()
+            try:
+                message = await asyncio.wait_for(
+                    self._read_message(),
+                    timeout=self._settings.protocol_timeout_seconds,
+                )
+            except asyncio.TimeoutError as exc:
+                timeout = self._settings.protocol_timeout_seconds
+                await self._restart()
+                raise CodexProtocolError(
+                    f"{method} timed out after {timeout:g} seconds without a response"
+                ) from exc
             if message.get("id") == request_id and "method" not in message:
                 if "error" in message:
                     raise CodexProtocolError(
@@ -223,6 +252,39 @@ class CodexRuntime:
                 await self._decline_server_request(message)
             elif "method" in message:
                 self._pending_notifications.append(message)
+
+    async def _next_turn_message(
+        self, cancellation_signal: asyncio.Event
+    ) -> dict[str, Any] | None:
+        if cancellation_signal.is_set():
+            await self._restart()
+            return None
+
+        read_task = asyncio.create_task(self._read_message())
+        cancellation_task = asyncio.create_task(cancellation_signal.wait())
+        done, _ = await asyncio.wait(
+            {read_task, cancellation_task},
+            timeout=self._settings.turn_idle_timeout_seconds,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if cancellation_task in done and cancellation_signal.is_set():
+            read_task.cancel()
+            await asyncio.gather(read_task, return_exceptions=True)
+            await self._restart()
+            return None
+        if read_task in done:
+            cancellation_task.cancel()
+            await asyncio.gather(cancellation_task, return_exceptions=True)
+            return await read_task
+
+        read_task.cancel()
+        cancellation_task.cancel()
+        await asyncio.gather(read_task, cancellation_task, return_exceptions=True)
+        timeout = self._settings.turn_idle_timeout_seconds
+        await self._restart()
+        raise CodexProtocolError(
+            f"Codex turn produced no events for {timeout:g} seconds"
+        )
 
     async def _send(self, message: dict[str, Any]) -> None:
         if not self._process or not self._process.stdin:
@@ -249,7 +311,20 @@ class CodexRuntime:
         return message
 
     async def _decline_server_request(self, message: dict[str, Any]) -> None:
-        await self._send({"id": message["id"], "result": {"decision": "decline"}})
+        method = str(message.get("method") or "")
+        result = _server_request_result(method)
+        if result is not None:
+            await self._send({"id": message["id"], "result": result})
+            return
+        await self._send(
+            {
+                "id": message["id"],
+                "error": {
+                    "code": -32601,
+                    "message": f"Unsupported Codex server request: {method or 'unknown'}",
+                },
+            }
+        )
 
     async def _drain_stderr(self) -> None:
         if not self._process or not self._process.stderr:
@@ -265,10 +340,13 @@ class CodexRuntime:
             except asyncio.TimeoutError:
                 self._process.kill()
                 await self._process.wait()
-        if self._stderr_task:
-            self._stderr_task.cancel()
+        stderr_task = self._stderr_task
+        if stderr_task:
+            stderr_task.cancel()
         self._process = None
         self._stderr_task = None
         self._active_fingerprint = None
         self._loaded_threads.clear()
         self._pending_notifications.clear()
+        if stderr_task:
+            await asyncio.gather(stderr_task, return_exceptions=True)

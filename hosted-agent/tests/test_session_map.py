@@ -27,6 +27,14 @@ class ResponseThreadMapTests(unittest.TestCase):
             self.assertEqual(binding.thread_id, "thread-1")
             self.assertEqual(binding.profile, "")
 
+    def test_corrupt_map_is_visible_and_does_not_break_new_sessions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mappings.json"
+            path.write_text("{", encoding="utf-8")
+
+            with self.assertLogs("codex_adapter.session_map", level="WARNING"):
+                self.assertIsNone(ResponseThreadMap(path).lookup("response-1"))
+
 
 if __name__ == "__main__":
     unittest.main()
