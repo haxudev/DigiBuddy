@@ -2,10 +2,10 @@
 
 ## Goal
 
-Provide one repeatable command for routine DigiBuddy Hosted Agent releases. The
-command must validate the self-contained skill bundle, publish an immutable ACR
-image, create a correctly shaped Foundry Agent version, and prove the deployed
-Superclarity and Agent Maturity MCP integration works.
+Provide one repeatable command for routine DigiBuddy releases. The command must
+validate the self-contained skill bundle, publish immutable Hosted Agent and
+Web UI images, create a correctly shaped Foundry Agent version, update the Web
+App, and prove both deployed surfaces work.
 
 ## Approach
 
@@ -29,10 +29,14 @@ Safe mode is the default:
    image, then create a new version through Foundry REST.
 6. Wait for `active`, invoke the agent-specific Responses endpoint, and require
    an answer containing the known `A1.qa` maturity question.
-7. Write a non-secret receipt to `.azure/releases/`.
+7. Build `webui/Dockerfile` in ACR with the same immutable release tag, update
+   `haeronclaw-haxu` while preserving app settings, and wait for HTTP 200.
+8. Write both image digests, Agent version, Web App host, and response ID to a
+   non-secret receipt under `.azure/releases/`.
 
 `--fast` skips the local Docker build but keeps tests and online verification.
-`--build-only` stops after ACR digest resolution. Resource names and timeout are
+`--build-only` stops after both ACR digests are resolved. `--skip-webui` is
+available for an intentional Agent-only release. Resource names and timeout are
 overridable CLI options with repository-specific defaults.
 
 ## Safety and Failure Handling
@@ -45,6 +49,8 @@ overridable CLI options with repository-specific defaults.
 - If online verification fails after creating a version, delete only that new
   version. If an active session prevents deletion, report the exact version for
   later cleanup rather than touching any older version.
+- Update the Web App only after the Agent gate passes. If Web UI readiness
+  fails, restore its previous image and restart it.
 - Preserve the previous valid versions as rollback history.
 
 ## Testing
@@ -53,4 +59,3 @@ Unit tests cover command construction, valid-version selection, response text
 extraction, redaction-safe receipts, and failure rollback decisions without
 calling Azure. Existing Hosted Agent and MCP tests remain release gates. The
 real release command supplies the end-to-end ACR, Foundry, and Responses checks.
-

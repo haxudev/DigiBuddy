@@ -118,6 +118,17 @@ azd up
 
 随后将 `webui/Dockerfile` 部署到 Web App for Containers 或其他 OCI 宿主，并设置 `FOUNDRY_AGENT_ENDPOINT`。参见 [快速开始](docs/quickstart.md) 与 [架构](docs/architecture.md)。
 
+首次初始化后，日常更新统一执行：
+
+```bash
+python scripts/release-hosted-agent.py
+```
+
+该命令会发布不可变的 Hosted Agent 与 Web UI 镜像，创建并验证新的
+Foundry Agent 版本，更新 Web App，并在 `.azure/releases/` 写入不含敏感值的
+发布回执。`--fast` 仅跳过本地 Docker 验证，`--build-only` 只发布镜像，
+`--skip-webui` 用于明确的 Agent-only 发布。
+
 ## 使用 API
 
 Hosted Agent 使用 Foundry Responses 协议 `2.0.0`：

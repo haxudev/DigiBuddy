@@ -137,6 +137,19 @@ azd up
 
 Then deploy `webui/Dockerfile` to Web App for Containers or another OCI host and set `FOUNDRY_AGENT_ENDPOINT`. See [Quickstart](docs/quickstart.md) and [Architecture](docs/architecture.md).
 
+For routine updates after initial provisioning, use the repository release
+orchestrator:
+
+```bash
+python scripts/release-hosted-agent.py
+```
+
+It publishes immutable Hosted Agent and Web UI images, creates and verifies the
+new Foundry Agent version, updates the Web App, and writes a non-secret receipt
+under `.azure/releases/`. Use `--fast` to skip local Docker validation,
+`--build-only` to stop after image publication, or `--skip-webui` for an
+intentional Agent-only release.
+
 ## Using the API
 
 The Hosted Agent speaks the Foundry Responses protocol `2.0.0`:

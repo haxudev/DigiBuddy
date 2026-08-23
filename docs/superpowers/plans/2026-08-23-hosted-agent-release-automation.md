@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a safe one-command release path for routine DigiBuddy Hosted Agent updates.
+**Goal:** Add a safe one-command release path for routine DigiBuddy Hosted Agent and Web UI updates.
 
 **Architecture:** A standard-library Python orchestrator runs local gates, builds an immutable ACR image, and uses Foundry v1 REST to clone the latest valid definition with a new image. Small pure helpers isolate selection and response parsing from subprocess and HTTP side effects.
 
@@ -15,6 +15,10 @@
 - A release tag must include the current committed git SHA.
 - Foundry versions are immutable; only a newly created failed version may be deleted.
 - The online gate must exercise `maturity_get_question` and recognize `A1.qa`.
+- The default release must deploy both `hosted-agent/Dockerfile` and
+  `webui/Dockerfile`; `--skip-webui` is the explicit Agent-only override.
+- Foundry list/get responses contain deployable fields under `definition`;
+  helpers must accept that real API shape.
 
 ---
 
@@ -66,8 +70,9 @@ Expected: all tests pass.
 - [ ] **Step 1: Add failing orchestration tests**
 
 Use a fake command/HTTP adapter to verify stage order, `--fast`,
-`--build-only`, bounded activation waits, online acceptance of the required
-question, and deletion of only the newly created version after a failed gate.
+`--build-only`, `--skip-webui`, bounded activation waits, online acceptance of
+the required question, Web App image update/readiness/rollback, and deletion of
+only the newly created Agent version after a failed Agent gate.
 
 - [ ] **Step 2: Run focused tests and confirm failure**
 
@@ -77,8 +82,10 @@ Run: `python -m unittest tests/test_release_hosted_agent.py -v`
 
 Implement subprocess execution without `shell=True`, Azure token retrieval in
 memory, Foundry JSON requests through `urllib.request`, local container cleanup
-in `finally`, ACR metadata lookup, activation polling, online Responses
-verification, and `.azure/releases/<tag>.json` receipts.
+in `finally`, ACR metadata lookup for both images, activation polling, online
+Responses verification, Web App deployment with preservation of existing app
+settings, condition-based HTTP readiness, targeted Web App rollback, and
+`.azure/releases/<tag>.json` receipts.
 
 - [ ] **Step 4: Run focused and existing tests**
 
@@ -122,11 +129,11 @@ git diff --check
 
 Run: `python scripts/release-hosted-agent.py`
 
-Expected: an ACR digest, an active Foundry version, a successful online MCP
-gate, and a receipt under `.azure/releases/`.
+Expected: two ACR digests, an active Foundry version, a successful online MCP
+gate, an HTTP-healthy Web UI running the new tag, and a receipt under
+`.azure/releases/`.
 
 - [ ] **Step 4: Commit**
 
 Commit the release script, tests, and documentation with the required Copilot
 co-author trailer.
-

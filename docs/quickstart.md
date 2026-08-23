@@ -22,6 +22,34 @@ azd up
 Store production keys in the deployment platform's secret configuration. Do not commit populated environment files.
 :::
 
+## Routine releases
+
+After the first deployment, publish both the Hosted Agent and Web UI with:
+
+```bash
+python scripts/release-hosted-agent.py
+```
+
+The release command requires a clean committed worktree. It runs the skill,
+Hosted Agent, and maturity MCP gates; validates the production Agent image
+locally; builds immutable Agent and Web UI images in `haxureg`; creates a new
+`haeronclaw-codex` version; exercises `maturity_get_question`; updates the
+`haeronclaw-haxu` Web App; and waits for HTTP readiness. A non-secret receipt is
+written under `.azure/releases/`.
+
+For a faster release that skips only the local Docker validation:
+
+```bash
+python scripts/release-hosted-agent.py --fast
+```
+
+Use `--build-only` to publish both images without rolling them out, or
+`--skip-webui` for an intentional Agent-only release. Resource names and
+timeouts can be overridden; run `python scripts/release-hosted-agent.py --help`
+for the complete interface. Failed Agent validation deletes only the version
+created by that run. Failed Web UI readiness restores the previous Web App
+image.
+
 ## Run the Web UI
 
 ```bash
