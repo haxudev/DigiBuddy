@@ -7,7 +7,14 @@ import {
   latestUserText,
   resolveConnection,
   responseText,
+  turnInput,
+  turnOptions,
 } from "@/lib/agent-proxy";
+import {
+  ACTIVITY_EVENT_NAME,
+  activityFromUpstream,
+  type ActivityEvent,
+} from "@/lib/activity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,6 +64,15 @@ export async function POST(request: Request) {
           : "";
 
       const emit = (event: BaseEvent) => controller.enqueue(sse(event));
+      // Thinking and tool activity travel as AG-UI custom events. Using the
+      // standard tool-call events instead would append rows to the message
+      // list, which is what the console persists and mines for deliverables.
+      const emitActivity = (activity: ActivityEvent) =>
+        emit({
+          type: EventType.CUSTOM,
+          name: ACTIVITY_EVENT_NAME,
+          value: activity,
+        } as BaseEvent);
       emit({
         type: EventType.RUN_STARTED,
         threadId: input.threadId,
@@ -65,12 +81,16 @@ export async function POST(request: Request) {
 
       try {
         const connection = resolveConnection(input.forwardedProps);
+        const { attachments, reasoningEffort } = turnOptions(input.forwardedProps);
         const body: Record<string, unknown> = {
           model: connection.model,
-          input: latestUserText(input.messages),
+          input: turnInput(latestUserText(input.messages), attachments),
           stream: true,
           store: true,
         };
+        if (reasoningEffort) {
+          body.reasoning = { effort: reasoningEffort };
+        }
         if (previousResponseId) {
           body.previous_response_id = previousResponseId;
         }
@@ -164,6 +184,9 @@ export async function POST(request: Request) {
               ) {
                 previousResponseId = response.id;
               }
+              const activity = activityFromUpstream(event);
+              if (activity) emitActivity(activity);
+
               if (eventType === "response.output_text.delta") {
                 const delta = typeof event.delta === "string" ? event.delta : "";
                 if (!delta) continue;
@@ -206,9 +229,12 @@ export async function POST(request: Request) {
           outcome: { type: "success" },
         });
       } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Agent request failed";
+        emitActivity({ kind: "error", id: crypto.randomUUID(), message });
         emit({
           type: EventType.RUN_ERROR,
-          message: error instanceof Error ? error.message : "Agent request failed",
+          message,
           code: "UPSTREAM_ERROR",
         });
       } finally {
