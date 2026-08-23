@@ -7,8 +7,18 @@ from asyncio.subprocess import Process
 from collections.abc import AsyncIterator
 from typing import Any
 
-from .config import RuntimeSettings, load_instructions, prepare_codex_environment
+from .config import (
+    RuntimeSettings,
+    apply_model_overrides,
+    build_catalogue,
+    effective_model,
+    load_instructions,
+    load_profiles,
+    prepare_codex_environment,
+)
+from .config_store import CATALOGUE_DOCUMENT, ConfigStore, build_config_store
 from .events import RuntimeEvent, translate_notification
+from .profiles import AgentProfile, profile_fingerprint, resolve_profile
 from .session_map import ResponseThreadMap
 
 logger = logging.getLogger(__name__)
@@ -19,17 +29,37 @@ class CodexProtocolError(RuntimeError):
 
 
 class CodexRuntime:
-    def __init__(self, settings: RuntimeSettings):
+    def __init__(self, settings: RuntimeSettings, store: ConfigStore | None = None):
+        self._base_settings = settings
         self._settings = settings
+        self._store = store if store is not None else build_config_store()
         self._process: Process | None = None
         self._stderr_task: asyncio.Task[None] | None = None
         self._request_id = 0
         self._lock = asyncio.Lock()
         self._loaded_threads: set[str] = set()
         self._pending_notifications: list[dict[str, Any]] = []
+        self._active_fingerprint: str | None = None
         self._thread_map = ResponseThreadMap(
             settings.codex_home / "digibuddy-response-threads.json"
         )
+        self._publish_catalogue()
+
+    def _publish_catalogue(self) -> None:
+        """Tell the admin console exactly what this image ships."""
+        try:
+            self._store.write(
+                CATALOGUE_DOCUMENT,
+                build_catalogue(self._base_settings, self._store).as_document(),
+            )
+        except Exception:  # noqa: BLE001 - publishing must never block startup
+            logger.warning("Could not publish the capability catalogue", exc_info=True)
+
+    def available_profiles(self) -> dict[str, AgentProfile]:
+        return load_profiles(self._base_settings, self._store)
+
+    def _resolve(self, requested: str | None) -> AgentProfile:
+        return resolve_profile(self.available_profiles(), requested)
 
     async def stream_turn(
         self,
@@ -39,15 +69,20 @@ class CodexRuntime:
         response_id: str,
         cancellation_signal: asyncio.Event,
         model: str | None = None,
+        profile: str | None = None,
     ) -> AsyncIterator[RuntimeEvent]:
         async with self._lock:
-            await self._ensure_started()
-            thread_id = self._thread_map.lookup(previous_response_id)
+            binding = self._thread_map.lookup(previous_response_id)
+            # A resumed conversation keeps the profile it was started with.
+            active = self._resolve(binding.profile if binding else profile)
+            await self._ensure_started(active)
+
+            thread_id = binding.thread_id if binding else None
             if thread_id:
-                await self._resume_thread(thread_id, model)
+                await self._resume_thread(thread_id, model, active)
             else:
-                thread_id = await self._start_thread(model)
-            self._thread_map.bind(response_id, thread_id)
+                thread_id = await self._start_thread(model, active)
+            self._thread_map.bind(response_id, thread_id, active.name)
 
             result = await self._request(
                 "turn/start",
@@ -86,10 +121,30 @@ class CodexRuntime:
                             raise CodexProtocolError(str(error))
                         return
 
-    async def _ensure_started(self) -> None:
-        if self._process and self._process.returncode is None:
+    async def _ensure_started(self, profile: AgentProfile) -> None:
+        # Configuration is re-read at the turn boundary so administrator edits
+        # take effect without redeploying, and the engine is restarted whenever
+        # the rendered Codex configuration would differ.
+        settings = apply_model_overrides(self._base_settings, self._store)
+        fingerprint = "|".join(
+            [
+                settings.model_name,
+                settings.model_endpoint,
+                settings.model_provider,
+                settings.reasoning_effort,
+                profile_fingerprint(profile),
+            ]
+        )
+        running = self._process is not None and self._process.returncode is None
+        if running and fingerprint == self._active_fingerprint:
             return
-        environment = prepare_codex_environment(self._settings)
+        if running:
+            logger.info("Codex configuration changed; restarting the engine")
+            await self._restart()
+
+        self._settings = settings
+        environment = prepare_codex_environment(settings, self._store, profile)
+        self._active_fingerprint = fingerprint
         self._process = await asyncio.create_subprocess_exec(
             "codex",
             "app-server",
@@ -99,7 +154,7 @@ class CodexRuntime:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=environment,
-            cwd=self._settings.workspace,
+            cwd=settings.workspace,
         )
         self._stderr_task = asyncio.create_task(self._drain_stderr())
         await self._request(
@@ -114,16 +169,20 @@ class CodexRuntime:
         )
         await self._send({"method": "initialized", "params": {}})
 
-    async def _start_thread(self, model: str | None) -> str:
+    def _thread_params(self, model: str | None, profile: AgentProfile) -> dict[str, Any]:
         params: dict[str, Any] = {
-            "model": model or self._settings.model_name,
+            "model": model or effective_model(self._settings, profile),
             "cwd": str(self._settings.workspace),
             "approvalPolicy": self._settings.approval_policy,
             "sandbox": self._settings.sandbox,
-            "baseInstructions": load_instructions(self._settings),
+            "baseInstructions": load_instructions(self._settings, profile),
         }
         if self._settings.model_endpoint:
             params["modelProvider"] = self._settings.model_provider
+        return params
+
+    async def _start_thread(self, model: str | None, profile: AgentProfile) -> str:
+        params = self._thread_params(model, profile)
         result = await self._request("thread/start", params)
         thread = result.get("thread") if isinstance(result, dict) else None
         thread_id = thread.get("id") if isinstance(thread, dict) else None
@@ -132,19 +191,13 @@ class CodexRuntime:
         self._loaded_threads.add(thread_id)
         return thread_id
 
-    async def _resume_thread(self, thread_id: str, model: str | None) -> None:
+    async def _resume_thread(
+        self, thread_id: str, model: str | None, profile: AgentProfile
+    ) -> None:
         if thread_id in self._loaded_threads:
             return
-        params: dict[str, Any] = {
-            "threadId": thread_id,
-            "model": model or self._settings.model_name,
-            "cwd": str(self._settings.workspace),
-            "approvalPolicy": self._settings.approval_policy,
-            "sandbox": self._settings.sandbox,
-            "baseInstructions": load_instructions(self._settings),
-        }
-        if self._settings.model_endpoint:
-            params["modelProvider"] = self._settings.model_provider
+        params = self._thread_params(model, profile)
+        params["threadId"] = thread_id
         await self._request("thread/resume", params)
         self._loaded_threads.add(thread_id)
 
@@ -210,5 +263,6 @@ class CodexRuntime:
             self._stderr_task.cancel()
         self._process = None
         self._stderr_task = None
+        self._active_fingerprint = None
         self._loaded_threads.clear()
         self._pending_notifications.clear()
