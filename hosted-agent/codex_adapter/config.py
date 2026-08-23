@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 import math
 import os
+import secrets
 import shutil
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -33,6 +35,7 @@ logger = logging.getLogger(__name__)
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _FALSE_VALUES = {"0", "false", "no", "off"}
 _NETWORK_CAPABLE_SANDBOX = "workspace-write"
+_FINGERPRINT_KEY = secrets.token_bytes(32)
 
 
 @dataclass(frozen=True)
@@ -411,7 +414,11 @@ def runtime_fingerprint(
     reasoning_effort: str = "",
 ) -> str:
     """Fingerprint every input that requires replacing the Codex process."""
-    secret_digest = hashlib.sha256(settings.model_api_key.encode("utf-8")).hexdigest()
+    secret_digest = hmac.new(
+        _FINGERPRINT_KEY,
+        settings.model_api_key.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
     parts = [
         render_codex_config(settings, store, profile, reasoning_effort),
         load_instructions(settings, profile),
