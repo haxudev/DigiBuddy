@@ -47,9 +47,16 @@ function endOfCentralDirectory(bytes: Buffer): number {
 
 function entryNames(bytes: Buffer): { names: string[]; extracted: number } {
   const eocd = endOfCentralDirectory(bytes);
+  const diskCount = bytes.readUInt16LE(eocd + 8);
   const count = bytes.readUInt16LE(eocd + 10);
+  const directorySize = bytes.readUInt32LE(eocd + 12);
   const directory = bytes.readUInt32LE(eocd + 16);
-  if (count === 0xffff || directory === ZIP64_MARKER) {
+  if (
+    diskCount === 0xffff ||
+    count === 0xffff ||
+    directorySize === ZIP64_MARKER ||
+    directory === ZIP64_MARKER
+  ) {
     throw new SkillBundleError("ZIP64 archives are not supported.");
   }
   if (count === 0) throw new SkillBundleError("The bundle is empty.");
