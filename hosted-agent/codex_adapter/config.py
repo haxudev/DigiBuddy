@@ -511,7 +511,13 @@ def install_global_skills(
             load_registry(store),
             target,
             allows=active.allows_skill,
-            reserved=frozenset(candidate.name for candidate in candidates),
+            reserved=frozenset(
+                candidate.name
+                for root in (settings.payload_root / "skills", source)
+                if root.is_dir()
+                for candidate in root.iterdir()
+                if candidate.is_dir() and (candidate / "SKILL.md").is_file()
+            ),
         )
     return installed
 
