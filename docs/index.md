@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: HaeronClaw
-  text: Hosted agent runtime on Azure Functions
-  tagline: A cloud-hosted markdown agent for Microsoft and Azure workflows, with Teams delivery, enterprise integrations, and artifact generation.
+  text: Codex runtime on Microsoft Foundry Hosted Agent
+  tagline: A coding agent with a Responses 2.0 adapter and a containerized Next.js + React + AG-UI client.
   actions:
     - theme: brand
       text: Quickstart
@@ -14,60 +14,40 @@ hero:
       link: https://github.com/haxudev/haeronclaw
 
 features:
-  - title: Cloud-hosted runtime
-    details: Deploy the same agent you author in VS Code to Azure Functions on Azure Container Apps, with HTTP chat, streaming, and built-in web UI.
-  - title: MCP and API ready
-    details: Expose both /runtime/webhooks/mcp and chat endpoints for remote MCP clients, browser access, and service-to-service integration.
-  - title: Enterprise workflows
-    details: Connect email, calendar, SharePoint, OneDrive, Teams, Azure Speech, and storage-backed knowledge in one runtime.
-  - title: Artifact delivery
-    details: Generate decks, spreadsheets, PDFs, and other files, then deliver them through Blob-backed application-owned links.
+  - title: Foundry Hosted Agent
+    details: Deploy a Responses protocol 2.0 container with Foundry-managed identity, lifecycle, scaling, and session isolation.
+  - title: Codex execution engine
+    details: Run repository analysis, shell commands, Git operations, tests, and file edits through Codex app-server.
+  - title: AG-UI web client
+    details: Use an independent Next.js and React client that securely proxies Foundry Responses streams into AG-UI events.
+  - title: Portable containers
+    details: Deploy the Hosted Agent through Foundry and the Web UI to Web App for Containers or any OCI-compatible service.
 ---
 
 ## Product Overview
 
-HaeronClaw is a branded, cloud-hosted markdown agent built for Microsoft and Azure workflows. The overall implementation approach is derived from [Azure-Samples/functions-markdown-agent](https://github.com/Azure-Samples/functions-markdown-agent), then extended with Azure hosting, Teams delivery, enterprise integrations, and artifact handling so the same agent can run beyond local Copilot Chat.
-
-HaeronClaw is positioned as a team-level or department-level agent. It can use storage-backed `index_memory/` and `work_memory/` to build shared knowledge for a team, business unit, or domain workflow instead of relying only on per-user chat context.
+HaeronClaw packages Codex app-server as the Coding Agent Runtime inside Microsoft Foundry Hosted Agent. Foundry owns the service boundary while Codex owns software-engineering execution.
 
 ::: tip Why this project exists
-You author the agent as markdown, skills, MCP config, and tools under `src/`, but run it as a real cloud service with APIs, Teams, and storage-backed session state.
+Deploy the coding runtime with `azure.yaml`, then connect the standalone `webui/` container to its Foundry Responses endpoint.
 :::
 
 ## Core Capabilities
 
-- Deploy HaeronClaw to Azure Functions on Azure Container Apps
-- Choose from GitHub models or Microsoft Foundry models to power the runtime
-- Built-in HTTP APIs for agent chat: `POST /agent/chat`, `POST /agent/chatstream`
-- Built-in MCP server endpoint for remote MCP clients: `/runtime/webhooks/mcp`
-- Built-in browser chat UI for direct access
-- Persistent multi-turn session state in Azure-hosted storage
-- Timer-triggered scheduled runs from `AGENTS.md` frontmatter
-- Custom Python tools loaded from `src/tools/`
-
-## Advanced Features Added in This Project
-
-- Azure Blob artifact delivery for generated files without SAS token handling
-- Email workflows with Microsoft 365 through `m365_cli`
-- Blob-backed rewriting of binary email attachments into clean download links
-- Teams async execution with proactive replies, typing indicators, and heartbeat progress
-- Voice transcription for Teams audio attachments through Azure Speech
-- SharePoint and OneDrive ingestion through Graph OBO flows
-- Document generation for PPTX, DOCX, XLSX, PDF, and more
-- Knowledge-backed responses from `work_memory/`, `index_memory/`, and Microsoft Learn
+- Responses protocol `2.0.0` Hosted Agent
+- Codex app-server JSON-RPC lifecycle and streaming
+- Persistent response-to-Codex-thread mapping
+- Configurable model endpoint, key, and deployment name
+- Next.js + React + AG-UI client
+- Generic container deployment for the Web UI
 
 ## Development Workflow
 
-1. Define and test your agent in VS Code as a standard Copilot project.
-2. Deploy the same project to Azure Functions on Azure Container Apps.
-3. Use it as a cloud-hosted HTTP API, MCP endpoint, chat UI, or Teams bot.
+1. Configure the Codex-compatible model with deployment environment variables.
+2. Deploy the Hosted Agent using `azd up`.
+3. Configure and deploy the independent Web UI container.
 
-## Model Support
-
-| Category | Prefix | Examples |
-| --- | --- | --- |
-| GitHub Models | `github:` | `github:gpt-5.4`, `github:claude-sonnet-4.6` |
-| Foundry Models | `foundry:` | `foundry:gpt-4.1-mini`, `foundry:o4-mini` |
+The earlier Azure Functions/ACA runtime remains under `infra/` as a migration path for Teams, MCP, timer, and enterprise delivery integrations.
 
 ## Next Steps
 

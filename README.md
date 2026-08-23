@@ -2,24 +2,20 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-> Hosted agent runtime on Azure Functions.
+> Codex coding runtime on Microsoft Foundry Hosted Agent.
 
-> **⚠️ Runtime note.** The Azure Functions agent runtime foundation is still evolving, but this repository already layers production-oriented integrations and delivery patterns on top of it.
+HaeronClaw packages Codex app-server as the Coding Agent Runtime / Execution Engine inside Microsoft Foundry Hosted Agent. It exposes the Foundry Responses protocol `2.0.0` and includes an independent Next.js + React + AG-UI Web UI for container deployment.
 
-HaeronClaw is a branded, cloud-hosted markdown agent built for Microsoft and Azure workflows. The overall implementation approach is derived from [Azure-Samples/functions-markdown-agent](https://github.com/Azure-Samples/functions-markdown-agent), then extended with Azure hosting, Teams delivery, enterprise integrations, and artifact handling so the same agent can run beyond local Copilot Chat.
-
-HaeronClaw is positioned as a team-level or department-level agent. It can use storage-backed `index_memory/` and `work_memory/` to build shared knowledge for a team, business unit, or domain workflow instead of relying only on per-user chat context. A natural next step is to add higher-level organizational intelligence layers such as Foundry IQ, Work IQ, and Fabric IQ.
+The former Azure Functions on Azure Container Apps runtime is retained under `infra/` as a legacy migration path for Teams, MCP, timers, and enterprise delivery integrations.
 
 **Core features**
 
-- Deploy HaeronClaw to Azure Functions on Azure Container Apps
-- Choose from GitHub models or Microsoft Foundry models to power the runtime
-- Built-in HTTP APIs for agent chat (`POST /agent/chat`, `POST /agent/chatstream`)
-- Built-in MCP server endpoint for remote MCP clients (`/runtime/webhooks/mcp`)
-- Built-in single-page chat UI for direct browser access
-- Persistent multi-turn session state in Azure-hosted storage
-- Timer-triggered scheduled runs from `AGENTS.md` frontmatter
-- Custom Python tools loaded from `src/tools/`
+- Deploy a protocol `2.0.0` agent through Microsoft Foundry
+- Use Codex app-server for coding-agent loops, shell, Git, and file operations
+- Resume Codex threads through persistent response/session mapping
+- Configure model endpoint, key, and model name at runtime
+- Connect through a standalone Next.js + React + AG-UI application
+- Deploy the Web UI to Web App for Containers or any OCI-compatible host
 
 ## Advanced Features Added in This Project
 
@@ -47,6 +43,10 @@ This repo packages **HaeronClaw**, a Microsoft expert agent that helps developer
 ## Project Structure
 
 ```
+azure.yaml                    # Microsoft Foundry Hosted Agent manifest
+hosted-agent/                 # Responses adapter and Codex execution runtime
+webui/                        # Standalone Next.js + React + AG-UI application
+
 src/                          # Agent definition, skills, tools, and work memory
 ├── AGENTS.md                 # HaeronClaw instructions, behavior, and optional function frontmatter
 ├── .github/skills/           # Markdown skills loaded by the runtime
@@ -59,7 +59,7 @@ src/                          # Agent definition, skills, tools, and work memory
 ├── work_memory/              # Domain knowledge and internal FAQ content
 └── index_memory/             # Indexed content for agent retrieval workflows
 
-infra/assets/                 # Azure Functions + Teams runtime implementation
+infra/assets/                 # Legacy Azure Functions + Teams runtime
 ├── function_app.py           # HTTP/function entrypoints
 ├── teams_bot.py              # Teams bot orchestration and proactive replies
 ├── file_upload.py            # Azure Blob upload and download-link pipeline
@@ -71,7 +71,7 @@ infra/assets/                 # Azure Functions + Teams runtime implementation
 teams-app/                    # Teams app manifests and sideload packages
 ```
 
-The `src` folder remains the authoring surface for the agent itself. The Azure-specific runtime lives under `infra/assets/`, where this project adds Teams integration, Blob-backed artifact delivery, SharePoint ingestion, speech handling, and other production behavior.
+The primary deployment is defined by `azure.yaml` and built from `hosted-agent/Dockerfile`. The `webui/` image is deployed separately and connects to the resulting Foundry Responses endpoint. The Azure Functions implementation under `infra/` is not part of the primary Hosted Agent deployment.
 
 The repository intentionally does not track a full `node_modules/` tree. Instead, any required customizations to bundled third-party code are stored under `infra/assets/vendor/` and applied after `npm install` via `infra/assets/scripts/apply-m365-cli-patches.mjs`.
 
@@ -86,19 +86,27 @@ The repository intentionally does not track a full `node_modules/` tree. Instead
 
 Your agent's instructions from `AGENTS.md`, skills from `.github/skills/`, and MCP servers from `.vscode/mcp.json` are all automatically loaded.
 
-## Deploying to Azure Functions
+## Deploying the Foundry Hosted Agent
 
 ### Deployment
 
-This project deploys to **Azure Functions on Azure Container Apps**.
+Configure the model and deploy with Azure Developer CLI:
 
 Use the unified entry point:
 
-```powershell
-./scripts/deploy.ps1 -Mode aca -ResourceGroup <rg-name> -Location eastus2 -Prefix fmaaca -Model github:gpt-5.4 -ImageTag v3
+```bash
+azd auth login
+azd env set CODEX_MODEL_ENDPOINT "https://your-resource.openai.azure.com/openai/v1"
+azd env set CODEX_MODEL_API_KEY "<model-key>"
+azd env set CODEX_MODEL_NAME "gpt-5.2-codex"
+azd up
 ```
 
-For complete commands, parameter templates, and CI/CD matrix guidance, see `README.deploy.md`.
+Then deploy `webui/Dockerfile` to Web App for Containers or another OCI host and set `FOUNDRY_AGENT_ENDPOINT`. See [Quickstart](docs/quickstart.md) and [Architecture](docs/architecture.md).
+
+## Legacy Azure Functions deployment
+
+The sections below document the retained Azure Functions/ACA runtime. They do not configure the Foundry Hosted Agent.
 
 ### Authentication for GitHub Models
 

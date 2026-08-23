@@ -1,0 +1,7 @@
+CODEX_MODEL_ENDPOINT=https://your-resource.openai.azure.com/openai/v1
+CODEX_MODEL_API_KEY=replace-at-deploy-time
+CODEX_MODEL_NAME=gpt-5.2-codex
+CODEX_APPROVAL_POLICY=never
+CODEX_SANDBOX=workspace-write
+CODEX_WORKSPACE=/workspace
+CODEX_HOME=/home/agent/.codex
