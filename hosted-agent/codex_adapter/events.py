@@ -88,8 +88,10 @@ def translate_notification(message: dict[str, Any]) -> list[RuntimeEvent]:
         return []
 
     if method in _REASONING_DELTA_METHODS:
-        delta = _first_text(params.get("delta"), params.get("text"))
-        if delta:
+        delta = params.get("delta")
+        if not isinstance(delta, str):
+            delta = params.get("text")
+        if isinstance(delta, str) and delta:
             return [RuntimeEvent("assistant.reasoning.delta", {"delta": delta})]
         return []
 
