@@ -413,8 +413,8 @@ class ReleaseRunnerTests(unittest.TestCase):
                     "--image",
                     f"haeronclaw-webui:{self.tag}",
                     "-f",
-                    "webui/Dockerfile",
-                    ".",
+                    "Dockerfile",
+                    "webui",
                 ],
                 stdout="webui build ok\n",
             )
