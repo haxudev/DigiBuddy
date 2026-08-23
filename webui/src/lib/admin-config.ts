@@ -7,16 +7,20 @@
  * Python implementation in `hosted-agent/codex_adapter/config_store.py`.
  */
 
+import { SKILL_NAME, bundlePath } from "./skill-bundle.ts";
+
 export const MODELS_DOCUMENT = "models.json";
 export const MCP_DOCUMENT = "mcp.json";
 export const PROFILES_DOCUMENT = "profiles.json";
 export const CATALOGUE_DOCUMENT = "catalogue.json";
+export const SKILLS_DOCUMENT = "skills.json";
 
 export const DOCUMENTS = [
   MODELS_DOCUMENT,
   MCP_DOCUMENT,
   PROFILES_DOCUMENT,
   CATALOGUE_DOCUMENT,
+  SKILLS_DOCUMENT,
 ] as const;
 
 export type DocumentName = (typeof DOCUMENTS)[number];
@@ -26,6 +30,7 @@ export const WRITABLE_DOCUMENTS: DocumentName[] = [
   MODELS_DOCUMENT,
   MCP_DOCUMENT,
   PROFILES_DOCUMENT,
+  SKILLS_DOCUMENT,
 ];
 
 export const REASONING_EFFORTS = ["minimal", "low", "medium", "high"] as const;
@@ -66,6 +71,21 @@ export type ProfileDocument = {
 };
 
 export type ProfilesDocument = { profiles: ProfileDocument[] };
+
+export type DeployedSkill = {
+  name: string;
+  version: string;
+  description: string;
+  /** `bundles/<name>/<sha256>.zip` — content-addressed, so it never collides. */
+  bundle: string;
+  sha256: string;
+  size: number;
+  enabled: boolean;
+  uploaded_at: string;
+  uploaded_by: string;
+};
+
+export type SkillsDocument = { skills: DeployedSkill[] };
 
 export type Catalogue = {
   skills: string[];
@@ -203,6 +223,46 @@ export function normaliseProfiles(input: unknown): ProfilesDocument {
   return { profiles };
 }
 
+export function normaliseSkills(input: unknown): SkillsDocument {
+  const entries = record(input).skills;
+  if (!Array.isArray(entries)) return { skills: [] };
+
+  const skills: DeployedSkill[] = [];
+  const seen = new Set<string>();
+  for (const item of entries) {
+    const raw = record(item);
+    const name = text(raw.name);
+    const sha256 = text(raw.sha256).toLowerCase();
+    if (!SKILL_NAME.test(name)) {
+      throw new ConfigValidationError(
+        `Skill names may only contain lowercase letters, digits and dashes: ${name}`,
+      );
+    }
+    if (!/^[0-9a-f]{64}$/.test(sha256)) {
+      throw new ConfigValidationError(`Skill ${name} has no content hash.`);
+    }
+    if (seen.has(name)) {
+      throw new ConfigValidationError(`Duplicate skill name: ${name}`);
+    }
+    seen.add(name);
+    skills.push({
+      name,
+      version: text(raw.version) || "1",
+      description: text(raw.description),
+      // Always derived, never taken from the request, so a crafted registry
+      // cannot point the runtime at another blob in the container.
+      bundle: bundlePath(name, sha256),
+      sha256,
+      size: typeof raw.size === "number" && raw.size > 0 ? raw.size : 0,
+      enabled: raw.enabled !== false,
+      uploaded_at: text(raw.uploaded_at),
+      uploaded_by: text(raw.uploaded_by),
+    });
+  }
+  skills.sort((left, right) => left.name.localeCompare(right.name));
+  return { skills };
+}
+
 export function normaliseDocument(
   name: DocumentName,
   input: unknown,
@@ -210,6 +270,7 @@ export function normaliseDocument(
   if (name === MODELS_DOCUMENT) return normaliseModels(input);
   if (name === MCP_DOCUMENT) return normaliseMcp(input);
   if (name === PROFILES_DOCUMENT) return normaliseProfiles(input);
+  if (name === SKILLS_DOCUMENT) return normaliseSkills(input);
   throw new ConfigValidationError(`${name} is published by the runtime.`);
 }
 
@@ -248,6 +309,19 @@ export function normaliseCatalogue(input: unknown): Catalogue {
 export interface ConfigStore {
   read(name: DocumentName): Promise<JsonDocument | null>;
   write(name: DocumentName, document: JsonDocument): Promise<void>;
+  /** Skill bundles share the container with the documents, under `bundles/`. */
+  writeBundle(path: string, payload: Buffer): Promise<void>;
+  deleteBundle(path: string): Promise<void>;
+}
+
+const BUNDLE_PATH = /^bundles\/[a-z0-9]+(?:-[a-z0-9]+)*\/[0-9a-f]{64}\.zip$/;
+
+/** Only content-addressed bundle paths may be written; nothing else. */
+function assertBundlePath(path: string): string {
+  if (!BUNDLE_PATH.test(path)) {
+    throw new ConfigValidationError(`Not a skill bundle path: ${path}`);
+  }
+  return path;
 }
 
 class FileConfigStore implements ConfigStore {
@@ -282,6 +356,22 @@ class FileConfigStore implements ConfigStore {
       mode: 0o600,
     });
     await rename(temporary, target);
+  }
+
+  async writeBundle(path: string, payload: Buffer): Promise<void> {
+    const { mkdir, writeFile, rename } = await import("node:fs/promises");
+    const { dirname, join } = await import("node:path");
+    const target = join(this.directory, assertBundlePath(path));
+    await mkdir(dirname(target), { recursive: true });
+    const temporary = `${target}.${process.pid}.tmp`;
+    await writeFile(temporary, payload, { mode: 0o600 });
+    await rename(temporary, target);
+  }
+
+  async deleteBundle(path: string): Promise<void> {
+    const { rm } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    await rm(join(this.directory, assertBundlePath(path)), { force: true });
   }
 }
 
@@ -322,6 +412,22 @@ class BlobConfigStore implements ConfigStore {
       .upload(body, Buffer.byteLength(body), {
         blobHTTPHeaders: { blobContentType: "application/json" },
       });
+  }
+
+  async writeBundle(path: string, payload: Buffer): Promise<void> {
+    const container = await this.container();
+    await container.createIfNotExists();
+    await container
+      .getBlockBlobClient(assertBundlePath(path))
+      .upload(payload, payload.byteLength, {
+        blobHTTPHeaders: { blobContentType: "application/zip" },
+      });
+  }
+
+  async deleteBundle(path: string): Promise<void> {
+    await (await this.container())
+      .getBlockBlobClient(assertBundlePath(path))
+      .deleteIfExists();
   }
 }
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -38,8 +39,20 @@ MODELS_DOCUMENT = "models.json"
 MCP_DOCUMENT = "mcp.json"
 PROFILES_DOCUMENT = "profiles.json"
 CATALOGUE_DOCUMENT = "catalogue.json"
+SKILLS_DOCUMENT = "skills.json"
 
-DOCUMENTS = (MODELS_DOCUMENT, MCP_DOCUMENT, PROFILES_DOCUMENT, CATALOGUE_DOCUMENT)
+DOCUMENTS = (
+    MODELS_DOCUMENT,
+    MCP_DOCUMENT,
+    PROFILES_DOCUMENT,
+    CATALOGUE_DOCUMENT,
+    SKILLS_DOCUMENT,
+)
+
+#: Administrator-uploaded skill bundles live beside the documents in the same
+#: container, under a reserved prefix and addressed by their content hash.
+BUNDLE_PREFIX = "bundles/"
+_BUNDLE_PATH = re.compile(r"^bundles/[a-z0-9]+(?:-[a-z0-9]+)*/[0-9a-f]{64}\.zip$")
 
 
 class ConfigStore(Protocol):
@@ -49,6 +62,8 @@ class ConfigStore(Protocol):
 
     def write(self, name: str, document: dict[str, Any]) -> None: ...
 
+    def read_bundle(self, path: str) -> bytes | None: ...
+
 
 class NullConfigStore:
     """Used when no overlay is configured; always falls back to the payload."""
@@ -57,6 +72,9 @@ class NullConfigStore:
         return None
 
     def write(self, name: str, document: dict[str, Any]) -> None:
+        return None
+
+    def read_bundle(self, path: str) -> bytes | None:
         return None
 
 
@@ -90,6 +108,13 @@ class FileConfigStore:
         finally:
             if os.path.exists(temporary):
                 os.unlink(temporary)
+
+    def read_bundle(self, path: str) -> bytes | None:
+        bundle = self._root / _safe_bundle_path(path)
+        try:
+            return bundle.read_bytes()
+        except OSError:
+            return None
 
 
 class BlobConfigStore:
@@ -125,6 +150,14 @@ class BlobConfigStore:
             _safe_document_name(name), payload.encode("utf-8"), overwrite=True
         )
 
+    def read_bundle(self, path: str) -> bytes | None:
+        from azure.core.exceptions import AzureError
+
+        try:
+            return self._container.download_blob(_safe_bundle_path(path)).readall()
+        except AzureError:
+            return None
+
 
 class CachingConfigStore:
     """Time-bounded cache so every turn does not hit the network."""
@@ -147,12 +180,24 @@ class CachingConfigStore:
         self._inner.write(name, document)
         self._cache.pop(name, None)
 
+    def read_bundle(self, path: str) -> bytes | None:
+        # Bundles are content-addressed and cached on disk by the installer, so
+        # keeping megabytes of archive in memory would buy nothing.
+        return self._inner.read_bundle(path)
+
 
 def _safe_document_name(name: str) -> str:
     """Reject traversal and nested paths; documents live in a flat namespace."""
     if name not in DOCUMENTS:
         raise ValueError(f"Unknown configuration document: {name}")
     return name
+
+
+def _safe_bundle_path(path: str) -> str:
+    """Only content-addressed bundle paths may be fetched from the store."""
+    if not _BUNDLE_PATH.fullmatch(path):
+        raise ValueError(f"Not a skill bundle path: {path}")
+    return path
 
 
 def build_config_store(
