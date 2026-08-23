@@ -30,7 +30,7 @@ export const WRITABLE_DOCUMENTS: DocumentName[] = [
   MODELS_DOCUMENT,
   MCP_DOCUMENT,
   PROFILES_DOCUMENT,
-  SKILLS_DOCUMENT,
+  // skills.json is written atomically by /api/admin/skills.
 ];
 
 export const REASONING_EFFORTS = ["minimal", "low", "medium", "high"] as const;
