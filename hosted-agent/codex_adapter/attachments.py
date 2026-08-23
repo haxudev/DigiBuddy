@@ -63,6 +63,7 @@ def _part_attachment(part: dict[str, Any], index: int) -> Attachment | None:
 def collect_attachments(items: list[Any]) -> list[Attachment]:
     """Pull decoded attachments out of Responses API input items."""
     attachments: list[Attachment] = []
+    total_bytes = 0
     for item in items:
         if not isinstance(item, dict) or item.get("type") != "message":
             continue
@@ -70,8 +71,9 @@ def collect_attachments(items: list[Any]) -> list[Attachment]:
             if not isinstance(part, dict):
                 continue
             attachment = _part_attachment(part, len(attachments) + 1)
-            if attachment:
+            if attachment and total_bytes + len(attachment.data) <= MAX_ATTACHMENT_BYTES:
                 attachments.append(attachment)
+                total_bytes += len(attachment.data)
     return attachments
 
 
