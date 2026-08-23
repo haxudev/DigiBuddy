@@ -17,6 +17,7 @@ from .config_store import (
 )
 from .profiles import (
     DEFAULT_PROFILE,
+    REASONING_EFFORTS,
     AgentProfile,
     Catalogue,
     parse_profiles,
@@ -238,8 +239,19 @@ def effective_model(settings: RuntimeSettings, profile: AgentProfile | None) -> 
 
 
 def effective_reasoning_effort(
-    settings: RuntimeSettings, profile: AgentProfile | None
+    settings: RuntimeSettings,
+    profile: AgentProfile | None,
+    override: str = "",
 ) -> str:
+    """Resolve the thinking effort for a turn.
+
+    An explicit per-request override wins over the profile and the deployment
+    default so the console can offer a thinking-strength control; anything the
+    model does not understand is ignored rather than passed through.
+    """
+    requested = override.strip().lower()
+    if requested in REASONING_EFFORTS:
+        return requested
     return (profile.reasoning_effort if profile else "") or settings.reasoning_effort
 
 
@@ -247,10 +259,12 @@ def render_codex_config(
     settings: RuntimeSettings,
     store: ConfigStore | None = None,
     profile: AgentProfile | None = None,
+    reasoning_effort: str = "",
 ) -> str:
     lines = [
         f"model = {json.dumps(effective_model(settings, profile))}",
-        f"model_reasoning_effort = {json.dumps(effective_reasoning_effort(settings, profile))}",
+        "model_reasoning_effort = "
+        f"{json.dumps(effective_reasoning_effort(settings, profile, reasoning_effort))}",
     ]
     if settings.model_endpoint:
         lines.extend(
@@ -339,12 +353,16 @@ def prepare_codex_environment(
     settings: RuntimeSettings,
     store: ConfigStore | None = None,
     profile: AgentProfile | None = None,
+    reasoning_effort: str = "",
 ) -> dict[str, str]:
     active = profile or DEFAULT_PROFILE
     settings.workspace.mkdir(parents=True, exist_ok=True)
     settings.codex_home.mkdir(parents=True, exist_ok=True)
     config_path = settings.codex_home / "config.toml"
-    config_path.write_text(render_codex_config(settings, store, active), encoding="utf-8")
+    config_path.write_text(
+        render_codex_config(settings, store, active, reasoning_effort),
+        encoding="utf-8",
+    )
     config_path.chmod(0o600)
 
     skills_root = settings.payload_root / "skills"

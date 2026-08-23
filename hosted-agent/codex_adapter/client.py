@@ -12,6 +12,7 @@ from .config import (
     apply_model_overrides,
     build_catalogue,
     effective_model,
+    effective_reasoning_effort,
     load_instructions,
     load_profiles,
     prepare_codex_environment,
@@ -70,12 +71,13 @@ class CodexRuntime:
         cancellation_signal: asyncio.Event,
         model: str | None = None,
         profile: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> AsyncIterator[RuntimeEvent]:
         async with self._lock:
             binding = self._thread_map.lookup(previous_response_id)
             # A resumed conversation keeps the profile it was started with.
             active = self._resolve(binding.profile if binding else profile)
-            await self._ensure_started(active)
+            await self._ensure_started(active, reasoning_effort or "")
 
             thread_id = binding.thread_id if binding else None
             if thread_id:
@@ -121,7 +123,9 @@ class CodexRuntime:
                             raise CodexProtocolError(str(error))
                         return
 
-    async def _ensure_started(self, profile: AgentProfile) -> None:
+    async def _ensure_started(
+        self, profile: AgentProfile, reasoning_effort: str = ""
+    ) -> None:
         # Configuration is re-read at the turn boundary so administrator edits
         # take effect without redeploying, and the engine is restarted whenever
         # the rendered Codex configuration would differ.
@@ -131,7 +135,7 @@ class CodexRuntime:
                 settings.model_name,
                 settings.model_endpoint,
                 settings.model_provider,
-                settings.reasoning_effort,
+                effective_reasoning_effort(settings, profile, reasoning_effort),
                 profile_fingerprint(profile),
             ]
         )
@@ -143,7 +147,9 @@ class CodexRuntime:
             await self._restart()
 
         self._settings = settings
-        environment = prepare_codex_environment(settings, self._store, profile)
+        environment = prepare_codex_environment(
+            settings, self._store, profile, reasoning_effort
+        )
         self._active_fingerprint = fingerprint
         self._process = await asyncio.create_subprocess_exec(
             "codex",
