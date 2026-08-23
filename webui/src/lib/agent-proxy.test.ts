@@ -6,6 +6,7 @@ import {
   resolveAuthHeaders,
   resolveConnection,
   responseText,
+  responseTextDelta,
   turnInput,
   turnOptions,
 } from "./agent-proxy.ts";
@@ -41,6 +42,39 @@ test("resolves server defaults without exposing them to the client", () => {
   );
   assert.equal(connection.apiKey, "server-key");
   assert.equal(connection.model, "gpt-5.2-codex");
+});
+
+test("an explicit API key is not reinterpreted by the server auth default", async () => {
+  const connection = resolveConnection(
+    { connection: { authMode: "api-key", apiKey: "request-key" } },
+    {
+      NODE_ENV: "production",
+      FOUNDRY_AGENT_ENDPOINT:
+        "https://demo.services.ai.azure.com/api/projects/app/responses",
+      FOUNDRY_AUTH_MODE: "bearer",
+      CODEX_MODEL_NAME: "gpt-5.6-luna",
+    },
+  );
+
+  assert.equal(connection.authMode, "api-key");
+  assert.deepEqual(await resolveAuthHeaders(connection), { "api-key": "request-key" });
+});
+
+test("does not silently target agent version one", () => {
+  assert.throws(
+    () =>
+      resolveConnection(
+        {},
+        {
+          NODE_ENV: "production",
+          FOUNDRY_AGENT_ENDPOINT:
+            "https://demo.services.ai.azure.com/api/projects/app/responses",
+          FOUNDRY_AGENT_NAME: "digibuddy",
+          CODEX_MODEL_NAME: "gpt-5.6-luna",
+        },
+      ),
+    /FOUNDRY_AGENT_VERSION/,
+  );
 });
 
 test("uses managed identity when bearer authentication has no static token", async () => {
@@ -83,6 +117,26 @@ test("does not let a request opt into the server managed identity", async () => 
   );
 });
 
+test("managed identity cannot be delegated to a request-supplied target", async () => {
+  const connection = resolveConnection(
+    {
+      connection: {
+        endpoint:
+          "https://other.services.ai.azure.com/api/projects/app/responses",
+      },
+    },
+    {
+      NODE_ENV: "production",
+      FOUNDRY_AGENT_ENDPOINT:
+        "https://demo.services.ai.azure.com/api/projects/app/responses",
+      FOUNDRY_AUTH_MODE: "bearer",
+      CODEX_MODEL_NAME: "gpt-5.6-luna",
+    },
+  );
+
+  await assert.rejects(resolveAuthHeaders(connection), /explicit access token/);
+});
+
 test("extracts the most recent user message and response output", () => {
   assert.equal(
     latestUserText([
@@ -97,6 +151,12 @@ test("extracts the most recent user message and response output", () => {
       output: [{ content: [{ type: "output_text", text: "done" }] }],
     }),
     "done",
+  );
+  assert.equal(
+    responseTextDelta("do", {
+      output: [{ content: [{ type: "output_text", text: "done" }] }],
+    }),
+    "ne",
   );
 });
 

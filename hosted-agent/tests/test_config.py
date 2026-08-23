@@ -14,6 +14,7 @@ from codex_adapter.config import (
     load_profiles,
     prepare_codex_environment,
     render_codex_config,
+    runtime_fingerprint,
     validate_settings,
 )
 from codex_adapter.config_store import FileConfigStore
@@ -118,6 +119,13 @@ class RuntimeSettingsTests(unittest.TestCase):
 
         self.assertNotIn("sandbox_workspace_write", parsed)
 
+    def test_provider_names_with_dots_are_rendered_as_literal_table_keys(self):
+        parsed = tomllib.loads(
+            render_codex_config(settings(model_provider="azure.openai"))
+        )
+
+        self.assertIn("azure.openai", parsed["model_providers"])
+
 
 class GlobalSkillInstallTests(unittest.TestCase):
     def test_skills_are_published_under_codex_home(self):
@@ -150,6 +158,24 @@ class GlobalSkillInstallTests(unittest.TestCase):
 
             with self.assertRaisesRegex(RuntimeError, "missing"):
                 install_global_skills(current)
+
+    def test_restricted_profile_removes_disallowed_global_skills(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / "pack"
+            for index in range(11):
+                skill = source / f"skill-{index}"
+                skill.mkdir(parents=True)
+                (skill / "SKILL.md").write_text("x", encoding="utf-8")
+            codex_home = Path(root) / "codex"
+            current = settings(skills_source=source, codex_home=codex_home)
+
+            self.assertEqual(install_global_skills(current), 11)
+            restricted = AgentProfile(name="restricted", skills=("skill-0",))
+            self.assertEqual(install_global_skills(current, restricted), 1)
+            self.assertEqual(
+                [entry.name for entry in (codex_home / "skills").iterdir()],
+                ["skill-0"],
+            )
 
 
 class ModelOverrideTests(unittest.TestCase):
@@ -206,6 +232,9 @@ class McpCatalogueTests(unittest.TestCase):
                     "good": {"url": "https://example.com/mcp"},
                     "off": {"url": "https://example.com/mcp", "enabled": False},
                     "plain": {"url": "http://example.com/mcp"},
+                    "placeholder": {
+                        "url": "https://<your-service>.azurewebsites.net/mcp"
+                    },
                 },
             )
 
@@ -252,6 +281,44 @@ class InstructionsTests(unittest.TestCase):
             self.assertIn("Be brief.", rendered)
             self.assertIn("- pptx", rendered)
             self.assertNotIn("- docx", rendered)
+
+
+class RuntimeFingerprintTests(unittest.TestCase):
+    def test_secret_profile_and_mcp_changes_restart_the_runtime(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory,
+                servers={"learn": {"url": "https://example.com/learn"}},
+            )
+            profile = AgentProfile(name="profile", persona="First")
+            original = runtime_fingerprint(configured, None, profile)
+
+            rotated = settings(
+                **{
+                    **configured.__dict__,
+                    "model_api_key": "rotated-key",
+                }
+            )
+            self.assertNotEqual(
+                original, runtime_fingerprint(rotated, None, profile)
+            )
+            self.assertNotEqual(
+                original,
+                runtime_fingerprint(
+                    configured,
+                    None,
+                    AgentProfile(name="profile", persona="Second"),
+                ),
+            )
+
+            store = FileConfigStore(Path(directory) / "config")
+            store.write(
+                "mcp.json",
+                {"servers": {"learn": {"url": "https://example.com/other"}}},
+            )
+            self.assertNotEqual(
+                original, runtime_fingerprint(configured, store, profile)
+            )
 
 
 class ProfileEnvironmentTests(unittest.TestCase):

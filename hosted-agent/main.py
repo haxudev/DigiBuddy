@@ -20,6 +20,7 @@ from codex_adapter import (
     load_settings,
     store_attachments,
 )
+from codex_adapter.events import completion_delta, tool_arguments
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("digibuddy.hosted_agent")
@@ -27,7 +28,10 @@ logger = logging.getLogger("digibuddy.hosted_agent")
 settings = load_settings()
 runtime = CodexRuntime(settings)
 app = ResponsesAgentServerHost(
-    options=ResponsesServerOptions(default_fetch_history_count=20)
+    options=ResponsesServerOptions(
+        default_fetch_history_count=20,
+        sse_keep_alive_interval_seconds=15,
+    )
 )
 
 
@@ -108,7 +112,7 @@ async def handle_response(
     reasoning: Any = None
     reasoning_part: Any = None
     reasoning_text = ""
-    tools: dict[str, Any] = {}
+    tools: dict[str, tuple[Any, str]] = {}
     text: Any = None
     output = ""
 
@@ -171,17 +175,17 @@ async def handle_response(
             call = stream.add_output_item_function_call(
                 str(event.data.get("tool") or "tool"), item_id or "call"
             )
-            tools[item_id] = call
+            tools[item_id] = (call, str(event.data.get("summary") or ""))
             yield call.emit_added()
-            yield call.emit_arguments_delta(
-                json.dumps({"summary": str(event.data.get("summary") or "")})
-            )
 
         elif event.type == "tool.completed":
-            call = tools.pop(str(event.data.get("item_id") or ""), None)
-            if call is None:
+            pending = tools.pop(str(event.data.get("item_id") or ""), None)
+            if pending is None:
                 continue
-            yield call.emit_arguments_done()
+            call, started_summary = pending
+            arguments = tool_arguments(event.data, started_summary)
+            yield call.emit_arguments_delta(arguments)
+            yield call.emit_arguments_done(arguments)
             yield call.emit_done()
 
         elif event.type == "assistant.message.delta":
@@ -195,10 +199,24 @@ async def handle_response(
             output += event.data["delta"]
             yield text.emit_delta(event.data["delta"])
 
+        elif event.type == "assistant.message.completed":
+            delta = completion_delta(output, event.data["text"])
+            if not delta:
+                continue
+            if text is None:
+                message = stream.add_output_item_message()
+                yield message.emit_added()
+                text = message.add_text_content()
+                yield text.emit_added()
+            output += delta
+            yield text.emit_delta(delta)
+
     for item in close_reasoning():
         yield item
-    for call in tools.values():
-        yield call.emit_arguments_done()
+    for call, summary in tools.values():
+        arguments = tool_arguments({}, summary)
+        yield call.emit_arguments_delta(arguments)
+        yield call.emit_arguments_done(arguments)
         yield call.emit_done()
 
     if text is None:

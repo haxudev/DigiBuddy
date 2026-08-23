@@ -46,7 +46,14 @@ class ParseProfilesTests(unittest.TestCase):
 
     def test_malformed_entries_are_skipped_not_fatal(self):
         profiles = parse_profiles(
-            {"profiles": ["nonsense", {"display_name": "no name"}, {"name": "good"}]}
+            {
+                "profiles": [
+                    "nonsense",
+                    {"display_name": "no name"},
+                    {"name": "../../escape"},
+                    {"name": "good"},
+                ]
+            }
         )
 
         self.assertEqual(list(profiles), ["good"])
@@ -91,6 +98,21 @@ class FingerprintTests(unittest.TestCase):
         self.assertNotEqual(
             profile_fingerprint(profiles["a"]), profile_fingerprint(profiles["c"])
         )
+
+    def test_fingerprint_covers_persona_skills_tools_and_empty_restrictions(self):
+        profiles = parse_profiles(
+            {
+                "profiles": [
+                    {"name": "a"},
+                    {"name": "b", "persona": "Be brief."},
+                    {"name": "c", "skills": []},
+                    {"name": "d", "tools": ["fetch_url"]},
+                ]
+            }
+        )
+
+        fingerprints = {profile_fingerprint(profile) for profile in profiles.values()}
+        self.assertEqual(len(fingerprints), 4)
 
 
 if __name__ == "__main__":

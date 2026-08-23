@@ -35,7 +35,7 @@ RUN cd /app/codex \
 
 # Agent payload: persona, tools (Azure Blob, SharePoint, M365), skills and MCP catalogue.
 COPY src /opt/digibuddy
-RUN cd /opt/digibuddy && npm install --omit=dev
+RUN cd /opt/digibuddy && npm ci --omit=dev
 
 COPY hosted-agent /app/hosted-agent
 

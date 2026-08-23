@@ -6,7 +6,8 @@
 		},
 		"cloud-pricing": {
 			"url": "https://<your-cloud-pricing-service>.azurewebsites.net/mcp",
-			"type": "http"
+			"type": "http",
+			"enabled": false
 		},
 		"agent-maturity": {
 			"command": "python",

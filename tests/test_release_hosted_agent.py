@@ -320,10 +320,17 @@ class ReleaseRunnerTests(unittest.TestCase):
         self.commands.add(["git", "rev-parse", "HEAD"], stdout="abc1234deadbeef\n")
         self.commands.add(["scripts/sync-agent-skills.sh", "--check"], stdout="ok\n")
         self.commands.add(
+            ["python", "-m", "unittest", "tests/test_release_hosted_agent.py"],
+            stdout="release tests ok\n",
+        )
+        self.commands.add(
             ["python", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"],
             stdout="hosted ok\n",
         )
         self.commands.add(["python", "hosted-agent/tests/probe_maturity_mcp.py"], stdout="probe ok\n")
+        self.commands.add(["npm", "test"], stdout="web tests ok\n")
+        self.commands.add(["npm", "run", "lint"], stdout="web lint ok\n")
+        self.commands.add(["npm", "run", "build"], stdout="web build ok\n")
         if not fast:
             self.commands.add(
                 ["docker", "build", "-f", "hosted-agent/Dockerfile", "-t", "digibuddy-skills:verify", "."],
@@ -494,6 +501,28 @@ class ReleaseRunnerTests(unittest.TestCase):
             ),
         )
         self.commands.add(
+            ["az", "webapp", "config", "appsettings", "list", "--resource-group", "rg-brand-intel", "--name", "haeronclaw-haxu", "-o", "json"],
+            stdout=json.dumps(
+                [{"name": "FOUNDRY_AGENT_VERSION", "value": "4"}]
+            ),
+        )
+        self.commands.add(
+            [
+                "az",
+                "webapp",
+                "config",
+                "appsettings",
+                "set",
+                "--resource-group",
+                "rg-brand-intel",
+                "--name",
+                "haeronclaw-haxu",
+                "--settings",
+                "FOUNDRY_AGENT_VERSION=7",
+            ],
+            stdout="version updated\n",
+        )
+        self.commands.add(
             [
                 "az",
                 "webapp",
@@ -516,6 +545,15 @@ class ReleaseRunnerTests(unittest.TestCase):
         self.http.add_text("GET", "http://127.0.0.1:18088/readiness", "ok")
         self.http.add_error("GET", self.web_url, ReleaseError("transient network failure"))
         self.http.add_text("GET", self.web_url, "ready")
+        self.http.add_text(
+            "POST",
+            f"https://{self.web_host}/api/agent",
+            (
+                'data: {"type":"RUN_STARTED"}\n\n'
+                'data: {"type":"TEXT_MESSAGE_CONTENT","delta":"ready"}\n\n'
+                'data: {"type":"RUN_FINISHED"}\n\n'
+            ),
+        )
 
         result = self._runner().run()
 
@@ -548,7 +586,12 @@ class ReleaseRunnerTests(unittest.TestCase):
             self.commands.seen(("az", "webapp", "config", "container", "show")),
             "expected rollback image lookup from webapp container config",
         )
-        self.assertFalse(self.commands.seen(("az", "webapp", "config", "appsettings", "list")))
+        self.assertTrue(
+            self.commands.seen(("az", "webapp", "config", "appsettings", "list"))
+        )
+        self.assertTrue(
+            self.commands.seen(("az", "webapp", "config", "appsettings", "set"))
+        )
         self.assertLess(
             next(i for i, call in enumerate(self.http.calls) if call["method"] == "POST" and call["url"] == self.responses_url),
             next(i for i, call in enumerate(self.http.calls) if call["method"] == "GET" and call["url"] == self.web_url),
@@ -610,6 +653,19 @@ class ReleaseRunnerTests(unittest.TestCase):
         self.assertNotIn("webui_image_digest", result)
         self.assertFalse(self.commands.seen(("az", "acr", "build", "--registry", "haxureg", "--image", f"haeronclaw-webui:{self.tag}")))
         self.assertFalse(self.commands.seen(("az", "webapp", "show")))
+
+    def test_webui_agent_smoke_test_surfaces_proxy_failures(self) -> None:
+        self.http.add_text(
+            "POST",
+            f"https://{self.web_host}/api/agent",
+            (
+                'data: {"type":"RUN_STARTED"}\n\n'
+                'data: {"type":"RUN_ERROR","message":"Agent version is not configured"}\n\n'
+            ),
+        )
+
+        with self.assertRaisesRegex(ReleaseError, "Agent version is not configured"):
+            self._runner(fast=True)._verify_webui_agent(self.web_host)
 
     def test_activation_wait_is_bounded(self) -> None:
         self._add_common_local_commands(fast=True)
@@ -682,6 +738,28 @@ class ReleaseRunnerTests(unittest.TestCase):
             ),
         )
         self.commands.add(
+            ["az", "webapp", "config", "appsettings", "list", "--resource-group", "rg-brand-intel", "--name", "haeronclaw-haxu", "-o", "json"],
+            stdout=json.dumps(
+                [{"name": "FOUNDRY_AGENT_VERSION", "value": "4"}]
+            ),
+        )
+        self.commands.add(
+            [
+                "az",
+                "webapp",
+                "config",
+                "appsettings",
+                "set",
+                "--resource-group",
+                "rg-brand-intel",
+                "--name",
+                "haeronclaw-haxu",
+                "--settings",
+                "FOUNDRY_AGENT_VERSION=7",
+            ],
+            stdout="version updated\n",
+        )
+        self.commands.add(
             [
                 "az",
                 "webapp",
@@ -718,6 +796,22 @@ class ReleaseRunnerTests(unittest.TestCase):
             stdout="rolled back\n",
         )
         self.commands.add(
+            [
+                "az",
+                "webapp",
+                "config",
+                "appsettings",
+                "set",
+                "--resource-group",
+                "rg-brand-intel",
+                "--name",
+                "haeronclaw-haxu",
+                "--settings",
+                "FOUNDRY_AGENT_VERSION=4",
+            ],
+            stdout="version rolled back\n",
+        )
+        self.commands.add(
             ["az", "webapp", "restart", "--resource-group", "rg-brand-intel", "--name", "haeronclaw-haxu"],
             stdout="restarted rollback\n",
         )
@@ -737,7 +831,16 @@ class ReleaseRunnerTests(unittest.TestCase):
             container_updates,
             [self.webui_image, "haxureg.azurecr.io/haeronclaw-webui:old"],
         )
-        self.assertFalse(self.commands.seen(("az", "webapp", "config", "appsettings", "list")))
+        version_updates = [
+            call["args"][-1]
+            for call in self.commands.calls
+            if call["args"][:5]
+            == ("az", "webapp", "config", "appsettings", "set")
+        ]
+        self.assertEqual(
+            version_updates,
+            ["FOUNDRY_AGENT_VERSION=7", "FOUNDRY_AGENT_VERSION=4"],
+        )
 
 
 if __name__ == "__main__":

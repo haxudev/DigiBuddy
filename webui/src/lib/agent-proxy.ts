@@ -65,28 +65,39 @@ export function resolveConnection(
       : {};
   const requestedAuthMode = stringValue(raw.authMode);
   const environmentAuthMode = environment.FOUNDRY_AUTH_MODE;
-  const authMode =
-    requestedAuthMode === "bearer" || environmentAuthMode === "bearer"
+  const requestedCredential = stringValue(raw.apiKey);
+  const environmentCredential = stringValue(environment.FOUNDRY_AGENT_API_KEY);
+  const requestedTarget = ["endpoint", "model", "agentName", "agentVersion"].some(
+    (key) => Boolean(stringValue(raw[key])),
+  );
+  const authMode = requestedCredential
+    ? requestedAuthMode === "bearer"
       ? "bearer"
-      : "api-key";
+      : "api-key"
+    : environmentCredential
+      ? environmentAuthMode === "bearer"
+        ? "bearer"
+        : "api-key"
+      : environmentAuthMode === "bearer" || requestedAuthMode === "bearer"
+        ? "bearer"
+        : "api-key";
 
   const connection = {
     endpoint:
       stringValue(raw.endpoint) || stringValue(environment.FOUNDRY_AGENT_ENDPOINT),
-    apiKey:
-      stringValue(raw.apiKey) || stringValue(environment.FOUNDRY_AGENT_API_KEY),
+    apiKey: requestedCredential || environmentCredential,
     authMode,
     model: stringValue(raw.model) || stringValue(environment.CODEX_MODEL_NAME),
     agentName:
       stringValue(raw.agentName) || stringValue(environment.FOUNDRY_AGENT_NAME),
     agentVersion:
       stringValue(raw.agentVersion) ||
-      stringValue(environment.FOUNDRY_AGENT_VERSION) ||
-      "1",
+      stringValue(environment.FOUNDRY_AGENT_VERSION),
     // Selecting an agent profile. Blank means "the runtime default".
     profile: stringValue(raw.profile) || stringValue(environment.DIGIBUDDY_PROFILE),
     useManagedIdentity:
       environmentAuthMode === "bearer" &&
+      !requestedTarget &&
       !stringValue(raw.apiKey) &&
       !stringValue(environment.FOUNDRY_AGENT_API_KEY),
   } satisfies ConnectionSettings;
@@ -98,6 +109,11 @@ export function resolveConnection(
   }
   if (!connection.model) {
     throw new Error("Configure a Codex model name in the UI or CODEX_MODEL_NAME.");
+  }
+  if (connection.agentName && !connection.agentVersion) {
+    throw new Error(
+      "Configure a Hosted Agent version in the UI or FOUNDRY_AGENT_VERSION.",
+    );
   }
 
   assertAllowedEndpoint(connection.endpoint, environment);
@@ -183,6 +199,12 @@ export function responseText(payload: unknown): string {
       return typeof text === "string" ? text : "";
     })
     .join("");
+}
+
+export function responseTextDelta(streamed: string, payload: unknown): string {
+  const completed = responseText(payload);
+  if (completed.startsWith(streamed)) return completed.slice(streamed.length);
+  return streamed ? "" : completed;
 }
 
 export const REASONING_EFFORTS = ["minimal", "low", "medium", "high"] as const;
