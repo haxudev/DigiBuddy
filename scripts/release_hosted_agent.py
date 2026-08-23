@@ -538,6 +538,7 @@ class ReleaseRunner:
         data = None
         headers = {
             "Accept": "application/json",
+            "Foundry-Features": "HostedAgents=V1Preview",
             "Authorization": f"Bearer {token}",
         }
         if payload is not None:

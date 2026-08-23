@@ -536,6 +536,14 @@ class ReleaseRunnerTests(unittest.TestCase):
             if call["method"] == "POST" and call["url"] == self.responses_url
         )
         self.assertEqual(auth_header, "Bearer token-123")
+        self.assertEqual(
+            next(
+                call["headers"]["Foundry-Features"]
+                for call in self.http.calls
+                if call["method"] == "POST" and call["url"] == self.responses_url
+            ),
+            "HostedAgents=V1Preview",
+        )
         self.assertIn("A1.qa", request_body["input"])
         self.assertIn("maturity_get_question", request_body["input"])
         self.assertEqual(request_body["model"], "gpt-5.6-luna")
