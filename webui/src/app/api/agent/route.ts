@@ -80,6 +80,11 @@ export async function POST(request: Request) {
             version: connection.agentVersion,
           };
         }
+        if (connection.profile) {
+          // `agent` names the deployed Foundry agent, so the profile that
+          // agent should assemble travels as request metadata instead.
+          body.metadata = { profile: connection.profile };
+        }
 
         const headers: Record<string, string> = {
           Accept: "text/event-stream",

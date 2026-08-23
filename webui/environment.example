@@ -5,3 +5,18 @@ FOUNDRY_AGENT_NAME=digibuddy-codex
 FOUNDRY_AGENT_VERSION=1
 CODEX_MODEL_NAME=gpt-5.2-codex
 AGENT_ENDPOINT_ALLOWLIST=services.ai.azure.com,openai.azure.com
+
+# Shared runtime configuration store. Set exactly one, and point the hosted
+# agent at the same location so admin changes reach it.
+DIGIBUDDY_CONFIG_URI=https://yourstorage.blob.core.windows.net/digibuddy-config
+# DIGIBUDDY_CONFIG_DIR=/var/lib/digibuddy/config
+
+# Agent profile used when a chat user does not pick one.
+# DIGIBUDDY_PROFILE=digibuddy
+
+# Comma-separated Entra object IDs or sign-in names allowed to use /admin.
+# The console expects Easy Auth in front of it, supplying x-ms-client-principal.
+# An empty list denies everyone.
+ADMIN_PRINCIPAL_IDS=
+# Local development only; ignored when NODE_ENV=production.
+# ADMIN_ALLOW_ANONYMOUS=true

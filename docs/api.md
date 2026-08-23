@@ -52,6 +52,7 @@ curl -N -X POST "https://<foundry-endpoint>/responses" \
 | `stream` | `true` for SSE, `false` for a single JSON response |
 | `store` | `true` so the response can be resumed |
 | `agent` | Target agent `name` and `version` |
+| `metadata.profile` | Agent profile to assemble; omit for the runtime default |
 | `previous_response_id` | Resumes a prior turn in the same Codex thread |
 
 ### Streaming events
@@ -129,5 +130,59 @@ The upstream connection is resolved server-side from environment variables, with
 | `FOUNDRY_AGENT_VERSION` | Agent version, defaults to `1` |
 | `CODEX_MODEL_NAME` | Model name sent as `model` |
 | `AGENT_ENDPOINT_ALLOWLIST` | Extra comma-separated host suffixes accepted as endpoints |
+| `DIGIBUDDY_PROFILE` | Default agent profile when the caller does not pick one |
+
+The connection also accepts a `profile` field. The route sends it as `metadata.profile` rather than in `agent`, because `agent` names the deployed Foundry agent while the profile selects what that agent assembles.
 
 Every endpoint must be HTTPS and must match `services.ai.azure.com`, `openai.azure.com`, or a host listed in `AGENT_ENDPOINT_ALLOWLIST`. Outside production, `localhost` and `127.0.0.1` are also permitted.
+
+## Web UI (`GET /api/profiles`)
+
+Lists the profiles a chat user may pick. Public and unauthenticated: only `name`, `display_name`, and `description` are exposed, because personas and capability assembly are runtime concerns. An unconfigured or unreachable store returns an empty list, meaning "no profile choice".
+
+```json
+{ "profiles": [{ "name": "marketing", "display_name": "Marketing", "description": "…" }] }
+```
+
+## Web UI (`/api/admin/config`)
+
+The admin console API over the shared configuration store. Both methods require an authorised caller.
+
+### Authentication
+
+The route reads the Easy Auth `x-ms-client-principal` header and matches the caller's Entra object ID or sign-in name against `ADMIN_PRINCIPAL_IDS`. An empty allowlist denies everyone. Outside production, `ADMIN_ALLOW_ANONYMOUS=true` admits an anonymous local caller.
+
+| Status | Meaning |
+| --- | --- |
+| `403` | Caller is not an allowlisted administrator |
+| `400` | Unknown document name, or a value that fails validation |
+| `500` | The configuration store is unavailable |
+
+### `GET`
+
+Returns all four documents. `models.json` is redacted: `api_key` is removed and replaced with a boolean `api_key_set`.
+
+### `PUT`
+
+```json
+{ "document": "profiles.json", "value": { "profiles": [{ "name": "marketing" }] } }
+```
+
+| Document | Validation |
+| --- | --- |
+| `models.json` | Endpoint must be HTTPS; a blank `api_key` preserves the stored secret |
+| `mcp.json` | Server names match `[A-Za-z0-9._-]+`; URLs must be HTTPS |
+| `profiles.json` | Names match `[a-z0-9-]+` and must be unique |
+
+`catalogue.json` is published by the runtime and is not writable. Each successful write is logged with the document name and the caller, without values.
+
+### Store configuration
+
+| Variable | Description |
+| --- | --- |
+| `DIGIBUDDY_CONFIG_URI` | Azure Blob container URI, accessed with a managed identity |
+| `DIGIBUDDY_CONFIG_DIR` | Filesystem directory, for local development |
+| `ADMIN_PRINCIPAL_IDS` | Comma-separated Entra object IDs or sign-in names |
+| `ADMIN_ALLOW_ANONYMOUS` | `true` to allow anonymous access outside production |
+
+The hosted agent must be pointed at the same store for admin changes to reach it.

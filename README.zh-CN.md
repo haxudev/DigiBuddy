@@ -14,6 +14,8 @@ DigiBuddy 将 Codex app-server 封装为 Microsoft Foundry Hosted Agent 内部�
 - 使用 Codex app-server 完成 coding-agent 循环、shell、Git 与文件操作
 - 通过持久化的 response/session 映射恢复 Codex thread
 - 在运行时配置模型 endpoint、密钥与模型名称
+- 通过 Web UI 管理控制台统一管理模型接入、远程 MCP 工具与 agent profile
+- 用 profile 装配面向不同业务的 agent，无需重新构建镜像
 - 通过独立的 Next.js + React + AG-UI 应用连接
 - 将 Web UI 部署到 Web App for Containers 或任意兼容 OCI 的宿主
 
@@ -35,9 +37,9 @@ hosted-agent/                 # Responses 适配器与 Codex 执行运行时
 ├── Dockerfile                # 协议 2.0.0 运行时镜像
 ├── main.py                   # Responses 处理器与流式适配器
 ├── AGENTS.md                 # 运行时护栏
-└── codex_adapter/            # Codex stdio JSON-RPC 客户端、配置、session 映射
+└── codex_adapter/            # Codex stdio JSON-RPC 客户端、配置、profile、session 映射
 
-webui/                        # 独立的 Next.js + React + AG-UI 应用
+webui/                        # 独立的 Next.js + React + AG-UI 应用，含 /admin 管理控制台
 
 src/                          # Agent payload，构建时打入镜像 /opt/digibuddy
 ├── AGENTS.md                 # DigiBuddy 人设与能力目录
@@ -85,6 +87,24 @@ python -m create_eml --out /workspace/message.eml --from a@b.com --to c@d.com \
 ```
 
 新增工具时，把带有基于 `argparse` 的 `main()` 以及 `if __name__ == "__main__"` 守卫的模块放入 `src/tools/`，然后在 `src/AGENTS.md` 中记录它。Python 依赖请加入 `src/requirements.txt`。
+
+## 管理控制台与 Agent Profile
+
+模型接入、远程 MCP 目录与 agent profile 属于数据，而不是镜像内容。它们存放在一个共享配置存储中 —— Azure Blob 容器（`DIGIBUDDY_CONFIG_URI`）或本地目录（`DIGIBUDDY_CONFIG_DIR`）—— Web UI 与 hosted agent 都从中读取。
+
+Web UI 提供 `/admin`，一个面向该存储的三页签控制台：
+
+| 页签 | 管理内容 |
+| --- | --- |
+| 模型接入 | 模型名称、endpoint、provider 与 API key |
+| 远程 MCP | HTTPS MCP server 目录 |
+| Agent profile | 人设，以及每个 profile 装配的 skills、tools、MCP server 与模型 |
+
+运行时在每个 turn 边界重新读取该存储，当生效配置发生变化时重启 Codex 引擎，因此管理端的修改无需重新部署即可生效。启动时运行时还会发布 `catalogue.json`，描述镜像实际包含的 skills 与 tools，从而保证控制台不会提供未部署的能力。
+
+聊天用户在设置面板中选择 profile，该选择以 `metadata.profile` 传给 agent；不选则使用运行时默认值。
+
+访问权限由 Easy Auth 主体头之上的 Entra 白名单（`ADMIN_PRINCIPAL_IDS`）守卫，空白名单拒绝所有人。模型 API key 只写不读 —— 永远不会返回给浏览器，留空保存则保留已存的值。详见 [功能](docs/features.md) 与 [API 参考](docs/api.md)。
 
 ## 部署 Foundry Hosted Agent
 

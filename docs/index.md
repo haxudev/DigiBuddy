@@ -22,6 +22,8 @@ features:
     details: Use an independent Next.js and React client that securely proxies Foundry Responses streams into AG-UI events.
   - title: Portable containers
     details: Deploy the Hosted Agent through Foundry and the Web UI to Web App for Containers or any OCI-compatible service.
+  - title: Admin console
+    details: Manage model access, remote MCP servers, and agent profiles from the Web UI, applied at the next turn without a redeploy.
 ---
 
 ## Product Overview
@@ -38,6 +40,8 @@ Deploy the coding runtime with `azure.yaml`, then connect the standalone `webui/
 - Codex app-server JSON-RPC lifecycle and streaming
 - Persistent response-to-Codex-thread mapping
 - Configurable model endpoint, key, and deployment name
+- Admin console for model access, remote MCP servers, and agent profiles
+- Agent profiles that assemble skills and tools per business use case
 - Next.js + React + AG-UI client
 - Generic container deployment for the Web UI
 
@@ -46,6 +50,7 @@ Deploy the coding runtime with `azure.yaml`, then connect the standalone `webui/
 1. Configure the Codex-compatible model with deployment environment variables.
 2. Deploy the Hosted Agent using `azd up`.
 3. Configure and deploy the independent Web UI container.
+4. Point both at the same configuration store and manage the runtime from `/admin`.
 
 ## Next Steps
 

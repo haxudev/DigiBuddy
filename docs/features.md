@@ -37,7 +37,50 @@ Codex exposes only a shell, so every payload tool is a Python module with a CLI 
 
 ## Remote MCP Servers
 
-`src/mcp.json` is the MCP catalogue. At startup the adapter renders each entry into `[mcp_servers.*]` blocks in the Codex `config.toml`, enabling `experimental_use_rmcp_client` when any remote HTTPS server is present. Plaintext and placeholder URLs are skipped rather than shipped into the configuration.
+`src/mcp.json` is the packaged MCP catalogue. At startup the adapter renders each entry into `[mcp_servers.*]` blocks in the Codex `config.toml`, enabling `experimental_use_rmcp_client` when any remote HTTPS server is present. Plaintext and placeholder URLs are skipped rather than shipped into the configuration. An `mcp.json` written by the admin console replaces the packaged catalogue entirely.
+
+## Runtime Configuration Store
+
+Model access, the MCP catalogue, and agent profiles are data, not image contents. They live in a shared store that both the Web UI admin console and the hosted agent read.
+
+| Document | Written by | Contents |
+| --- | --- | --- |
+| `models.json` | Admin console | Model name, endpoint, provider, API key |
+| `mcp.json` | Admin console | Remote MCP server catalogue |
+| `profiles.json` | Admin console | Agent profiles |
+| `catalogue.json` | Runtime, at startup | Skills, tools, and MCP servers the image actually ships |
+
+| Variable | Description |
+| --- | --- |
+| `DIGIBUDDY_CONFIG_URI` | Azure Blob container URI, read with the agent's Entra ID identity |
+| `DIGIBUDDY_CONFIG_DIR` | Filesystem directory, for local development |
+| `DIGIBUDDY_CONFIG_TTL_SECONDS` | Runtime cache lifetime, default `30` |
+
+The runtime re-reads the store at turn boundaries. When the model settings or the selected profile change, it fingerprints the new configuration and restarts the Codex engine, so administrative changes take effect without a redeploy. Publishing `catalogue.json` from the runtime keeps the console from ever offering a capability the image does not contain.
+
+## Agent Profiles
+
+A profile assembles a subset of the payload into a business-specific agent. One image serves every profile.
+
+| Field | Effect |
+| --- | --- |
+| `name`, `display_name`, `description` | Identity, shown in the chat profile picker |
+| `persona` | Appended to the base instructions |
+| `skills`, `tools` | Restrict what the profile sees; absent means everything |
+| `mcp_servers` | Restrict the rendered `[mcp_servers.*]` blocks |
+| `model` | Override the model for this profile |
+
+For a restricted profile the runtime builds a filtered view of the payload and points `DIGIBUDDY_SKILLS_ROOT` and `DIGIBUDDY_TOOLS_ROOT` at it; unrestricted profiles point straight at the payload. Filtering controls what the agent is offered, not what the sandbox can reach — Codex still has a shell, so it is a curation mechanism rather than a security boundary.
+
+Chat clients select a profile with `metadata.profile` on the Responses request. Selecting nothing uses the runtime default.
+
+## Admin Console
+
+The Web UI serves `/admin`, a three-tab console over the configuration store covering model access, remote MCP servers, and agent profiles.
+
+Access requires Easy Auth in front of the container; `requireAdmin` reads the `x-ms-client-principal` header and checks the caller against `ADMIN_PRINCIPAL_IDS`. An empty allowlist denies everyone rather than admitting everyone. Anonymous local access needs an explicit `ADMIN_ALLOW_ANONYMOUS=true` opt-in that is ignored when `NODE_ENV=production`.
+
+The model API key is write-only: reads return `api_key_set` instead of the value, and saving with the field blank preserves the stored secret. Every write is audited to the log with the document name and the caller, without values. `catalogue.json` is read-only from the console.
 
 ## Artifact Delivery
 

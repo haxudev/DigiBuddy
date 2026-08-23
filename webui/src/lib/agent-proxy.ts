@@ -7,6 +7,7 @@ export type ConnectionSettings = {
   model: string;
   agentName: string;
   agentVersion: string;
+  profile: string;
 };
 
 type Environment = Record<string, string | undefined>;
@@ -47,6 +48,8 @@ export function resolveConnection(
       stringValue(raw.agentVersion) ||
       stringValue(environment.FOUNDRY_AGENT_VERSION) ||
       "1",
+    // Selecting an agent profile. Blank means "the runtime default".
+    profile: stringValue(raw.profile) || stringValue(environment.DIGIBUDDY_PROFILE),
   } satisfies ConnectionSettings;
 
   if (!connection.endpoint) {

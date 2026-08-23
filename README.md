@@ -14,6 +14,8 @@ On top of the runtime, this repository ships an agent payload that turns Codex i
 - Use Codex app-server for coding-agent loops, shell, Git, and file operations
 - Resume Codex threads through persistent response/session mapping
 - Configure model endpoint, key, and model name at runtime
+- Administer models, remote MCP servers, and agent profiles from a Web UI console
+- Assemble business-specific agents from profiles without rebuilding the image
 - Connect through a standalone Next.js + React + AG-UI application
 - Deploy the Web UI to Web App for Containers or any OCI-compatible host
 
@@ -35,9 +37,9 @@ hosted-agent/                 # Responses adapter and Codex execution runtime
 ├── Dockerfile                # Protocol 2.0.0 runtime image
 ├── main.py                   # Responses handler and stream adapter
 ├── AGENTS.md                 # Runtime guardrails
-└── codex_adapter/            # Codex stdio JSON-RPC client, config, session map
+└── codex_adapter/            # Codex stdio JSON-RPC client, config, profiles, session map
 
-webui/                        # Standalone Next.js + React + AG-UI application
+webui/                        # Standalone Next.js + React + AG-UI application, incl. /admin console
 
 src/                          # Agent payload, baked into the image at /opt/digibuddy
 ├── AGENTS.md                 # DigiBuddy persona and capability catalogue
@@ -85,6 +87,24 @@ python -m create_eml --out /workspace/message.eml --from a@b.com --to c@d.com \
 ```
 
 To add a tool, drop a module into `src/tools/` with an `argparse`-based `main()` and a `if __name__ == "__main__"` guard, then document it in `src/AGENTS.md`. Add any Python dependencies to `src/requirements.txt`.
+
+## Admin Console and Agent Profiles
+
+Model access, the remote MCP catalogue, and agent profiles are data rather than image contents. They live in a shared configuration store — an Azure Blob container (`DIGIBUDDY_CONFIG_URI`) or a directory (`DIGIBUDDY_CONFIG_DIR`) — that both the Web UI and the hosted agent read.
+
+The Web UI serves `/admin`, a three-tab console over that store:
+
+| Tab | Manages |
+| --- | --- |
+| Model access | Model name, endpoint, provider, and API key |
+| Remote MCP | The HTTPS MCP server catalogue |
+| Agent profiles | Persona plus the skills, tools, MCP servers, and model each profile assembles |
+
+The runtime re-reads the store at each turn boundary and restarts the Codex engine when the effective configuration changes, so administrative edits take effect without a redeploy. At startup it also publishes `catalogue.json`, describing the skills and tools the image actually ships, so the console can never offer a capability that is not deployed.
+
+Chat users pick a profile in the settings panel; it travels to the agent as `metadata.profile`. Selecting nothing uses the runtime default.
+
+Access is guarded by an Entra allowlist over the Easy Auth principal header (`ADMIN_PRINCIPAL_IDS`); an empty list denies everyone. The model API key is write-only — it is never returned to the browser, and leaving the field blank preserves the stored value. See [Features](docs/features.md) and the [API Reference](docs/api.md).
 
 ## Deploying the Foundry Hosted Agent
 
