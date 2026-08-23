@@ -403,14 +403,13 @@ class ReleaseRunner:
         host = _string_value(details.get("defaultHostName"))
         if not host:
             raise ReleaseError("Azure Web App response did not contain defaultHostName.")
-        previous_image = _extract_linux_fx_image(details)
-        self._command_json(
+        container_config = self._command_json(
             [
                 "az",
                 "webapp",
                 "config",
-                "appsettings",
-                "list",
+                "container",
+                "show",
                 "--resource-group",
                 self.config.webapp_resource_group,
                 "--name",
@@ -419,6 +418,7 @@ class ReleaseRunner:
                 "json",
             ]
         )
+        previous_image = _extract_webapp_container_image(container_config)
         self._set_webui_image(new_image)
         self._restart_webapp()
         try:
@@ -478,15 +478,28 @@ class ReleaseRunner:
     def _wait_for_http_ready(self, url: str, *, timeout_seconds: int, failure_message: str) -> None:
         remaining = timeout_seconds
         poll_seconds = max(1, min(self.options.activation_poll_seconds, timeout_seconds or 1))
+        last_error: ReleaseError | None = None
         while True:
-            response = self.http_client("GET", url, headers={"Accept": "application/json, text/plain, */*"}, timeout=timeout_seconds)
-            status = int(getattr(response, "status", 0) or 0)
-            if 200 <= status < 300:
-                return
+            try:
+                response = self.http_client(
+                    "GET",
+                    url,
+                    headers={"Accept": "application/json, text/plain, */*"},
+                    timeout=timeout_seconds,
+                )
+            except ReleaseError as exc:
+                last_error = exc
+            else:
+                status = int(getattr(response, "status", 0) or 0)
+                if 200 <= status < 300:
+                    return
+                last_error = None
             if remaining <= poll_seconds:
                 break
             self.sleep(float(poll_seconds))
             remaining -= poll_seconds
+        if last_error is not None:
+            raise ReleaseError(f"{failure_message} Last error: {last_error}") from last_error
         raise ReleaseError(failure_message)
 
     def _delete_failed_version(self, token: str, version_id: str) -> str:
@@ -855,6 +868,10 @@ def _environment_value(version: Mapping[str, Any], name: str) -> str:
     definition = _definition(version)
     for key in ("environment_variables", "environmentVariables"):
         entries = definition.get(key)
+        if isinstance(entries, Mapping):
+            value = entries.get(name)
+            if isinstance(value, str):
+                return _string_value(value)
         if isinstance(entries, Sequence) and not isinstance(entries, (str, bytes, bytearray)):
             for entry in entries:
                 if not isinstance(entry, Mapping):
@@ -867,9 +884,11 @@ def _environment_value(version: Mapping[str, Any], name: str) -> str:
     return ""
 
 
-def _extract_linux_fx_image(payload: Mapping[str, Any]) -> str:
-    site_config = _as_mapping(payload.get("siteConfig")) or {}
-    linux_fx = _string_value(site_config.get("linuxFxVersion"))
+def _extract_webapp_container_image(payload: Mapping[str, Any]) -> str:
+    linux_fx = _string_value(payload.get("DOCKER_CUSTOM_IMAGE_NAME"))
+    if not linux_fx:
+        site_config = _as_mapping(payload.get("siteConfig")) or {}
+        linux_fx = _string_value(site_config.get("linuxFxVersion"))
     prefix = "DOCKER|"
     if linux_fx.startswith(prefix):
         return linux_fx[len(prefix) :]

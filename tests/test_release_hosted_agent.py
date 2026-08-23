@@ -79,7 +79,7 @@ class FakeCommandRunner:
 
 class FakeHttpClient:
     def __init__(self) -> None:
-        self._responses: dict[tuple[str, str], list[SimpleNamespace]] = {}
+        self._responses: dict[tuple[str, str], list[object]] = {}
         self.calls: list[dict[str, object]] = []
 
     def add_json(self, method: str, url: str, payload: object, *, status: int = 200) -> None:
@@ -91,6 +91,9 @@ class FakeHttpClient:
         self._responses.setdefault((method, url), []).append(
             SimpleNamespace(status=status, body=text.encode("utf-8"), headers={})
         )
+
+    def add_error(self, method: str, url: str, error: Exception) -> None:
+        self._responses.setdefault((method, url), []).append(error)
 
     def __call__(
         self,
@@ -113,7 +116,10 @@ class FakeHttpClient:
         queue = self._responses.get((method, url))
         if not queue:
             raise AssertionError(f"unexpected HTTP request: {(method, url)!r}")
-        return queue.pop(0)
+        response = queue.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
     def count(self, method: str, url: str) -> int:
         return sum(1 for call in self.calls if call["method"] == method and call["url"] == url)
@@ -292,10 +298,10 @@ class ReleaseRunnerTests(unittest.TestCase):
                 "cpu": "2",
                 "memory": "4Gi",
                 "protocol_versions": [{"protocol": "responses", "version": "2.0.0"}],
-                "environment_variables": [
-                    {"name": "CODEX_MODEL_NAME", "value": "gpt-5.2-codex"},
-                    {"name": "CODEX_MODEL_API_KEY", "value": "super-secret"},
-                ],
+                "environment_variables": {
+                    "CODEX_MODEL_NAME": "gpt-5.6-luna",
+                    "CODEX_MODEL_API_KEY": "super-secret",
+                },
             },
         }
 
@@ -464,16 +470,11 @@ class ReleaseRunnerTests(unittest.TestCase):
         self._add_common_http()
         self.commands.add(
             ["az", "webapp", "show", "--resource-group", "rg-brand-intel", "--name", "haeronclaw-haxu", "-o", "json"],
-            stdout=json.dumps(
-                {
-                    "defaultHostName": self.web_host,
-                    "siteConfig": {"linuxFxVersion": "DOCKER|haxureg.azurecr.io/haeronclaw-webui:old"},
-                }
-            ),
+            stdout=json.dumps({"defaultHostName": self.web_host}),
         )
         self.commands.add(
-            ["az", "webapp", "config", "appsettings", "list", "--resource-group", "rg-brand-intel", "--name", "haeronclaw-haxu", "-o", "json"],
-            stdout=json.dumps([{"name": "SECRET", "value": "hidden"}]),
+            ["az", "webapp", "config", "container", "show", "--resource-group", "rg-brand-intel", "--name", "haeronclaw-haxu", "-o", "json"],
+            stdout=json.dumps({"DOCKER_CUSTOM_IMAGE_NAME": "DOCKER|haxureg.azurecr.io/haeronclaw-webui:old"}),
         )
         self.commands.add(
             [
@@ -496,6 +497,7 @@ class ReleaseRunnerTests(unittest.TestCase):
             stdout="restarted\n",
         )
         self.http.add_text("GET", "http://127.0.0.1:18088/readiness", "ok")
+        self.http.add_error("GET", self.web_url, ReleaseError("transient network failure"))
         self.http.add_text("GET", self.web_url, "ready")
 
         result = self._runner().run()
@@ -515,16 +517,28 @@ class ReleaseRunnerTests(unittest.TestCase):
             self.commands.seen(("az", "webapp", "config", "container")),
             "expected a Web App image update command",
         )
+        self.assertTrue(
+            self.commands.seen(("az", "webapp", "config", "container", "show")),
+            "expected rollback image lookup from webapp container config",
+        )
+        self.assertFalse(self.commands.seen(("az", "webapp", "config", "appsettings", "list")))
         self.assertLess(
             next(i for i, call in enumerate(self.http.calls) if call["method"] == "POST" and call["url"] == self.responses_url),
             next(i for i, call in enumerate(self.http.calls) if call["method"] == "GET" and call["url"] == self.web_url),
         )
-        self.assertEqual(self.sleep_calls, [5])
+        self.assertEqual(self.sleep_calls, [5, 5])
         request_body = json.loads(
             next(call for call in self.http.calls if call["method"] == "POST" and call["url"] == self.responses_url)["data"].decode("utf-8")
         )
+        auth_header = next(
+            call["headers"]["Authorization"]
+            for call in self.http.calls
+            if call["method"] == "POST" and call["url"] == self.responses_url
+        )
+        self.assertEqual(auth_header, "Bearer token-123")
         self.assertIn("A1.qa", request_body["input"])
         self.assertIn("maturity_get_question", request_body["input"])
+        self.assertEqual(request_body["model"], "gpt-5.6-luna")
 
     def test_fast_mode_skips_local_container_validation(self) -> None:
         self._add_common_local_commands(fast=True)
@@ -619,16 +633,11 @@ class ReleaseRunnerTests(unittest.TestCase):
         self._add_common_http()
         self.commands.add(
             ["az", "webapp", "show", "--resource-group", "rg-brand-intel", "--name", "haeronclaw-haxu", "-o", "json"],
-            stdout=json.dumps(
-                {
-                    "defaultHostName": self.web_host,
-                    "siteConfig": {"linuxFxVersion": "DOCKER|haxureg.azurecr.io/haeronclaw-webui:old"},
-                }
-            ),
+            stdout=json.dumps({"defaultHostName": self.web_host}),
         )
         self.commands.add(
-            ["az", "webapp", "config", "appsettings", "list", "--resource-group", "rg-brand-intel", "--name", "haeronclaw-haxu", "-o", "json"],
-            stdout=json.dumps([{"name": "SECRET", "value": "hidden"}]),
+            ["az", "webapp", "config", "container", "show", "--resource-group", "rg-brand-intel", "--name", "haeronclaw-haxu", "-o", "json"],
+            stdout=json.dumps({"DOCKER_CUSTOM_IMAGE_NAME": "DOCKER|haxureg.azurecr.io/haeronclaw-webui:old"}),
         )
         self.commands.add(
             [
@@ -680,12 +689,13 @@ class ReleaseRunnerTests(unittest.TestCase):
         container_updates = [
             call["args"][-1]
             for call in self.commands.calls
-            if call["args"][:4] == ("az", "webapp", "config", "container")
+            if call["args"][:5] == ("az", "webapp", "config", "container", "set")
         ]
         self.assertEqual(
             container_updates,
             [self.webui_image, "haxureg.azurecr.io/haeronclaw-webui:old"],
         )
+        self.assertFalse(self.commands.seen(("az", "webapp", "config", "appsettings", "list")))
 
 
 if __name__ == "__main__":
