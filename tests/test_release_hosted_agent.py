@@ -11,6 +11,7 @@ from scripts.release_hosted_agent import (
     ReleaseConfig,
     ReleaseError,
     ReleaseRunner,
+    build_parser,
     extract_output_text,
     make_image_tag,
     release_receipt,
@@ -133,6 +134,15 @@ class MakeImageTagTests(unittest.TestCase):
             make_image_tag("abc1234deadbeef", moment),
             "abc1234-20260823T122333Z",
         )
+
+
+class BuildParserTests(unittest.TestCase):
+    def test_default_resource_arguments_are_concrete_values(self) -> None:
+        args = build_parser().parse_args([])
+
+        self.assertEqual(args.acr_name, "haxureg")
+        self.assertEqual(args.agent_name, "haeronclaw-codex")
+        self.assertEqual(args.release_root, ".azure/releases")
 
 
 class SelectSourceVersionTests(unittest.TestCase):
