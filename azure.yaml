@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+requiredVersions:
+  extensions:
+    azure.ai.agents: ">=1.0.0-beta.4"
+name: haeronclaw-codex
+services:
+  ai-project:
+    host: azure.ai.project
+  haeronclaw-codex:
+    host: azure.ai.agent
+    uses:
+      - ai-project
+    project: .
+    language: python
+    docker:
+      path: hosted-agent/Dockerfile
+      remoteBuild: true
+    kind: hosted
+    name: haeronclaw-codex
+    displayName: HaeronClaw Codex
+    description: Codex coding runtime hosted in a Microsoft Foundry session sandbox.
+    protocols:
+      - protocol: responses
+        version: 2.0.0
+    environmentVariables:
+      - name: CODEX_MODEL_ENDPOINT
+        value: ${CODEX_MODEL_ENDPOINT}
+      - name: CODEX_MODEL_API_KEY
+        value: ${CODEX_MODEL_API_KEY}
+      - name: CODEX_MODEL_NAME
+        value: ${CODEX_MODEL_NAME=gpt-5.2-codex}
+      - name: CODEX_APPROVAL_POLICY
+        value: ${CODEX_APPROVAL_POLICY=never}
+      - name: CODEX_SANDBOX
+        value: ${CODEX_SANDBOX=workspace-write}
+    container:
+      resources:
+        cpu: "2"
+        memory: 4Gi
+infra:
+  provider: microsoft.foundry
