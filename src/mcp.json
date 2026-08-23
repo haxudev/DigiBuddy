@@ -12,6 +12,7 @@
 			"command": "python",
 			"args": ["-m", "agent_maturity.mcp"],
 			"env": {
+				"AGENT_MATURITY_REFERENCES": "/app/hosted-agent/skills/agent-maturity-assess/references",
 				"PYTHONPATH": "/app/hosted-agent/vendor/agent-maturity"
 			}
 		}

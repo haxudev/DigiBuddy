@@ -3,7 +3,7 @@
 requiredVersions:
   extensions:
     azure.ai.agents: ">=1.0.0-beta.4"
-name: digibuddy-codex
+name: ${FOUNDRY_AGENT_NAME=digibuddy-codex}
 services:
   ai-project:
     host: azure.ai.project

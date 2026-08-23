@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import subprocess
@@ -106,6 +107,15 @@ class SkillBundleTests(unittest.TestCase):
         )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_agent_maturity_mcp_can_locate_its_bundled_references(self):
+        config = json.loads((ROOT / "src" / "mcp.json").read_text(encoding="utf-8"))
+        environment = config["servers"]["agent-maturity"]["env"]
+
+        self.assertEqual(
+            environment["AGENT_MATURITY_REFERENCES"],
+            "/app/hosted-agent/skills/agent-maturity-assess/references",
+        )
 
 
 if __name__ == "__main__":
