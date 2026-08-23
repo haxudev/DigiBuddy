@@ -1,0 +1,144 @@
+import type { Message } from "@ag-ui/core";
+
+export type ConnectionSettings = {
+  endpoint: string;
+  apiKey: string;
+  authMode: "api-key" | "bearer";
+  model: string;
+  agentName: string;
+  agentVersion: string;
+};
+
+type Environment = Record<string, string | undefined>;
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function resolveConnection(
+  forwardedProps: unknown,
+  environment: Environment = process.env,
+): ConnectionSettings {
+  const props =
+    forwardedProps && typeof forwardedProps === "object"
+      ? (forwardedProps as Record<string, unknown>)
+      : {};
+  const raw =
+    props.connection && typeof props.connection === "object"
+      ? (props.connection as Record<string, unknown>)
+      : {};
+  const requestedAuthMode = stringValue(raw.authMode);
+  const environmentAuthMode = environment.FOUNDRY_AUTH_MODE;
+  const authMode =
+    requestedAuthMode === "bearer" || environmentAuthMode === "bearer"
+      ? "bearer"
+      : "api-key";
+
+  const connection = {
+    endpoint:
+      stringValue(raw.endpoint) || stringValue(environment.FOUNDRY_AGENT_ENDPOINT),
+    apiKey:
+      stringValue(raw.apiKey) || stringValue(environment.FOUNDRY_AGENT_API_KEY),
+    authMode,
+    model: stringValue(raw.model) || stringValue(environment.CODEX_MODEL_NAME),
+    agentName:
+      stringValue(raw.agentName) || stringValue(environment.FOUNDRY_AGENT_NAME),
+    agentVersion:
+      stringValue(raw.agentVersion) ||
+      stringValue(environment.FOUNDRY_AGENT_VERSION) ||
+      "1",
+  } satisfies ConnectionSettings;
+
+  if (!connection.endpoint) {
+    throw new Error(
+      "Configure a Hosted Agent Responses endpoint in the UI or FOUNDRY_AGENT_ENDPOINT.",
+    );
+  }
+  if (!connection.model) {
+    throw new Error("Configure a Codex model name in the UI or CODEX_MODEL_NAME.");
+  }
+
+  assertAllowedEndpoint(connection.endpoint, environment);
+  return connection;
+}
+
+export function assertAllowedEndpoint(
+  value: string,
+  environment: Environment = process.env,
+): URL {
+  let endpoint: URL;
+  try {
+    endpoint = new URL(value);
+  } catch {
+    throw new Error("Hosted Agent endpoint is not a valid URL.");
+  }
+
+  const local =
+    endpoint.hostname === "localhost" || endpoint.hostname === "127.0.0.1";
+  if (endpoint.protocol !== "https:" && !(local && environment.NODE_ENV !== "production")) {
+    throw new Error("Hosted Agent endpoint must use HTTPS.");
+  }
+
+  const configuredHosts = stringValue(environment.AGENT_ENDPOINT_ALLOWLIST)
+    .split(",")
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean);
+  const allowedHosts = [
+    "services.ai.azure.com",
+    "openai.azure.com",
+    ...configuredHosts,
+  ];
+  const hostname = endpoint.hostname.toLowerCase();
+  const allowed =
+    (local && environment.NODE_ENV !== "production") ||
+    allowedHosts.some(
+      (host) => hostname === host || hostname.endsWith(`.${host}`),
+    );
+  if (!allowed) {
+    throw new Error(
+      "Hosted Agent endpoint host is not allowed. Add it to AGENT_ENDPOINT_ALLOWLIST.",
+    );
+  }
+  return endpoint;
+}
+
+export function latestUserText(messages: Message[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role !== "user") continue;
+    if (typeof message.content === "string" && message.content.trim()) {
+      return message.content.trim();
+    }
+    if (Array.isArray(message.content)) {
+      const text = message.content
+        .map((item) =>
+          typeof item === "object" && item && "text" in item
+            ? String(item.text)
+            : "",
+        )
+        .join("")
+        .trim();
+      if (text) return text;
+    }
+  }
+  throw new Error("A non-empty user message is required.");
+}
+
+export function responseText(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
+  const response = payload as Record<string, unknown>;
+  if (typeof response.output_text === "string") return response.output_text;
+  if (!Array.isArray(response.output)) return "";
+  return response.output
+    .flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const content = (item as Record<string, unknown>).content;
+      return Array.isArray(content) ? content : [];
+    })
+    .map((content) => {
+      if (!content || typeof content !== "object") return "";
+      const text = (content as Record<string, unknown>).text;
+      return typeof text === "string" ? text : "";
+    })
+    .join("");
+}
