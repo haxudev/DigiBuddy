@@ -3,11 +3,11 @@
 requiredVersions:
   extensions:
     azure.ai.agents: ">=1.0.0-beta.4"
-name: haeronclaw-codex
+name: digibuddy-codex
 services:
   ai-project:
     host: azure.ai.project
-  haeronclaw-codex:
+  digibuddy-codex:
     host: azure.ai.agent
     uses:
       - ai-project
@@ -17,8 +17,8 @@ services:
       path: hosted-agent/Dockerfile
       remoteBuild: true
     kind: hosted
-    name: haeronclaw-codex
-    displayName: HaeronClaw Codex
+    name: digibuddy-codex
+    displayName: DigiBuddy Codex
     description: Codex coding runtime hosted in a Microsoft Foundry session sandbox.
     protocols:
       - protocol: responses
@@ -34,6 +34,8 @@ services:
         value: ${CODEX_APPROVAL_POLICY=never}
       - name: CODEX_SANDBOX
         value: ${CODEX_SANDBOX=workspace-write}
+      - name: DIGIBUDDY_CONFIG_URI
+        value: ${DIGIBUDDY_CONFIG_URI=}
     container:
       resources:
         cpu: "2"

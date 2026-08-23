@@ -1,0 +1,58 @@
+{
+  "profiles": [
+    {
+      "name": "digibuddy",
+      "display_name": "DigiBuddy",
+      "description": "Full Microsoft domain expert with every packaged capability.",
+      "persona": ""
+    },
+    {
+      "name": "solution-architect",
+      "display_name": "Solution Architect",
+      "description": "Azure pricing, cost estimation and architecture documents.",
+      "persona": "## Profile\n\nYou are working as a Microsoft solution architect. Lead with architecture trade-offs and total cost of ownership. Always show the pricing SKU, region and quantity behind an estimate, and cite Microsoft Learn for platform limits.",
+      "skills": [
+        "azure-pricing",
+        "cto-advisor",
+        "docx",
+        "pptx",
+        "pdf",
+        "xlsx",
+        "doc-coauthoring"
+      ],
+      "tools": ["cost_estimator", "fetch_url", "azure_blob", "sharepoint"],
+      "mcp_servers": ["microsoft-learn", "cloud-pricing"]
+    },
+    {
+      "name": "marketing",
+      "display_name": "Marketing Partner",
+      "description": "Campaign content, brand-consistent collateral and outbound email.",
+      "persona": "## Profile\n\nYou are working as a marketing partner. Respect the brand guidelines before producing any collateral, and prefer measurable, campaign-ready deliverables over generic copy.",
+      "skills": [
+        "brand-guidelines",
+        "canvas-design",
+        "competitive-ads-extractor",
+        "content-creator",
+        "content-research-writer",
+        "internal-comms",
+        "marketing-demand-acquisition",
+        "marketing-email",
+        "marketing-strategy-pmm",
+        "seo-optimizer",
+        "pptx",
+        "docx"
+      ],
+      "tools": ["fetch_url", "azure_blob", "create_eml", "m365_cli"],
+      "mcp_servers": ["microsoft-learn"]
+    },
+    {
+      "name": "support-desk",
+      "display_name": "Support Desk",
+      "description": "Answers from the internal knowledge base, with M365 follow-up.",
+      "persona": "## Profile\n\nYou are working as an internal support desk agent. Answer from the internal knowledge base first and always cite the source. If the knowledge base does not cover the question, say so explicitly instead of guessing.",
+      "skills": ["faq-knowledge-base-agent", "m365-send-mail", "docx", "pdf"],
+      "tools": ["m365_cli", "sharepoint", "create_eml", "azure_blob"],
+      "mcp_servers": ["microsoft-learn"]
+    }
+  ]
+}

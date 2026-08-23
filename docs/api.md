@@ -2,178 +2,187 @@
 
 ## Overview
 
-Once deployed, HaeronClaw exposes two HTTP chat endpoints, an MCP server endpoint, and a built-in browser Chat UI. All chat endpoints accept JSON requests and GitHub OAuth tokens for authentication.
+DigiBuddy exposes two surfaces:
 
-## Getting the Base URL
+- The **Hosted Agent** speaks the Microsoft Foundry **Responses protocol `2.0.0`**. This is the upstream API, callable directly by any Responses-compatible client.
+- The **Web UI** exposes a single **AG-UI** SSE endpoint at `POST /api/agent`, which proxies to the Hosted Agent server-side so credentials never reach the browser.
 
-After deployment, get the container app hostname using the Azure CLI:
+## Hosted Agent (Responses `2.0.0`)
 
-```bash
-APP_NAME=<container-app-name>
-RG=<resource-group>
-HOST=$(az containerapp show --name "$APP_NAME" --resource-group "$RG" \
-  --query properties.configuration.ingress.fqdn -o tsv)
-echo "https://$HOST"
+### Endpoint
+
+The endpoint is provisioned by `azd up` and takes the form:
+
+```text
+https://<your-foundry-endpoint>/responses
 ```
 
-Use that value as the base URL for all API calls.
+### Authentication
 
-## Authentication
-
-All chat endpoints require a GitHub OAuth token. Pass it in both headers:
+Either an API key or a bearer token, selected with `FOUNDRY_AUTH_MODE`:
 
 ```http
-Authorization: Bearer <gho_or_ghu_token>
-x-github-token: <gho_or_ghu_token>
+api-key: <key>
 ```
 
-::: tip
-In secure environments, prefer per-user OAuth tokens over shared service tokens.
-:::
-
-## `POST /agent/chat`
-
-Standard JSON request-response endpoint for agent chat.
+```http
+Authorization: Bearer <token>
+```
 
 ### Request
 
 ```bash
-curl -X POST "https://<host>/agent/chat" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <gho_or_ghu_token>" \
-  -H "x-github-token: <gho_or_ghu_token>" \
-  -d '{"prompt": "What is the price of a Standard_D4s_v5 VM in East US?"}'
-```
-
-### Response
-
-```json
-{
-  "session_id": "abc123-def456-...",
-  "response": "The agent's final response text",
-  "response_intermediate": "Any intermediate responses",
-  "tool_calls": ["list of tools invoked during the response"]
-}
-```
-
-The response always includes a `session_id`, also returned via the `x-ms-session-id` response header.
-
-## Multi-Turn Conversations
-
-To resume an existing session, pass the session ID in the `x-ms-session-id` request header:
-
-```bash
-curl -X POST "https://<host>/agent/chat" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <gho_or_ghu_token>" \
-  -H "x-github-token: <gho_or_ghu_token>" \
-  -H "x-ms-session-id: abc123-def456-..." \
-  -d '{"prompt": "If I run that VM 24/7 for a month, what would it cost?"}'
-```
-
-If you omit `x-ms-session-id`, a new session is created automatically.
-
-## `POST /agent/chatstream`
-
-Use `POST /agent/chatstream` to receive responses incrementally as Server-Sent Events.
-
-### Request
-
-```bash
-curl -N -X POST "https://<host>/agent/chatstream" \
+curl -N -X POST "https://<foundry-endpoint>/responses" \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
-  -H "Authorization: Bearer <gho_or_ghu_token>" \
-  -H "x-github-token: <gho_or_ghu_token>" \
-  -d '{"prompt": "Give me a quick summary of Azure Functions pricing."}'
+  -H "api-key: <key>" \
+  -d '{
+    "model": "gpt-5.2-codex",
+    "input": "What is the price of a Standard_D4s_v5 VM in East US?",
+    "stream": true,
+    "store": true,
+    "agent": { "name": "digibuddy-codex", "version": "1" }
+  }'
 ```
 
-## SSE Event Types
-
-| Event Type | Description |
+| Field | Description |
 | --- | --- |
-| `session` | Contains the `session_id` for the conversation |
-| `delta` | Incremental text chunks |
-| `intermediate` | Intermediate reasoning or response snippets |
-| `tool_start` | Tool invocation started |
-| `tool_end` | Tool invocation completed |
-| `message` | Final full response text |
-| `done` | Stream completion signal |
+| `model` | Model name, matching `CODEX_MODEL_NAME` |
+| `input` | User prompt text |
+| `stream` | `true` for SSE, `false` for a single JSON response |
+| `store` | `true` so the response can be resumed |
+| `agent` | Target agent `name` and `version` |
+| `metadata.profile` | Agent profile to assemble; omit for the runtime default |
+| `previous_response_id` | Resumes a prior turn in the same Codex thread |
 
-### Example SSE sequence
+### Streaming events
 
-```text
-data: {"type":"session","session_id":"..."}
+The agent emits standard Responses events. The ones the Web UI consumes are:
 
-data: {"type":"delta","content":"Hello"}
+| Event | Description |
+| --- | --- |
+| `response.created` | Carries `response.id`, used as the next `previous_response_id` |
+| `response.output_text.delta` | Incremental assistant text in `delta` |
+| `response.completed` | Final `response.id` |
+| `response.failed` / `error` | Terminal failure |
 
-data: {"type":"tool_start","tool_name":"bash","tool_call_id":"..."}
+### Multi-turn conversations
 
-data: {"type":"tool_end","tool_name":"bash","tool_call_id":"..."}
+Pass the `id` from the previous response as `previous_response_id`. The adapter maps it to a Codex thread and calls `thread/resume`, so the workspace and conversation state carry over.
 
-data: {"type":"message","content":"Hello...final"}
-
-data: {"type":"done"}
+```bash
+curl -N -X POST "https://<foundry-endpoint>/responses" \
+  -H "Content-Type: application/json" \
+  -H "api-key: <key>" \
+  -d '{
+    "model": "gpt-5.2-codex",
+    "input": "If I run that VM 24/7 for a month, what would it cost?",
+    "stream": true,
+    "store": true,
+    "previous_response_id": "resp_..."
+  }'
 ```
 
-## MCP Server Endpoint
+## Web UI (`POST /api/agent`)
 
-The deployed app also exposes an MCP endpoint:
+The Web UI route accepts an AG-UI `RunAgentInput` body and returns an AG-UI event stream as SSE.
 
-```text
-https://<host>/runtime/webhooks/mcp
+### Request
+
+```bash
+curl -N -X POST "http://localhost:3000/api/agent" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "threadId": "thread-1",
+    "runId": "run-1",
+    "messages": [{ "id": "m1", "role": "user", "content": "Hello" }],
+    "state": {},
+    "tools": [],
+    "context": [],
+    "forwardedProps": {}
+  }'
 ```
 
-If your environment enables function keys for the MCP extension endpoint, pass the key in the `x-functions-key` header.
+### Response events
 
-### VS Code `mcp.json` example
+| Event | Description |
+| --- | --- |
+| `RUN_STARTED` | Run accepted |
+| `TEXT_MESSAGE_START` | Assistant message opened |
+| `TEXT_MESSAGE_CONTENT` | Incremental `delta` text |
+| `TEXT_MESSAGE_END` | Assistant message closed |
+| `STATE_SNAPSHOT` | Carries `previousResponseId` for the next turn |
+| `RUN_FINISHED` | Run completed successfully |
+| `RUN_ERROR` | Run failed, with `message` and `code` |
+
+Return the `previousResponseId` from `STATE_SNAPSHOT` in the next request's `state` to continue the conversation.
+
+### Connection configuration
+
+The upstream connection is resolved server-side from environment variables, with optional per-request overrides under `forwardedProps.connection`. See `webui/environment.example`:
+
+| Variable | Description |
+| --- | --- |
+| `FOUNDRY_AGENT_ENDPOINT` | Responses endpoint URL |
+| `FOUNDRY_AGENT_API_KEY` | API key or bearer token |
+| `FOUNDRY_AUTH_MODE` | `api-key` or `bearer` |
+| `FOUNDRY_AGENT_NAME` | Agent name, e.g. `digibuddy-codex` |
+| `FOUNDRY_AGENT_VERSION` | Agent version, defaults to `1` |
+| `CODEX_MODEL_NAME` | Model name sent as `model` |
+| `AGENT_ENDPOINT_ALLOWLIST` | Extra comma-separated host suffixes accepted as endpoints |
+| `DIGIBUDDY_PROFILE` | Default agent profile when the caller does not pick one |
+
+The connection also accepts a `profile` field. The route sends it as `metadata.profile` rather than in `agent`, because `agent` names the deployed Foundry agent while the profile selects what that agent assembles.
+
+Every endpoint must be HTTPS and must match `services.ai.azure.com`, `openai.azure.com`, or a host listed in `AGENT_ENDPOINT_ALLOWLIST`. Outside production, `localhost` and `127.0.0.1` are also permitted.
+
+## Web UI (`GET /api/profiles`)
+
+Lists the profiles a chat user may pick. Public and unauthenticated: only `name`, `display_name`, and `description` are exposed, because personas and capability assembly are runtime concerns. An unconfigured or unreachable store returns an empty list, meaning "no profile choice".
 
 ```json
-{
-  "inputs": [
-    {
-      "type": "promptString",
-      "id": "functions-mcp-extension-system-key",
-      "description": "Azure Functions MCP Extension System Key",
-      "password": true
-    },
-    {
-      "type": "promptString",
-      "id": "functionapp-host",
-      "description": "Container app host, e.g. fmaaca-xxxx.<env>.<region>.azurecontainerapps.io"
-    }
-  ],
-  "servers": {
-    "remote-mcp-function": {
-      "type": "http",
-      "url": "https://${input:functionapp-host}/runtime/webhooks/mcp",
-      "headers": {
-        "x-functions-key": "${input:functions-mcp-extension-system-key}"
-      }
-    }
-  }
-}
+{ "profiles": [{ "name": "marketing", "display_name": "Marketing", "description": "…" }] }
 ```
 
-## Chat UI
+## Web UI (`/api/admin/config`)
 
-After deployment, open the app root URL:
+The admin console API over the shared configuration store. Both methods require an authorised caller.
 
-```text
-https://<host>/
+### Authentication
+
+The route reads the Easy Auth `x-ms-client-principal` header and matches the caller's Entra object ID or sign-in name against `ADMIN_PRINCIPAL_IDS`. An empty allowlist denies everyone. Outside production, `ADMIN_ALLOW_ANONYMOUS=true` admits an anonymous local caller.
+
+| Status | Meaning |
+| --- | --- |
+| `403` | Caller is not an allowlisted administrator |
+| `400` | Unknown document name, or a value that fails validation |
+| `500` | The configuration store is unavailable |
+
+### `GET`
+
+Returns all four documents. `models.json` is redacted: `api_key` is removed and replaced with a boolean `api_key_set`.
+
+### `PUT`
+
+```json
+{ "document": "profiles.json", "value": { "profiles": [{ "name": "marketing" }] } }
 ```
 
-At first load, enter:
+| Document | Validation |
+| --- | --- |
+| `models.json` | Endpoint must be HTTPS; a blank `api_key` preserves the stored secret |
+| `mcp.json` | Server names match `[A-Za-z0-9._-]+`; URLs must be HTTPS |
+| `profiles.json` | Names match `[a-z0-9-]+` and must be unique |
 
-- Base URL, usually your ACA app URL
-- GitHub OAuth token, usually a `gho_` or `ghu_` token
+`catalogue.json` is published by the runtime and is not writable. Each successful write is logged with the document name and the caller, without values.
 
-The base URL is stored in local storage. The GitHub token is stored in session storage only.
+### Store configuration
 
-### URL hash prefill
+| Variable | Description |
+| --- | --- |
+| `DIGIBUDDY_CONFIG_URI` | Azure Blob container URI, accessed with a managed identity |
+| `DIGIBUDDY_CONFIG_DIR` | Filesystem directory, for local development |
+| `ADMIN_PRINCIPAL_IDS` | Comma-separated Entra object IDs or sign-in names |
+| `ADMIN_ALLOW_ANONYMOUS` | `true` to allow anonymous access outside production |
 
-```text
-https://<host>/#baseUrl=https%3A%2F%2F<host>&token=<url-encoded-token>
-```
-
-On load, the page reads these values, stores them, and removes the hash from the address bar.
+The hosted agent must be pointed at the same store for admin changes to reach it.

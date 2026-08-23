@@ -37,32 +37,46 @@ Open `http://localhost:3000`, then configure the Foundry Responses endpoint, aut
 
 ```bash
 cd webui
-docker build -t haeronclaw-webui .
+docker build -t digibuddy-webui .
 docker run --rm -p 3000:3000 \
   -e FOUNDRY_AGENT_ENDPOINT="https://your-foundry-endpoint/responses" \
   -e FOUNDRY_AGENT_API_KEY="<agent-key>" \
   -e CODEX_MODEL_NAME="gpt-5.2-codex" \
-  haeronclaw-webui
+  digibuddy-webui
 ```
 
 The image listens on port `3000` and uses Next.js standalone output. Deploy it to Azure Web App for Containers or another OCI-compatible service. In production, restrict `AGENT_ENDPOINT_ALLOWLIST` to approved endpoint suffixes.
 
+## Enable the admin console
+
+Point the Web UI and the Hosted Agent at the same configuration store, then allowlist the administrators:
+
+```bash
+azd env set DIGIBUDDY_CONFIG_URI "https://yourstorage.blob.core.windows.net/digibuddy-config"
+```
+
+```bash
+docker run --rm -p 3000:3000 \
+  -e FOUNDRY_AGENT_ENDPOINT="https://your-foundry-endpoint/responses" \
+  -e DIGIBUDDY_CONFIG_URI="https://yourstorage.blob.core.windows.net/digibuddy-config" \
+  -e ADMIN_PRINCIPAL_IDS="<entra-object-id>,<entra-object-id>" \
+  digibuddy-webui
+```
+
+Both containers read the store with their managed identity, so grant each the **Storage Blob Data Contributor** role on the container. For local development set `DIGIBUDDY_CONFIG_DIR` to a directory and `ADMIN_ALLOW_ANONYMOUS=true` instead; the anonymous opt-in is ignored when `NODE_ENV=production`.
+
+::: warning
+Put Easy Auth in front of the Web UI container. `ADMIN_PRINCIPAL_IDS` is matched against the `x-ms-client-principal` header, so without an authentication front end no caller is ever admitted.
+:::
+
+Open `http://localhost:3000/admin` to manage models, remote MCP servers, and agent profiles. Changes apply at the next turn.
+
 ## Local checks
 
 ```bash
-python -m unittest discover -s hosted-agent/tests -v
-cd webui
+cd hosted-agent && python -m unittest discover -s tests -t . -v
+cd ../webui
 npm test
 npm run lint
 npm run build
 ```
-
-## Legacy Azure Functions path
-
-The previous Azure Functions/ACA implementation remains available for migration scenarios:
-
-```powershell
-./scripts/deploy.ps1 -Mode aca -ResourceGroup <rg-name> -Location eastus2 -Prefix fmaaca -Model github:gpt-5.4 -ImageTag v3
-```
-
-This deploys the legacy APIs, Teams integration, MCP endpoint, and timer features. It is separate from the Hosted Agent deployment above.

@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { HttpAgent, type Message } from "@ag-ui/client";
+import Link from "next/link";
 import styles from "./page.module.css";
 
 type Connection = {
@@ -11,6 +12,13 @@ type Connection = {
   model: string;
   agentName: string;
   agentVersion: string;
+  profile: string;
+};
+
+type ProfileOption = {
+  name: string;
+  display_name: string;
+  description: string;
 };
 
 const emptyConnection: Connection = {
@@ -20,6 +28,7 @@ const emptyConnection: Connection = {
   model: "",
   agentName: "",
   agentVersion: "1",
+  profile: "",
 };
 
 function messageText(message: Message): string {
@@ -44,6 +53,7 @@ export default function Home() {
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
+  const [profiles, setProfiles] = useState<ProfileOption[]>([]);
   const agentRef = useRef<HttpAgent | null>(null);
 
   if (agentRef.current === null) {
@@ -63,6 +73,16 @@ export default function Home() {
         setMessages(nextMessages.map((message) => ({ ...message })) as Message[]);
       },
     }).unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/profiles", { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : { profiles: [] }))
+      .then((payload) => setProfiles(payload.profiles ?? []))
+      // No profiles configured simply means the runtime default is used.
+      .catch(() => undefined);
+    return () => controller.abort();
   }, []);
 
   const visibleMessages = useMemo(
@@ -126,7 +146,7 @@ export default function Home() {
     <main className={styles.shell}>
       <aside className={styles.settings}>
         <div>
-          <p className={styles.eyebrow}>HaeronClaw</p>
+          <p className={styles.eyebrow}>DigiBuddy</p>
           <h1>Codex Hosted Agent</h1>
           <p className={styles.subtitle}>
             AG-UI console for a Microsoft Foundry hosted coding runtime.
@@ -134,6 +154,24 @@ export default function Home() {
         </div>
 
         <div className={styles.formGrid}>
+          {profiles.length > 0 && (
+            <label>
+              Agent profile
+              <select
+                value={connection.profile}
+                onChange={(event) =>
+                  updateConnection("profile", event.target.value)
+                }
+              >
+                <option value="">Runtime default</option>
+                {profiles.map((profile) => (
+                  <option key={profile.name} value={profile.name}>
+                    {profile.display_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label>
             Hosted Agent Responses endpoint
             <input
@@ -205,7 +243,8 @@ export default function Home() {
 
         <p className={styles.securityNote}>
           Keys stay in memory and pass only through the server-side proxy. Leave
-          fields blank to use container environment settings.
+          fields blank to use container environment settings.{" "}
+          <Link href="/admin">Administer the runtime</Link>
         </p>
       </aside>
 

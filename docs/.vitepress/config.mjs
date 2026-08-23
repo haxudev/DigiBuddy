@@ -1,20 +1,20 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
-  title: 'HaeronClaw',
+  title: 'DigiBuddy',
   description: 'Hosted agent runtime on Azure Functions for Microsoft and Azure workflows.',
-  base: '/haeronclaw/',
+  base: '/DigiBuddy/',
   lang: 'en-US',
   cleanUrls: true,
   lastUpdated: true,
   themeConfig: {
-    siteTitle: 'HaeronClaw',
+    siteTitle: 'DigiBuddy',
     nav: [
       { text: 'Guide', link: '/quickstart' },
       { text: 'Features', link: '/features' },
       { text: 'API', link: '/api' },
       { text: 'Architecture', link: '/architecture' },
-      { text: 'GitHub', link: 'https://github.com/haxudev/haeronclaw' }
+      { text: 'GitHub', link: 'https://github.com/haxudev/DigiBuddy' }
     ],
     sidebar: [
       {
@@ -39,11 +39,11 @@ export default defineConfig({
       }
     ],
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/haxudev/haeronclaw' }
+      { icon: 'github', link: 'https://github.com/haxudev/DigiBuddy' }
     ],
     footer: {
       message: 'Hosted agent runtime on Azure Functions.',
-      copyright: 'Copyright © 2026 HaeronClaw'
+      copyright: 'Copyright © 2026 DigiBuddy'
     },
     outline: {
       level: [2, 3],
@@ -59,7 +59,7 @@ export default defineConfig({
   },
   head: [
     ['meta', { property: 'og:type', content: 'website' }],
-    ['meta', { property: 'og:title', content: 'HaeronClaw' }],
+    ['meta', { property: 'og:title', content: 'DigiBuddy' }],
     ['meta', { property: 'og:description', content: 'Hosted agent runtime on Azure Functions for Microsoft and Azure workflows.' }]
   ]
 })

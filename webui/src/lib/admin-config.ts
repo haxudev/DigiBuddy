@@ -1,0 +1,341 @@
+/**
+ * Admin-managed runtime configuration.
+ *
+ * The hosted agent is stateless and its payload is read-only, so anything an
+ * administrator changes at runtime lives in a shared store that both sides
+ * read. This module owns the schema for those documents and mirrors the
+ * Python implementation in `hosted-agent/codex_adapter/config_store.py`.
+ */
+
+export const MODELS_DOCUMENT = "models.json";
+export const MCP_DOCUMENT = "mcp.json";
+export const PROFILES_DOCUMENT = "profiles.json";
+export const CATALOGUE_DOCUMENT = "catalogue.json";
+
+export const DOCUMENTS = [
+  MODELS_DOCUMENT,
+  MCP_DOCUMENT,
+  PROFILES_DOCUMENT,
+  CATALOGUE_DOCUMENT,
+] as const;
+
+export type DocumentName = (typeof DOCUMENTS)[number];
+
+/** Documents an administrator may write. The catalogue is published by the runtime. */
+export const WRITABLE_DOCUMENTS: DocumentName[] = [
+  MODELS_DOCUMENT,
+  MCP_DOCUMENT,
+  PROFILES_DOCUMENT,
+];
+
+export const REASONING_EFFORTS = ["minimal", "low", "medium", "high"] as const;
+
+export type JsonDocument = Record<string, unknown>;
+
+type Environment = Record<string, string | undefined>;
+
+export type ModelsDocument = {
+  model: string;
+  endpoint: string;
+  provider: string;
+  reasoning_effort: string;
+  /** Present only when the administrator is rotating it; never read back out. */
+  api_key?: string;
+};
+
+export type McpServer = {
+  url: string;
+  enabled: boolean;
+  bearer_token_env_var: string;
+  description: string;
+};
+
+export type McpDocument = { servers: Record<string, McpServer> };
+
+export type ProfileDocument = {
+  name: string;
+  display_name: string;
+  description: string;
+  persona: string;
+  /** `null` means "every packaged capability"; an array restricts to those entries. */
+  skills: string[] | null;
+  tools: string[] | null;
+  mcp_servers: string[] | null;
+  model: string;
+  reasoning_effort: string;
+};
+
+export type ProfilesDocument = { profiles: ProfileDocument[] };
+
+export type Catalogue = {
+  skills: string[];
+  tools: string[];
+  mcp_servers: string[];
+};
+
+export class ConfigValidationError extends Error {}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function text(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** `undefined` (absent) keeps everything; an array restricts to those entries. */
+function names(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return value
+    .map((item) => text(item))
+    .filter((item, index, all) => item && all.indexOf(item) === index);
+}
+
+function reasoningEffort(value: unknown): string {
+  const effort = text(value).toLowerCase();
+  return (REASONING_EFFORTS as readonly string[]).includes(effort) ? effort : "";
+}
+
+export function assertDocumentName(name: string): DocumentName {
+  if (!(DOCUMENTS as readonly string[]).includes(name)) {
+    throw new ConfigValidationError(`Unknown configuration document: ${name}`);
+  }
+  return name as DocumentName;
+}
+
+export function assertWritableDocument(name: string): DocumentName {
+  const document = assertDocumentName(name);
+  if (!WRITABLE_DOCUMENTS.includes(document)) {
+    throw new ConfigValidationError(`${document} is published by the runtime.`);
+  }
+  return document;
+}
+
+function assertHttps(url: string, label: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new ConfigValidationError(`${label} is not a valid URL.`);
+  }
+  if (parsed.protocol !== "https:") {
+    throw new ConfigValidationError(`${label} must use HTTPS.`);
+  }
+}
+
+export function normaliseModels(input: unknown): ModelsDocument {
+  const raw = record(input);
+  const endpoint = text(raw.endpoint).replace(/\/+$/, "");
+  if (endpoint) assertHttps(endpoint, "Model endpoint");
+
+  const document: ModelsDocument = {
+    model: text(raw.model),
+    endpoint,
+    provider: text(raw.provider),
+    reasoning_effort: reasoningEffort(raw.reasoning_effort),
+  };
+  const apiKey = text(raw.api_key);
+  if (apiKey) document.api_key = apiKey;
+  return document;
+}
+
+export function normaliseMcp(input: unknown): McpDocument {
+  const servers = record(record(input).servers);
+  const normalised: Record<string, McpServer> = {};
+  for (const [name, value] of Object.entries(servers)) {
+    const key = name.trim();
+    if (!key || !/^[A-Za-z0-9._-]+$/.test(key)) {
+      throw new ConfigValidationError(
+        `MCP server names may only contain letters, digits, dot, dash and underscore: ${name}`,
+      );
+    }
+    const server = record(value);
+    const url = text(server.url);
+    if (!url) {
+      throw new ConfigValidationError(`MCP server ${key} needs a URL.`);
+    }
+    assertHttps(url, `MCP server ${key} URL`);
+    normalised[key] = {
+      url,
+      enabled: server.enabled !== false,
+      bearer_token_env_var: text(server.bearer_token_env_var),
+      description: text(server.description),
+    };
+  }
+  return { servers: normalised };
+}
+
+export function normaliseProfiles(input: unknown): ProfilesDocument {
+  const entries = record(input).profiles;
+  if (!Array.isArray(entries)) return { profiles: [] };
+
+  const profiles: ProfileDocument[] = [];
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    const raw = record(entry);
+    const name = text(raw.name);
+    if (!name) {
+      throw new ConfigValidationError("Every profile needs a name.");
+    }
+    if (!/^[a-z0-9-]+$/.test(name)) {
+      throw new ConfigValidationError(
+        `Profile names may only contain lowercase letters, digits and dashes: ${name}`,
+      );
+    }
+    if (seen.has(name)) {
+      throw new ConfigValidationError(`Duplicate profile name: ${name}`);
+    }
+    seen.add(name);
+    profiles.push({
+      name,
+      display_name: text(raw.display_name) || name,
+      description: text(raw.description),
+      persona: text(raw.persona),
+      skills: names(raw.skills),
+      tools: names(raw.tools),
+      mcp_servers: names(raw.mcp_servers),
+      model: text(raw.model),
+      reasoning_effort: reasoningEffort(raw.reasoning_effort),
+    });
+  }
+  return { profiles };
+}
+
+export function normaliseDocument(
+  name: DocumentName,
+  input: unknown,
+): JsonDocument {
+  if (name === MODELS_DOCUMENT) return normaliseModels(input);
+  if (name === MCP_DOCUMENT) return normaliseMcp(input);
+  if (name === PROFILES_DOCUMENT) return normaliseProfiles(input);
+  throw new ConfigValidationError(`${name} is published by the runtime.`);
+}
+
+/** Strip anything an administrator should not be able to read back out. */
+export function redactDocument(
+  name: DocumentName,
+  document: JsonDocument | null,
+): JsonDocument | null {
+  if (!document || name !== MODELS_DOCUMENT) return document;
+  const { api_key: apiKey, ...rest } = document as ModelsDocument;
+  return { ...rest, api_key_set: Boolean(text(apiKey)) };
+}
+
+/**
+ * Carry the stored key forward when the administrator leaves the field blank,
+ * so changing the model name does not require re-entering the secret.
+ */
+export function preserveSecret(
+  next: ModelsDocument,
+  current: JsonDocument | null,
+): ModelsDocument {
+  if (next.api_key) return next;
+  const existing = text(record(current).api_key);
+  return existing ? { ...next, api_key: existing } : next;
+}
+
+export function normaliseCatalogue(input: unknown): Catalogue {
+  const raw = record(input);
+  return {
+    skills: names(raw.skills) ?? [],
+    tools: names(raw.tools) ?? [],
+    mcp_servers: names(raw.mcp_servers) ?? [],
+  };
+}
+
+export interface ConfigStore {
+  read(name: DocumentName): Promise<JsonDocument | null>;
+  write(name: DocumentName, document: JsonDocument): Promise<void>;
+}
+
+class FileConfigStore implements ConfigStore {
+  readonly directory: string;
+
+  constructor(directory: string) {
+    this.directory = directory;
+  }
+
+  async read(name: DocumentName): Promise<JsonDocument | null> {
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    try {
+      const raw = await readFile(join(this.directory, assertDocumentName(name)), "utf-8");
+      const parsed: unknown = JSON.parse(raw);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as JsonDocument)
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async write(name: DocumentName, document: JsonDocument): Promise<void> {
+    const { mkdir, writeFile, rename } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    await mkdir(this.directory, { recursive: true });
+    const target = join(this.directory, assertDocumentName(name));
+    const temporary = `${target}.${process.pid}.tmp`;
+    await writeFile(temporary, JSON.stringify(document, null, 2), {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
+    await rename(temporary, target);
+  }
+}
+
+class BlobConfigStore implements ConfigStore {
+  readonly containerUri: string;
+
+  constructor(containerUri: string) {
+    this.containerUri = containerUri;
+  }
+
+  private async container() {
+    const { ContainerClient } = await import("@azure/storage-blob");
+    const { DefaultAzureCredential } = await import("@azure/identity");
+    return new ContainerClient(this.containerUri, new DefaultAzureCredential());
+  }
+
+  async read(name: DocumentName): Promise<JsonDocument | null> {
+    const blob = (await this.container()).getBlockBlobClient(
+      assertDocumentName(name),
+    );
+    try {
+      const buffer = await blob.downloadToBuffer();
+      const parsed: unknown = JSON.parse(buffer.toString("utf-8"));
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as JsonDocument)
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async write(name: DocumentName, document: JsonDocument): Promise<void> {
+    const container = await this.container();
+    await container.createIfNotExists();
+    const body = JSON.stringify(document, null, 2);
+    await container
+      .getBlockBlobClient(assertDocumentName(name))
+      .upload(body, Buffer.byteLength(body), {
+        blobHTTPHeaders: { blobContentType: "application/json" },
+      });
+  }
+}
+
+export function buildConfigStore(
+  environment: Environment = process.env,
+): ConfigStore {
+  const containerUri = text(environment.DIGIBUDDY_CONFIG_URI);
+  if (containerUri) {
+    assertHttps(containerUri, "DIGIBUDDY_CONFIG_URI");
+    return new BlobConfigStore(containerUri);
+  }
+  const directory = text(environment.DIGIBUDDY_CONFIG_DIR);
+  if (directory) return new FileConfigStore(directory);
+  throw new ConfigValidationError(
+    "Set DIGIBUDDY_CONFIG_URI or DIGIBUDDY_CONFIG_DIR to enable the admin console.",
+  );
+}

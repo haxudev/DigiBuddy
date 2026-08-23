@@ -1,3 +1,14 @@
+"""Microsoft 365 access (mail, calendar, OneDrive, SharePoint) via the m365 CLI.
+
+Wraps the vendored ``m365-cli`` npm package and adds email conveniences on top of
+``mail send``: reading the body from a file, expanding ``$(cat ...)`` references,
+and staging non-plain-text attachments to Azure Blob Storage as download links.
+
+CLI:
+    python -m m365_cli 'mail list --top 5 --json'
+"""
+
+import argparse
 import asyncio
 import json
 import logging
@@ -26,8 +37,8 @@ _ALLOWED_ATTACH_EXTENSIONS = frozenset({
 _MAIL_SEND_PREPROCESS_RETRY_COUNT = 1
 _MAIL_SEND_PREPROCESS_RETRY_DELAY_SECONDS = 1.0
 
-# Pattern to match $(cat /tmp/...) shell substitution in args
-_CAT_SUBST_RE = re.compile(r'\$\(cat\s+(/tmp/[^\s)]+)\)')
+# Pattern to match $(cat /abs/path) shell substitution in args
+_CAT_SUBST_RE = re.compile(r'\$\(cat\s+(/[^\s)]+)\)')
 
 
 class M365CliParams(BaseModel):
@@ -39,7 +50,7 @@ class M365CliParams(BaseModel):
             "'onedrive ls --json', 'sharepoint sites --json'. "
             "Always append --json for structured output.\n\n"
             "For sending emails with HTML body from a file, use --bodyFile:\n"
-            "  mail send \"user@example.com\" \"Subject\" --bodyFile /tmp/body.html --json\n\n"
+            "  mail send \"user@example.com\" \"Subject\" --bodyFile /workspace/body.html --json\n\n"
             "Attachments that are not plain text (pdf, images, office docs, etc.) are "
             "automatically uploaded to Azure Blob Storage and replaced with download "
             "links in the email body. Only .txt/.md/.csv/.log files are sent as direct attachments."
@@ -54,10 +65,10 @@ class M365CliParams(BaseModel):
 
 
 def _expand_cat_substitutions(args: list[str]) -> list[str]:
-    """Expand $(cat /tmp/...) shell patterns by reading the referenced files.
+    """Expand $(cat /abs/path) shell patterns by reading the referenced files.
 
-    Only expands paths under /tmp for safety. If the file cannot be read,
-    the original pattern is left intact (the CLI will receive the literal text).
+    Only absolute paths are expanded. If the file cannot be read, the original
+    pattern is left intact (the CLI will receive the literal text).
     """
     def _replace_in_arg(arg: str) -> str:
         def _read(match):
@@ -90,8 +101,8 @@ def _process_bodyfile_flag(args: list[str]) -> list[str]:
         return args
 
     filepath = args[bodyfile_idx + 1]
-    if not filepath.startswith("/tmp"):
-        raise ValueError(f"--bodyFile path must be under /tmp, got: {filepath}")
+    if not filepath.startswith("/"):
+        raise ValueError(f"--bodyFile path must be absolute, got: {filepath}")
 
     try:
         body_content = Path(filepath).read_text(encoding="utf-8")
@@ -165,10 +176,10 @@ def _upload_restricted_attachments(args: list[str]) -> tuple[list[str], list[tup
     # Upload restricted files to blob
     uploaded: list[tuple[str, str]] = []
     try:
-        from file_upload import upload_single_file
+        from azure_blob import upload_single_file
     except ImportError:
         raise RuntimeError(
-            "Binary attachments require Blob upload support, but file_upload is unavailable."
+            "Binary attachments require Blob upload support, but azure_blob is unavailable."
         )
 
     upload_failures: list[str] = []
@@ -457,19 +468,19 @@ async def m365_cli(params: M365CliParams) -> str:
     deliver messages.  (The create_eml tool only writes .eml files to disk.)
 
     Provides access to Mail, Calendar, OneDrive, and SharePoint via the m365-cli tool.
-    The user must be pre-authenticated (credentials stored in Key Vault or locally).
+    The user must be pre-authenticated (credentials stored under ~/.m365-cli).
 
     Email-specific features (auto-handled for 'mail send'):
-    - --bodyFile /tmp/body.html: Reads file content as the email body (HTML supported)
-    - $(cat /tmp/file.html) in body: Auto-expanded by reading the file
+    - --bodyFile /workspace/body.html: Reads file content as the email body (HTML supported)
+    - $(cat /workspace/file.html) in body: Auto-expanded by reading the file
     - Only plain-text attachments (.txt, .md, .csv, .log) are sent directly.
       All binary files (pdf, images, office docs, etc.) in --attach are auto-uploaded
       to Azure Blob Storage with download links injected into the email body.
 
     Common commands:
     - mail send "<to>" "<subject>" "<body>" --json  (SEND an email)
-    - mail send "<to>" "<subject>" --bodyFile /tmp/body.html --json  (body from file)
-    - mail send "<to>" "<subject>" "<body>" --attach /tmp/report.pptx --json  (auto-uploads)
+    - mail send "<to>" "<subject>" --bodyFile /workspace/body.html --json  (body from file)
+    - mail send "<to>" "<subject>" "<body>" --attach /workspace/report.pptx --json  (auto-uploads)
     - mail list --top 10 --json          (list recent emails)
     - mail read <id> --json              (read a specific email)
     - mail search "<query>" --json       (search emails)
@@ -507,8 +518,7 @@ async def m365_cli(params: M365CliParams) -> str:
     )
 
     env = os.environ.copy()
-    # Ensure the m365-cli can find its credentials
-    # In Azure Functions, credentials are restored from Key Vault to ~/.m365-cli/
+    # Ensure the m365-cli can find its credentials under the agent's home directory.
     home = os.path.expanduser("~")
     env.setdefault("HOME", home)
 
@@ -516,7 +526,7 @@ async def m365_cli(params: M365CliParams) -> str:
     if not launchers:
         return (
             "Error: m365 CLI launcher not found. Ensure Node.js and m365-cli are installed "
-            "(for local package, run npm install in the function app directory)."
+            "(run 'npm install' in the agent payload root, $DIGIBUDDY_PAYLOAD_ROOT)."
         )
 
     launcher_errors: list[str] = []
@@ -586,3 +596,21 @@ async def m365_cli(params: M365CliParams) -> str:
         output = output[:max_chars] + "\n\n... (output truncated)"
 
     return output
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = argparse.ArgumentParser(prog="m365_cli", description=__doc__)
+    parser.add_argument("command", help="m365 sub-command, e.g. 'mail list --top 5 --json'")
+    parser.add_argument("--timeout", type=int, default=60, help="Command timeout in seconds")
+
+    args = parser.parse_args(argv)
+    print(
+        asyncio.run(
+            m365_cli(M365CliParams(command=args.command, timeout_seconds=args.timeout))
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

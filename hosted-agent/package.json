@@ -1,5 +1,5 @@
 {
-  "name": "haeronclaw-codex-hosted-agent",
+  "name": "digibuddy-codex-hosted-agent",
   "version": "1.0.0",
   "description": "OpenAI Codex app-server runtime for Microsoft Foundry Hosted Agents",
   "private": true,

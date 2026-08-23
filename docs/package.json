@@ -1,5 +1,5 @@
 {
-  "name": "haeronclaw-docs",
+  "name": "digibuddy-docs",
   "private": true,
   "scripts": {
     "docs:dev": "vitepress dev .",

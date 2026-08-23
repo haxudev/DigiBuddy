@@ -1,3 +1,14 @@
+"""Monthly/annual cost projection from an Azure Retail Prices unit price.
+
+CLI:
+    python -m cost_estimator --unit-price 0.192 --unit-of-measure "1 Hour" \\
+        --quantity 730 --label "D4s v5 VM - East US"
+"""
+
+import argparse
+import asyncio
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -26,3 +37,30 @@ async def cost_estimator(params: CostEstimatorParams) -> str:
         f"Monthly cost:  ${monthly_cost:,.4f}\n"
         f"Annual cost:   ${annual_cost:,.4f}\n"
     )
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = argparse.ArgumentParser(prog="cost_estimator", description=__doc__)
+    parser.add_argument("--unit-price", type=float, required=True)
+    parser.add_argument("--unit-of-measure", required=True)
+    parser.add_argument("--quantity", type=float, required=True)
+    parser.add_argument("--label", default="")
+
+    args = parser.parse_args(argv)
+    print(
+        asyncio.run(
+            cost_estimator(
+                CostEstimatorParams(
+                    unit_price=args.unit_price,
+                    unit_of_measure=args.unit_of_measure,
+                    quantity=args.quantity,
+                    label=args.label,
+                )
+            )
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

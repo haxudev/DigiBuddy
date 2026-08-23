@@ -16,7 +16,7 @@ from azure.ai.agentserver.responses import (
 from codex_adapter import CodexRuntime, load_settings
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("haeronclaw.hosted_agent")
+logger = logging.getLogger("digibuddy.hosted_agent")
 
 settings = load_settings()
 runtime = CodexRuntime(settings)
@@ -31,6 +31,19 @@ def _request_value(request: CreateResponse, name: str) -> Any:
     if isinstance(request, dict):
         return request.get(name)
     return None
+
+
+def _requested_profile(request: CreateResponse) -> str | None:
+    """Agent profiles are selected with ``metadata.profile`` on the request.
+
+    The ``agent`` field is reserved for the deployed Foundry agent reference, so
+    it cannot double as the profile selector.
+    """
+    metadata = _request_value(request, "metadata")
+    if not isinstance(metadata, dict):
+        return None
+    profile = metadata.get("profile")
+    return profile.strip() if isinstance(profile, str) and profile.strip() else None
 
 
 @app.response_handler
@@ -66,6 +79,7 @@ async def handle_response(
         response_id=context.response_id,
         cancellation_signal=cancellation_signal,
         model=requested_model,
+        profile=_requested_profile(request),
     ):
         logger.info(
             "codex_event %s",
