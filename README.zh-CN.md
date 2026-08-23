@@ -2,24 +2,20 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-> 基于 Azure Functions 托管的 Agent Runtime 构建。
+> 在 Microsoft Foundry Hosted Agent 中运行的 Codex Coding Agent。
 
-> **⚠️ 运行时说明。** Azure Functions Agent Runtime 的基础能力仍在演进中，但本仓库已经在此之上叠加了面向生产的集成与交付模式。
+HaeronClaw 将 Codex app-server 作为 Microsoft Foundry Hosted Agent 内部的 Coding Agent Runtime / Execution Engine，对外提供 Foundry Responses `2.0.0` 协议，并提供独立的 Next.js + React + AG-UI Web UI 容器项目。
 
-HaeronClaw 是一个面向 Microsoft 与 Azure 工作流的品牌化云端 Markdown Agent。它的整体实现思路来源于 [Azure-Samples/functions-markdown-agent](https://github.com/Azure-Samples/functions-markdown-agent)，并在此基础上增加了 Azure 托管、Teams 交付、企业集成和制品处理能力，使同一个 agent 不仅能在本地 Copilot Chat 中运行，也能在云端作为服务运行。
-
-HaeronClaw 的定位是团队级或部门级 Agent。它可以利用存储侧的 `index_memory/` 与 `work_memory/` 构建团队、部门或领域工作流共享的知识底座，而不只是依赖单用户会话上下文。下一步的自然增强方向是继续引入更高层的组织智能能力，例如 Foundry IQ、Work IQ 和 Fabric IQ。
+原 Azure Functions on Azure Container Apps 运行时继续保留在 `infra/`，作为 Teams、MCP、定时任务和企业交付集成的迁移兼容路径。
 
 **核心能力**
 
-- 将 HaeronClaw 部署到 Azure Container Apps 上运行的 Azure Functions
-- 选择 GitHub models 或 Microsoft Foundry models 作为运行时模型
-- 内置 agent chat HTTP API：`POST /agent/chat`、`POST /agent/chatstream`
-- 内置 MCP server 远程端点：`/runtime/webhooks/mcp`
-- 内置单页聊天界面，可直接通过浏览器访问
-- 基于 Azure 托管存储的持久化多轮会话状态
-- 通过 `AGENTS.md` frontmatter 定义定时触发任务
-- 自动加载 `src/tools/` 下的自定义 Python 工具
+- 通过 Microsoft Foundry 部署 Responses `2.0.0` Hosted Agent
+- 通过 Codex app-server 执行 coding agent loop、shell、Git 和文件操作
+- 使用持久化 response/session 映射恢复 Codex thread
+- 运行时配置模型 endpoint、key 和 model name
+- 通过独立的 Next.js + React + AG-UI Web 应用连接 Agent
+- 将 Web UI 部署到 Web App for Containers 或任意 OCI 容器平台
 
 ## 本项目新增的高级能力
 
@@ -47,6 +43,10 @@ Azure Functions 是一个已经支持 JavaScript、Python、.NET 等运行时的
 ## 项目结构
 
 ```text
+azure.yaml                    # Microsoft Foundry Hosted Agent 清单
+hosted-agent/                 # Responses 适配器和 Codex 执行运行时
+webui/                        # 独立 Next.js + React + AG-UI 应用
+
 src/                          # Agent 定义、skills、tools 和 work memory
 ├── AGENTS.md                 # HaeronClaw 指令、行为定义，以及可选的 function frontmatter
 ├── .github/skills/           # 运行时加载的 Markdown skills
@@ -59,7 +59,7 @@ src/                          # Agent 定义、skills、tools 和 work memory
 ├── work_memory/              # 领域知识和内部 FAQ 内容
 └── index_memory/             # 检索工作流使用的索引内容
 
-infra/assets/                 # Azure Functions + Teams 运行时实现
+infra/assets/                 # 旧版 Azure Functions + Teams 运行时
 ├── function_app.py           # HTTP / function 入口
 ├── teams_bot.py              # Teams bot 编排与主动回复
 ├── file_upload.py            # Azure Blob 上传与下载链接生成
@@ -71,7 +71,7 @@ infra/assets/                 # Azure Functions + Teams 运行时实现
 teams-app/                    # Teams app manifest 与 sideload 包
 ```
 
-`src` 目录仍然是 agent 本身的主要创作面。Azure 特定运行时位于 `infra/assets/`，项目在这里增加了 Teams 集成、基于 Blob 的制品交付、SharePoint 接入、语音处理等生产能力。
+主部署由 `azure.yaml` 定义，并从 `hosted-agent/Dockerfile` 构建。`webui/` 镜像独立部署并连接 Foundry Responses endpoint。`infra/` 下的 Azure Functions 实现不属于主 Hosted Agent 部署。
 
 仓库不会跟踪完整的 `node_modules/` 目录树。对第三方依赖的必要定制统一存放在 `infra/assets/vendor/` 中，并通过 `infra/assets/scripts/apply-m365-cli-patches.mjs` 在 `npm install` 后自动应用。
 
@@ -86,19 +86,27 @@ teams-app/                    # Teams app manifest 与 sideload 包
 
 `AGENTS.md` 中的指令、`.github/skills/` 中的 skills，以及 `.vscode/mcp.json` 中的 MCP server 都会自动加载。
 
-## 部署到 Azure Functions
+## 部署 Foundry Hosted Agent
 
 ### 部署方式
 
-本项目部署目标是 **Azure Container Apps 上的 Azure Functions**。
+配置模型并通过 Azure Developer CLI 部署：
 
 统一入口命令如下：
 
-```powershell
-./scripts/deploy.ps1 -Mode aca -ResourceGroup <rg-name> -Location eastus2 -Prefix fmaaca -Model github:gpt-5.4 -ImageTag v3
+```bash
+azd auth login
+azd env set CODEX_MODEL_ENDPOINT "https://your-resource.openai.azure.com/openai/v1"
+azd env set CODEX_MODEL_API_KEY "<model-key>"
+azd env set CODEX_MODEL_NAME "gpt-5.2-codex"
+azd up
 ```
 
-完整命令、参数模板和 CI/CD 矩阵说明请参考 `README.deploy.md`。
+随后把 `webui/Dockerfile` 部署到 Web App for Containers 或其他 OCI 平台，并设置 `FOUNDRY_AGENT_ENDPOINT`。详见 [快速开始](docs/quickstart.md) 和 [架构](docs/architecture.md)。
+
+## 旧版 Azure Functions 部署
+
+以下章节记录保留的 Azure Functions/ACA 运行时，不会配置 Foundry Hosted Agent。
 
 ### GitHub Models 的鉴权方式
 
