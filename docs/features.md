@@ -22,6 +22,12 @@ Everything that gives the agent its personality and capabilities lives in `src/`
 
 The runtime concatenates the hosted-agent guardrails with the payload persona into the Codex base instructions at startup.
 
+## Turn Inputs
+
+A turn may carry more than text. Responses `input_image` and `input_file` parts are written into `<workspace>/uploads` and their paths are appended to the prompt, so Codex opens attachments as ordinary files; a per-turn budget caps how much is materialised. A `reasoning.effort` of `minimal`, `low`, `medium`, or `high` overrides the configured thinking strength for that turn and restarts the Codex engine through its configuration fingerprint.
+
+While the turn runs, reasoning summaries and tool calls stream back as Responses reasoning items and function calls, which the console renders as a live activity trail.
+
 ## Tools
 
 Codex exposes only a shell, so every payload tool is a Python module with a CLI entry point.
