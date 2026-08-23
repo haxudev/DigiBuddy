@@ -184,3 +184,87 @@ export function responseText(payload: unknown): string {
     })
     .join("");
 }
+
+export const REASONING_EFFORTS = ["minimal", "low", "medium", "high"] as const;
+
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+
+/** Matches the cap the hosted agent enforces when it writes uploads to disk. */
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+export type TurnAttachment = {
+  filename: string;
+  mimeType: string;
+  /** A `data:` URL, which is what `FileReader.readAsDataURL` produces. */
+  data: string;
+};
+
+/**
+ * Read the per-turn knobs the composer sends alongside the message. Anything
+ * malformed is dropped rather than forwarded, so a bad attachment cannot stop
+ * the text from reaching the agent.
+ */
+export function turnOptions(forwardedProps: unknown): {
+  attachments: TurnAttachment[];
+  reasoningEffort: ReasoningEffort | "";
+} {
+  const props =
+    forwardedProps && typeof forwardedProps === "object"
+      ? (forwardedProps as Record<string, unknown>)
+      : {};
+
+  const requested = stringValue(props.reasoningEffort).toLowerCase();
+  const reasoningEffort = (REASONING_EFFORTS as readonly string[]).includes(
+    requested,
+  )
+    ? (requested as ReasoningEffort)
+    : "";
+
+  const attachments: TurnAttachment[] = [];
+  let budget = MAX_ATTACHMENT_BYTES;
+  for (const value of Array.isArray(props.attachments) ? props.attachments : []) {
+    if (!value || typeof value !== "object") continue;
+    const raw = value as Record<string, unknown>;
+    const data = typeof raw.data === "string" ? raw.data : "";
+    if (!data.startsWith("data:")) continue;
+    // base64 is 4 characters per 3 bytes, which is close enough for a budget.
+    const size = Math.ceil((data.length - data.indexOf(",") - 1) * 0.75);
+    if (size > budget) continue;
+    budget -= size;
+    attachments.push({
+      filename: stringValue(raw.filename) || "attachment",
+      mimeType: stringValue(raw.mimeType),
+      data,
+    });
+  }
+  return { attachments, reasoningEffort };
+}
+
+/**
+ * Build the Responses `input` for a turn. Plain text stays a plain string so
+ * the request looks exactly as it did before attachments existed.
+ */
+export function turnInput(
+  text: string,
+  attachments: TurnAttachment[],
+): unknown {
+  if (!attachments.length) return text;
+  return [
+    {
+      type: "message",
+      role: "user",
+      content: [
+        { type: "input_text", text },
+        ...attachments.map((attachment) =>
+          attachment.mimeType.startsWith("image/")
+            ? { type: "input_image", image_url: attachment.data }
+            : {
+                type: "input_file",
+                filename: attachment.filename,
+                file_data: attachment.data,
+              },
+        ),
+      ],
+    },
+  ];
+}

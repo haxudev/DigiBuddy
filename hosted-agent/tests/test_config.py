@@ -83,6 +83,18 @@ class RuntimeSettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "HTTPS"):
             validate_settings(settings(model_endpoint="http://example.com/v1"))
 
+    def test_requested_reasoning_effort_overrides_the_profile(self):
+        profile = AgentProfile(name="deep", reasoning_effort="high")
+
+        rendered = render_codex_config(settings(), None, profile, "low")
+
+        self.assertIn('model_reasoning_effort = "low"', rendered)
+
+    def test_unknown_reasoning_effort_keeps_the_configured_one(self):
+        rendered = render_codex_config(settings(reasoning_effort="medium"), None, None, "turbo")
+
+        self.assertIn('model_reasoning_effort = "medium"', rendered)
+
     def test_endpoint_requires_key(self):
         with self.assertRaisesRegex(RuntimeError, "CODEX_MODEL_API_KEY"):
             validate_settings(settings(model_api_key=""))

@@ -1,0 +1,139 @@
+.trail {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 10px;
+}
+
+.toggle {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  align-self: start;
+  padding: 4px 10px 4px 6px;
+  color: #4a5b60;
+  background: #eef4f4;
+  border: 1px solid #dde5e7;
+  border-radius: 20px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toggle:hover {
+  background: #e4eeee;
+}
+
+.count {
+  padding: 0 7px;
+  color: #66787d;
+  background: #fff;
+  border-radius: 20px;
+  font-size: 11.5px;
+}
+
+.rows {
+  display: grid;
+  gap: 4px;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  overflow: hidden;
+  background: #fbfcfc;
+  border: 1px solid #e6ecee;
+  border-radius: 10px;
+}
+
+.row[data-status="failed"] {
+  background: #fef6f5;
+  border-color: #f3d2cd;
+}
+
+.summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 7px 10px;
+  color: #33454a;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.summary:disabled {
+  cursor: default;
+}
+
+.summary:not(:disabled):hover {
+  background: #f2f6f6;
+}
+
+.icon {
+  flex: none;
+  width: 18px;
+  color: #6f8288;
+  text-align: center;
+}
+
+.row[data-kind="error"] .icon {
+  color: #c0392b;
+}
+
+.row[data-status="running"] .icon {
+  color: #1f8a70;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row[data-status="running"] .icon {
+    animation: none;
+  }
+}
+
+.label {
+  flex: none;
+  color: #8b9a9e;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* The one line the row is collapsed to. */
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chevron {
+  flex: none;
+  color: #8b9a9e;
+  font-size: 11px;
+}
+
+.detail {
+  max-height: 260px;
+  padding: 0 12px 10px 36px;
+  overflow: auto;
+  color: #4a5b60;
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

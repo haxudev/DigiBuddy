@@ -15,7 +15,21 @@ The browser speaks AG-UI only to `/api/agent`. The Next.js route validates the e
 
 ## Console layout
 
-The chat page is a three-pane console. The left pane lists sessions; each one keeps its own thread id and Responses `previous_response_id`, so switching never mixes transcripts. Sessions live in browser storage under `digibuddy.sessions.v1` — double-click a title to rename, `×` to delete. The middle pane renders the transcript as GitHub-flavoured Markdown with inline HTML sanitised on the way in. The right pane previews deliverables.
+The chat page is a three-pane console that fills the viewport (`100dvh`, so it stays full screen once mobile browser chrome hides). The left pane lists sessions; each one keeps its own thread id and Responses `previous_response_id`, so switching never mixes transcripts. Sessions live in browser storage under `digibuddy.sessions.v1` — double-click a title to rename, `×` to delete. The middle pane renders the transcript as GitHub-flavoured Markdown with inline HTML sanitised on the way in. The right pane previews deliverables.
+
+Narrow viewports keep the same conversation width instead of stacking the panes: below 1180px the deliverable pane slides in as a drawer, and below 860px the session pane does too. The header buttons open them and a backdrop closes them.
+
+### Activity trail
+
+Thinking summaries, tool calls, and failures appear under the answer as one-line rows that expand on click. They travel from `/api/agent` as AG-UI `CUSTOM` events named `activity` rather than as tool-call or message events, so they never enter the transcript the console stores and mines for deliverables. Each row shows a status: running rows pulse, and an upstream error marks everything still running as failed. The trail is cleared at the start of each run and when switching sessions.
+
+### Composer
+
+Attach local files with **Attach files** — images, PDF, Office documents, CSV, and plain text. Files are read in the browser as data URLs and sent as Responses `input_image` or `input_file` parts; anything without inline bytes, or beyond the 25 MB per-turn budget the hosted agent enforces, is dropped. The hosted agent writes them into the Codex workspace and appends their paths to the prompt. Attachments belong to the turn that sends them, so the tray empties on submit.
+
+**Thinking** sets the reasoning effort (`minimal`, `low`, `medium`, `high`) for the turn; leaving it on *Default* sends no `reasoning` field and lets the runtime configuration decide. Changing the effort restarts the Codex engine through its configuration fingerprint.
+
+Backend failures surface as a dismissable card above the composer, separate from the transcript, with the upstream message intact.
 
 ### Ask-user cards
 
