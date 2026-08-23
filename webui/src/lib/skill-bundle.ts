@@ -99,7 +99,7 @@ function assertSafe(name: string): void {
     !name ||
     name.startsWith("/") ||
     name.includes("\\") ||
-    name.split("/").some((part) => part === ".." || part === ".")
+    name.split("/").some((part) => !part || part === ".." || part === ".")
   ) {
     throw new SkillBundleError(`The bundle contains an unsafe path: ${name}`);
   }
