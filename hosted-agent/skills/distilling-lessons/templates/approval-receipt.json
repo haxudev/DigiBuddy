@@ -1,0 +1,7 @@
+{
+  "user_approval_id": "<host-recorded user decision id>",
+  "proposal_id": "evt-<32 lowercase hex>",
+  "approved_diff": "<exact approved_diff returned by propose>",
+  "result_sha256": "sha256:<64 lowercase hex returned by propose>",
+  "after_content": "<exact afterContent returned by propose>"
+}

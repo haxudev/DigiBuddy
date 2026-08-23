@@ -1,0 +1,1553 @@
+{
+  "schema": "agent-maturity-bank/2",
+  "model": {
+    "name": "Microsoft Agentic AI adoption maturity model",
+    "root": "https://learn.microsoft.com/en-us/agents/adoption-maturity-model/",
+    "retrieved": "2026-08-21",
+    "levels": [
+      100,
+      200,
+      300,
+      400,
+      500
+    ],
+    "level_names": {
+      "100": {
+        "en": "Initial",
+        "zh": "初始"
+      },
+      "200": {
+        "en": "Repeatable",
+        "zh": "可重复"
+      },
+      "300": {
+        "en": "Defined",
+        "zh": "已定义"
+      },
+      "400": {
+        "en": "Capable",
+        "zh": "有能力"
+      },
+      "500": {
+        "en": "Efficient",
+        "zh": "高效"
+      }
+    }
+  },
+  "tiers": {
+    "pulse": {
+      "qa": "all",
+      "qb": "batched-per-pillar",
+      "qc": false,
+      "probe2": false,
+      "score_ceiling": 300,
+      "expected_questions": "~20",
+      "duration": "25-35 min"
+    },
+    "standard": {
+      "qa": "all",
+      "qb": "per-dimension",
+      "qc": true,
+      "probe2": false,
+      "expected_questions": "30-45 (typically 30-36)",
+      "duration": "60-90 min"
+    },
+    "deep": {
+      "qa": "all",
+      "qb": "per-dimension",
+      "qc": true,
+      "probe2": true,
+      "expected_questions": "45-60",
+      "duration": "2-3 h"
+    }
+  },
+  "pillars": [
+    {
+      "id": "A",
+      "name": {
+        "en": "AI strategy and experience",
+        "zh": "AI 战略与体验"
+      },
+      "source": "https://learn.microsoft.com/en-us/agents/adoption-maturity-model/maturity-model-strategy",
+      "qb_batched": {
+        "prompt": {
+          "en": "Before we move on: for each answer at 300 or above, name the artifact that supports that dimension. Reply as a keyed mapping, one line per dimension: A1: artifact or none; A2: artifact or none; A3: artifact or none.",
+          "zh": "在离开本支柱之前：针对每个 300 及以上的回答，说出支撑该维度的制品。请按维度逐行回答：A1: 制品或无；A2: 制品或无；A3: 制品或无。"
+        },
+        "response_format": "dimension-evidence-map"
+      },
+      "dimensions": [
+        {
+          "id": "A1",
+          "name": {
+            "en": "Vision and executive sponsorship",
+            "zh": "愿景与高管发起人"
+          },
+          "source_heading": "Pillar A, AI strategy block: vision articulation, executive leadership, agent-first definition; Responsible AI block at every level",
+          "rai_bearing": true,
+          "qa": {
+            "prompt": {
+              "en": "Which of these best describes how AI agents are actually talked about by your leadership today?",
+              "zh": "关于 AI agent，你们领导层今天的真实状态最接近下面哪一条？"
+            },
+            "anchors": [
+              {
+                "level": 100,
+                "text": {
+                  "en": "Nobody has said out loud what agents are for. Whoever is curious tries something, and no executive owns it. Responsible-AI risk has not come up as a topic.",
+                  "zh": "没人明确说过 agent 是用来干什么的。谁有兴趣谁试，没有高管对它负责。「负责任 AI」还没被当成一个议题提起过。"
+                }
+              },
+              {
+                "level": 200,
+                "text": {
+                  "en": "A senior leader can describe an ambition for agents, but it lives in a deck rather than in the plan, and different leaders describe it differently. People know responsible AI matters, but it is not part of the strategy.",
+                  "zh": "有位高层能讲出对 agent 的构想，但它活在 PPT 里而不在计划里，而且不同领导讲出来的版本不一样。大家知道负责任 AI 重要，但它不在战略里。"
+                },
+                "short": {
+                  "en": "A leader can describe an ambition, but it lives in a deck, not the plan."
+                }
+              },
+              {
+                "level": 300,
+                "text": {
+                  "en": "There is a written, approved agent strategy with a named executive sponsor and a roadmap people can point to. Responsible-AI principles are part of how that strategy and its decisions get set.",
+                  "zh": "有一份写下来、审批过的 agent 战略，有具名的高管发起人，也有大家指得出来的路线图。负责任 AI 的原则参与了这份战略和相关决策的制定。"
+                },
+                "short": {
+                  "en": "A written, approved strategy with a named sponsor and a roadmap."
+                }
+              },
+              {
+                "level": 400,
+                "text": {
+                  "en": "The agent strategy sits inside enterprise planning; business units have their own sub-plans that ladder up to it, and leadership reviews outcomes on a fixed cadence. Leaders describe responsible AI as a competitive advantage rather than a constraint.",
+                  "zh": "agent 战略长在企业级规划里；各业务单元有自己向上对齐的子计划，领导层按固定节奏 review 结果。领导谈负责任 AI 时，把它讲成竞争优势而不是约束。"
+                },
+                "short": {
+                  "en": "The strategy sits inside enterprise planning, reviewed on a fixed cadence."
+                }
+              },
+              {
+                "level": 500,
+                "text": {
+                  "en": "Leaders at every level use agents in their own work and refresh the strategy from real telemetry, with named C-suite accountability. Responsible AI is simply one of the company's values, not an AI-specific programme.",
+                  "zh": "各层级的领导自己就在用 agent 干活，并根据真实运行数据刷新战略，C 级有具名问责。负责任 AI 就是公司价值观之一，而不是一个 AI 专项。"
+                },
+                "short": {
+                  "en": "Leaders use agents themselves and refresh the strategy from real telemetry."
+                }
+              }
+            ]
+          },
+          "qb": {
+            "prompt": {
+              "en": "Name the artifact that would show me that — the document, the recurring meeting, or the person.",
+              "zh": "说出一件能证明这点的东西 —— 那份文档、那个例会，或者那个人。"
+            }
+          },
+          "qc": {
+            "fires_at": [
+              400,
+              500
+            ],
+            "prompt": {
+              "en": "Without looking it up: when did leadership last change a priority because of what agent usage data showed, and what changed?",
+              "zh": "不用去查：上一次领导层因为 agent 的实际使用数据改变某个优先级是什么时候？改了什么？"
+            },
+            "pass_test": {
+              "en": "Passes only if the answer names a specific decision and roughly when it happened. 'We review it regularly' is a fail.",
+              "zh": "只有当回答说得出具体是哪个决定、大概什么时候发生的，才算通过。「我们定期 review」算不通过。"
+            }
+          },
+          "probe2": {
+            "prompt": {
+              "en": "If I asked a director in a different business unit to state the agent vision in one sentence, how close would their answer be to yours?",
+              "zh": "如果我去问另一个业务单元的总监，让他一句话讲讲 agent 的愿景，他的答案会和你的差多远？"
+            }
+          },
+          "header": {
+            "en": "A1 Vision",
+            "zh": "A1 愿景"
+          }
+        },
+        {
+          "id": "A2",
+          "name": {
+            "en": "Strategy-to-planning integration and key results",
+            "zh": "战略落入规划与关键结果"
+          },
+          "source_heading": "Pillar A, AI strategy block: alignment with enterprise and IT planning, budgeting, architecture standards, objectives and key results",
+          "rai_bearing": false,
+          "qa": {
+            "prompt": {
+              "en": "How does agent work get funded and measured in your organization?",
+              "zh": "在你们组织里，agent 相关的工作是怎么拿到预算、又是怎么被衡量的？"
+            },
+            "anchors": [
+              {
+                "level": 100,
+                "text": {
+                  "en": "It is funded out of whatever budget someone can find, and success is whether the demo went well. There is no link to a business goal.",
+                  "zh": "谁能挪出预算就从哪出，成功与否看那场 demo 效果好不好。跟业务目标没有连接。"
+                },
+                "short": {
+                  "en": "Funded from whatever budget someone can find; success is a good demo."
+                }
+              },
+              {
+                "level": 200,
+                "text": {
+                  "en": "Individual projects have their own targets, but they are set after the fact and each team measures differently. Nothing rolls up.",
+                  "zh": "单个项目有自己的目标，但都是事后补的，而且每个团队量的东西都不一样。汇总不上去。"
+                },
+                "short": {
+                  "en": "Projects set their own targets after the fact, each measuring differently."
+                }
+              },
+              {
+                "level": 300,
+                "text": {
+                  "en": "There are documented objectives and key results for agent adoption that are reported on a schedule, though how teams execute against them still varies a lot.",
+                  "zh": "针对 agent 落地有成文的目标与关键结果，并按周期汇报，只是各团队执行的方式差异还很大。"
+                },
+                "short": {
+                  "en": "Documented objectives and key results, reported on a schedule."
+                }
+              },
+              {
+                "level": 400,
+                "text": {
+                  "en": "Agent work goes through the same planning and budgeting cycle as everything else, and IT architecture and security standards were adjusted to fit agents rather than treating them as exceptions.",
+                  "zh": "agent 相关工作走的是和其他事情同一套规划与预算流程，而且 IT 架构与安全标准是为 agent 调整过的，而不是把 agent 当例外处理。"
+                },
+                "short": {
+                  "en": "Agent work runs through the normal planning and budgeting cycle."
+                }
+              },
+              {
+                "level": 500,
+                "text": {
+                  "en": "Priorities are re-cut during the year based on measured outcomes and external signals, not only at planning time, and the metrics themselves get revised when they stop being useful.",
+                  "zh": "优先级在年中就会依据实测结果与外部信号重切，而不是只在规划季动一次；连指标本身在失去意义时也会被改掉。"
+                },
+                "short": {
+                  "en": "Priorities are re-cut mid-year from measured outcomes, and metrics revised."
+                }
+              }
+            ]
+          },
+          "qb": {
+            "prompt": {
+              "en": "Which key result would you show a CFO to justify continuing? Name it and where it is reported.",
+              "zh": "如果要向 CFO 证明这件事该继续做，你会拿哪个关键结果给他看？说出它的名字和它在哪汇报。"
+            }
+          },
+          "qc": {
+            "fires_at": [
+              400,
+              500
+            ],
+            "prompt": {
+              "en": "Name one architecture or security standard that was changed specifically because of agents, and who signed it off.",
+              "zh": "说出一条专门因为 agent 而修改过的架构或安全标准，以及是谁签的字。"
+            },
+            "pass_test": {
+              "en": "Passes only if a specific standard and an owner are named. 'Security was involved' is a fail.",
+              "zh": "只有说得出具体是哪条标准、以及负责人是谁，才算通过。「安全团队有参与」算不通过。"
+            }
+          },
+          "probe2": {
+            "prompt": {
+              "en": "What was the last agent initiative that got turned down or deferred in a planning cycle, and on what grounds?",
+              "zh": "最近一次在规划流程里被否掉或推迟的 agent 项目是哪个？理由是什么？"
+            }
+          },
+          "header": {
+            "en": "A2 Planning",
+            "zh": "A2 规划"
+          }
+        },
+        {
+          "id": "A3",
+          "name": {
+            "en": "User experience and adoption design",
+            "zh": "用户体验与采用设计"
+          },
+          "source_heading": "Pillar A, Experience block: discovery, consistency across agents, personalization, human-agent handoff",
+          "rai_bearing": false,
+          "qa": {
+            "prompt": {
+              "en": "When one of your employees needs an agent, what actually happens?",
+              "zh": "当你们的员工需要用某个 agent 时，实际会发生什么？"
+            },
+            "anchors": [
+              {
+                "level": 100,
+                "text": {
+                  "en": "They mostly would not know one exists, and if they found it they would probably struggle to get anything useful out of it.",
+                  "zh": "他们大概率根本不知道有这么个东西；就算找到了，多半也很难从里面得到有用的结果。"
+                },
+                "short": {
+                  "en": "Most people would not know an agent exists, or get anything useful from it."
+                }
+              },
+              {
+                "level": 200,
+                "text": {
+                  "en": "The people who know, know. Those who use it get value, but each agent behaves differently and there are rough edges everyone has learned to work around.",
+                  "zh": "知道的人才知道。用起来的人确实有收益，但每个 agent 的行为都不一样，大家都学会了绕开一堆毛病。"
+                }
+              },
+              {
+                "level": 300,
+                "text": {
+                  "en": "There is a place people go to find the agent they need, and agents look and behave consistently enough that knowing one helps you use the next.",
+                  "zh": "有一个地方是大家去找所需 agent 的入口，而且不同 agent 的外观与行为足够一致 —— 会用一个就大致会用下一个。"
+                },
+                "short": {
+                  "en": "One place to find the agent you need, and agents behave consistently."
+                }
+              },
+              {
+                "level": 400,
+                "text": {
+                  "en": "People reach several agents through one surface, the experience adapts to their role and context, and handoffs between an agent and a human are visible rather than a dead end.",
+                  "zh": "人们通过一个入口就能触达多个 agent，体验会依角色与上下文自适应，而且 agent 与人之间的交接是可见的，不会走进死胡同。"
+                },
+                "short": {
+                  "en": "Several agents through one surface that adapts to role, with visible handoffs."
+                }
+              },
+              {
+                "level": 500,
+                "text": {
+                  "en": "Working with an agent feels like working with a colleague, and the experience improves on its own from how people actually use it.",
+                  "zh": "跟 agent 协作的感觉跟跟同事协作差不多，而且体验会依据人们的真实用法自行改进。"
+                },
+                "short": {
+                  "en": "Working with an agent feels like a colleague, and it improves from real use."
+                }
+              }
+            ]
+          },
+          "qb": {
+            "prompt": {
+              "en": "Where does a new joiner go on day one to find out which agents exist? Name the place.",
+              "zh": "新人入职第一天，去哪里能知道有哪些 agent 可用？说出那个地方。"
+            }
+          },
+          "qc": {
+            "fires_at": [
+              400,
+              500
+            ],
+            "prompt": {
+              "en": "When an agent cannot finish something, what does the user see, and where does the work go next?",
+              "zh": "当 agent 做不完一件事时，用户看到的是什么？这件事接下来流到哪里去？"
+            },
+            "pass_test": {
+              "en": "Passes only if a concrete handoff path is described. 'It says it cannot help' is a fail.",
+              "zh": "只有描述出具体的交接路径才算通过。「它会说帮不了你」算不通过。"
+            }
+          },
+          "probe2": {
+            "prompt": {
+              "en": "What is the most recent change you made to an agent experience because of user feedback, and how did the feedback reach you?",
+              "zh": "最近一次因为用户反馈而修改 agent 体验是改了什么？那个反馈是怎么传到你这儿的？"
+            }
+          },
+          "header": {
+            "en": "A3 UX",
+            "zh": "A3 体验"
+          }
+        }
+      ]
+    },
+    {
+      "id": "B",
+      "name": {
+        "en": "Business strategy: process transformation and value",
+        "zh": "业务战略：流程重塑与价值"
+      },
+      "source": "https://learn.microsoft.com/en-us/agents/adoption-maturity-model/maturity-model-business-process",
+      "qb_batched": {
+        "prompt": {
+          "en": "Before we move on: for each answer at 300 or above, name the artifact that supports that dimension. Reply as a keyed mapping: B1: artifact or none; B2: artifact or none; B3: artifact or none.",
+          "zh": "在离开本支柱之前：针对每个 300 及以上的回答，说出支撑该维度的制品。请按维度回答：B1: 制品或无；B2: 制品或无；B3: 制品或无。"
+        },
+        "response_format": "dimension-evidence-map"
+      },
+      "dimensions": [
+        {
+          "id": "B1",
+          "name": {
+            "en": "End-to-end process redesign",
+            "zh": "端到端流程重塑"
+          },
+          "source_heading": "Pillar B, Process excellence block: task assistance through to agents orchestrating multistep cross-system workflows",
+          "rai_bearing": false,
+          "qa": {
+            "prompt": {
+              "en": "Think of the process where agents help most today. What did you change about the process itself?",
+              "zh": "想一个 agent 目前帮助最大的流程。你们对这个流程本身做了什么改动？"
+            },
+            "anchors": [
+              {
+                "level": 100,
+                "text": {
+                  "en": "Nothing. The process runs exactly as before; the agent just helps a person do their existing step a bit faster.",
+                  "zh": "什么也没改。流程还是照旧跑，agent 只是帮某个人把他原来那一步做快一点。"
+                }
+              },
+              {
+                "level": 200,
+                "text": {
+                  "en": "We improved one or two steps. It is better, but the shape of the process — the handoffs, the waiting, the rework — is unchanged.",
+                  "zh": "我们改进了一两个步骤。是变好了，但流程的形状 —— 交接、等待、返工 —— 没变。"
+                }
+              },
+              {
+                "level": 300,
+                "text": {
+                  "en": "We redesigned the whole flow end to end so the agent actually executes steps rather than just advising, and we wrote down who does what.",
+                  "zh": "我们把整条流程端到端重新设计过，让 agent 真的去执行步骤而不只是给建议，并且把谁做什么写了下来。"
+                },
+                "short": {
+                  "en": "We redesigned the flow end to end so the agent executes, not just advises."
+                }
+              },
+              {
+                "level": 400,
+                "text": {
+                  "en": "Agents run multistep work across more than one system, and business teams now come to us proposing which process to transform next.",
+                  "zh": "agent 已经在跨多个系统跑多步骤的工作，而且现在是业务团队主动来找我们，提议下一个该改造哪条流程。"
+                },
+                "short": {
+                  "en": "Agents run multistep work across systems; business teams propose what is next."
+                }
+              },
+              {
+                "level": 500,
+                "text": {
+                  "en": "Core processes are agent-operated and adapt as they run, handling exceptions themselves; agents have made operating models possible that we could not have run before.",
+                  "zh": "核心流程由 agent 运行并在运行中自适应、自己处理异常；agent 让我们跑出了以前根本跑不了的运营模式。"
+                },
+                "short": {
+                  "en": "Core processes are agent-operated, adapt as they run, and handle exceptions."
+                }
+              }
+            ]
+          },
+          "qb": {
+            "prompt": {
+              "en": "Is there a before-and-after picture of that process? Who owns it end to end?",
+              "zh": "这条流程有没有改造前后的对照图？端到端的 owner 是谁？"
+            }
+          },
+          "qc": {
+            "fires_at": [
+              400,
+              500
+            ],
+            "prompt": {
+              "en": "Name the systems a single agent run touches in that process, in order.",
+              "zh": "在那条流程里，一次 agent 运行会依次碰到哪些系统？请按顺序说出来。"
+            },
+            "pass_test": {
+              "en": "Passes only if two or more distinct systems are named in sequence. A single system, or 'various systems', is a fail.",
+              "zh": "只有按顺序说出两个及以上不同系统才算通过。只有一个系统，或者「各种系统」，算不通过。"
+            }
+          },
+          "probe2": {
+            "prompt": {
+              "en": "Which step in that process did you deliberately leave with a human, and why that one?",
+              "zh": "那条流程里，你们刻意留给人做的是哪一步？为什么是那一步？"
+            }
+          },
+          "header": {
+            "en": "B1 Process",
+            "zh": "B1 流程"
+          }
+        },
+        {
+          "id": "B2",
+          "name": {
+            "en": "Human-agent decision rights and oversight",
+            "zh": "人机决策权与监督"
+          },
+          "source_heading": "Pillar B, Process excellence block: explicit decision rights, humans staying in control, autonomy raised only where processes and governance are mature; trust and risk indicators in value metrics",
+          "rai_bearing": true,
+          "qa": {
+            "prompt": {
+              "en": "How do people know what an agent is allowed to decide on its own?",
+              "zh": "在你们这儿，大家怎么知道一个 agent 可以自己决定什么、不可以决定什么？"
+            },
+            "anchors": [
+              {
+                "level": 100,
+                "text": {
+                  "en": "They do not. Agents only suggest things, so the question has not come up, and nobody has asked what would happen if one acted on its own.",
+                  "zh": "不知道。agent 只是给建议，所以这个问题还没出现过，也没人问过「如果它自己动手了会怎样」。"
+                }
+              },
+              {
+                "level": 200,
+                "text": {
+                  "en": "It depends who built it. Each team made its own call about what the agent can touch, and those calls are not written down anywhere comparable.",
+                  "zh": "看是谁做的。每个团队自己决定了 agent 能碰什么，而且这些决定没有写在任何可比对的地方。"
+                }
+              },
+              {
+                "level": 300,
+                "text": {
+                  "en": "For the processes that matter, we have written down which decisions belong to the agent, which belong to a person, and when it must escalate.",
+                  "zh": "对重要的流程，我们把哪些决定归 agent、哪些归人、什么情况必须上报，都写下来了。"
+                },
+                "short": {
+                  "en": "For processes that matter, we wrote down who decides what and when to escalate."
+                }
+              },
+              {
+                "level": 400,
+                "text": {
+                  "en": "Decision rights differ by how risky the agent is, we let agents decide autonomously in low-risk cases, and we revisit those boundaries as processes change.",
+                  "zh": "决策权按 agent 的风险高低分档，低风险场景我们让 agent 自主决定，并且会随流程变化重新审视这些边界。"
+                },
+                "short": {
+                  "en": "Decision rights vary by risk; low-risk cases are decided autonomously."
+                }
+              },
+              {
+                "level": 500,
+                "text": {
+                  "en": "Agents operate with high autonomy under oversight that is itself instrumented, and trust and risk indicators sit alongside efficiency numbers in how we judge them.",
+                  "zh": "agent 在高度自主下运行，而监督本身也是被度量的；在评判它们时，信任与风险指标和效率数字并列。"
+                },
+                "short": {
+                  "en": "High autonomy under oversight that is itself instrumented and measured."
+                }
+              }
+            ]
+          },
+          "qb": {
+            "prompt": {
+              "en": "Where is that written down, and when was it last reviewed?",
+              "zh": "这些写在哪里？上一次 review 是什么时候？"
+            }
+          },
+          "qc": {
+            "fires_at": [
+              400,
+              500
+            ],
+            "prompt": {
+              "en": "Describe the last time an agent escalated to a human. What triggered it and what happened next?",
+              "zh": "描述最近一次 agent 把事情上报给人的情况。是什么触发的？后来怎么处理的？"
+            },
+            "pass_test": {
+              "en": "Passes only if a specific trigger and outcome are described. 'It escalates when it is unsure' is a fail.",
+              "zh": "只有描述出具体的触发条件和处理结果才算通过。「它不确定的时候就会上报」算不通过。"
+            }
+          },
+          "probe2": {
+            "prompt": {
+              "en": "Which agent has the widest blast radius today, and who would be accountable if it acted wrongly?",
+              "zh": "今天哪个 agent 的影响半径最大？如果它做错了，谁来担责？"
+            }
+          },
+          "header": {
+            "en": "B2 Oversight",
+            "zh": "B2 决策权"
+          }
+        },
+        {
+          "id": "B3",
+          "name": {
+            "en": "Value measurement and portfolio decisions",
+            "zh": "价值度量与组合决策"
+          },
+          "source_heading": "Pillar B, Value realization block: baselines, standardized KPIs, dashboards aggregating value not usage, decisions to scale refine or retire",
+          "rai_bearing": false,
+          "qa": {
+            "prompt": {
+              "en": "How do you know whether your agents are worth what they cost?",
+              "zh": "你们怎么知道自己的 agent 值不值它花掉的钱？"
+            },
+            "anchors": [
+              {
+                "level": 100,
+                "text": {
+                  "en": "We do not measure it. People say it feels faster and that is what we go on.",
+                  "zh": "我们没有量过。大家说感觉快了些，我们就以此为准。"
+                }
+              },
+              {
+                "level": 200,
+                "text": {
+                  "en": "Some projects worked out a number afterwards, but every team calculates it differently and none of it ties to company KPIs.",
+                  "zh": "有些项目事后算过一个数，但每个团队的算法都不一样，也都没跟公司 KPI 挂上。"
+                },
+                "short": {
+                  "en": "Some projects worked out a number afterwards, each team calculating differently."
+                }
+              },
+              {
+                "level": 300,
+                "text": {
+                  "en": "Each agent has defined KPIs and a baseline captured before it went live, and the business case stated the expected outcome up front. The insight stays inside each domain though.",
+                  "zh": "每个 agent 都有定义好的 KPI 和上线前采集的基线，业务论证里事先写明了预期结果。只是这些洞察还留在各自领域内部。"
+                },
+                "short": {
+                  "en": "Each agent has defined KPIs and a baseline captured before it went live."
+                }
+              },
+              {
+                "level": 400,
+                "text": {
+                  "en": "The same metrics roll up across agents into one view that leadership reviews, and we have actually redesigned or retired an agent because the numbers said so.",
+                  "zh": "同一套指标能跨 agent 汇总成一个视图供领导层 review，而且我们真的因为数字不好而重做或下线过某个 agent。"
+                },
+                "short": {
+                  "en": "Metrics roll up into one view leadership reviews, and we have acted on them."
+                }
+              },
+              {
+                "level": 500,
+                "text": {
+                  "en": "We can state total AI value across the portfolio in near real time, the measures cover experience and trust as well as efficiency, and scaling decisions are made from that data.",
+                  "zh": "我们能近乎实时地讲出整个组合的 AI 总价值，度量既包含效率也包含体验与信任，扩张决策就是从这些数据里做出来的。"
+                },
+                "short": {
+                  "en": "Near real-time portfolio value covering experience and trust, driving scaling."
+                }
+              }
+            ]
+          },
+          "qb": {
+            "prompt": {
+              "en": "What was the baseline before the agent, and who captured it?",
+              "zh": "上 agent 之前的基线是多少？是谁采的？"
+            }
+          },
+          "qc": {
+            "fires_at": [
+              400,
+              500
+            ],
+            "prompt": {
+              "en": "Name an agent you retired or rebuilt because of what the measurement showed.",
+              "zh": "说出一个你们因为度量结果而下线或重做的 agent。"
+            },
+            "pass_test": {
+              "en": "Passes only if a specific agent and the measurement that condemned it are named. 'We would retire one if needed' is a fail.",
+              "zh": "只有说得出具体是哪个 agent、以及是哪个度量判了它的死刑，才算通过。「有需要的话我们会下线」算不通过。"
+            }
+          },
+          "probe2": {
+            "prompt": {
+              "en": "Who currently reads the value dashboard, and what decision did they last make from it?",
+              "zh": "现在谁在看那个价值看板？他上一次依据它做了什么决定？"
+            }
+          },
+          "header": {
+            "en": "B3 Value",
+            "zh": "B3 价值"
+          }
+        }
+      ]
+    },
+    {
+      "id": "C",
+      "name": {
+        "en": "AI governance and security",
+        "zh": "AI 治理与安全"
+      },
+      "source": "https://learn.microsoft.com/en-us/agents/adoption-maturity-model/maturity-model-security-governance",
+      "qb_batched": {
+        "prompt": {
+          "en": "Before we move on: for each answer at 300 or above, name the artifact that supports that dimension. Reply as a keyed mapping: C1: artifact or none; C2: artifact or none; C3: artifact or none.",
+          "zh": "在离开本支柱之前：针对每个 300 及以上的回答，说出支撑该维度的制品。请按维度回答：C1: 制品或无；C2: 制品或无；C3: 制品或无。"
+        },
+        "response_format": "dimension-evidence-map"
+      },
+      "dimensions": [
+        {
+          "id": "C1",
+          "name": {
+            "en": "Governance framework and agent classification",
+            "zh": "治理框架与 agent 分级"
+          },
+          "source_heading": "Pillar C, Governance and security block: ownership, decision rights, tiering by purpose criticality and autonomy, central registry, CoE or AI Council; Responsible AI block at every level",
+          "rai_bearing": true,
+          "qa": {
+            "prompt": {
+              "en": "How does a new agent get from someone's idea to something people rely on?",
+              "zh": "在你们这儿，一个 agent 从某人的想法变成大家依赖的东西，要经过什么？"
+            },
+            "anchors": [
+              {
+                "level": 100,
+                "text": {
+                  "en": "Whoever builds it publishes it. There is no review, no register of what exists, and every agent is treated the same regardless of what it touches. Responsible-AI risk is not assessed.",
+                  "zh": "谁做的谁发布。没有评审，没有一份「现有 agent 清单」，而且不管它碰什么，所有 agent 一视同仁。负责任 AI 风险没有被评估过。"
+                }
+              },
+              {
+                "level": 200,
+                "text": {
+                  "en": "There are written rules and usually a security review before production, but whether they get applied depends on who is involved. Responsible-AI checks exist as a checklist someone may or may not run.",
+                  "zh": "有成文规则，上生产前一般会过一次安全评审，但真正执行与否取决于经手的是谁。负责任 AI 检查以清单形式存在，跑不跑看人。"
+                },
+                "short": {
+                  "en": "Written rules and usually a security review, but applied inconsistently."
+                }
+              },
+              {
+                "level": 300,
+                "text": {
+                  "en": "Agents are classified by what they do, how critical they are and how much autonomy they have, with different approval requirements per class, a central register, and a body that reviews the higher-risk ones. High-risk agents need a documented Responsible-AI assessment.",
+                  "zh": "agent 按用途、关键程度、自主度分级，不同等级有不同审批要求，有中央台账，也有一个机构负责评审高风险的那些。高风险 agent 需要一份成文的负责任 AI 评估。"
+                },
+                "short": {
+                  "en": "Agents classified by criticality and autonomy, with a central register."
+                }
+              },
+              {
+                "level": 400,
+                "text": {
+                  "en": "Governance is risk-based and partly automated: low-risk agents move fast under delegated approval while mission-critical ones carry full rigour, and a cross-functional council actively monitors rather than only approves. Responsible-AI checks happen by design during build, not as a gate at the end.",
+                  "zh": "治理是基于风险且部分自动化的：低风险 agent 在授权审批下快速通过，关键业务 agent 走完整严格流程；跨职能委员会是在持续监控而不只是审批。负责任 AI 检查内建在开发过程中，而不是最后一道关卡。"
+                },
+                "short": {
+                  "en": "Risk-based, partly automated governance with a council that actively monitors."
+                }
+              },
+              {
+                "level": 500,
+                "text": {
+                  "en": "Agents are run as tiered digital services whose controls and permitted autonomy adjust as usage, risk and regulation change. Trust, risk and ethics show up in strategic and performance discussions, not only after an incident.",
+                  "zh": "agent 作为分级的数字服务在运行，其管控与允许的自主度会随使用情况、风险和监管变化而调整。信任、风险与伦理会出现在战略与绩效讨论里，而不只是出事之后。"
+                },
+                "short": {
+                  "en": "Agents run as tiered digital services whose controls adjust as risk changes."
+                }
+              }
+            ]
+          },
+          "qb": {
+            "prompt": {
+              "en": "How many agents are in production right now, and where is that list?",
+              "zh": "现在生产环境里有多少个 agent？那份清单在哪儿？"
+            }
+          },
+          "qc": {
+            "fires_at": [
+              400,
+              500
+            ],
+            "prompt": {
+              "en": "Name the agent classes you use and one control that differs between the lowest and the highest.",
+              "zh": "说出你们用的 agent 分级名称，以及最低级和最高级之间有哪一条管控是不同的。"
+            },
+            "pass_test": {
+              "en": "Passes only if named classes and a concrete differing control are given. 'We handle them differently' is a fail.",
+              "zh": "只有说出具体分级名称和一条确实不同的管控措施才算通过。「我们区别对待」算不通过。"
+            }
+          },
+          "probe2": {
+            "prompt": {
+              "en": "Who can say no to an agent going live, and when did they last do it?",
+              "zh": "谁有权拦下一个 agent 上线？他上一次行使这个权力是什么时候？"
+            }
+          },
+          "header": {
+            "en": "C1 Govern",
+            "zh": "C1 治理"
+          }
+        },
+        {
+          "id": "C2",
+          "name": {
+            "en": "Security, identity and data boundaries",
+            "zh": "安全、身份与数据边界"
+          },
+          "source_heading": "Pillar C, Governance and security block: identity and access, data policy and connector governance as an agent safety boundary, environment separation, audit logging",
+          "rai_bearing": false,
+          "qa": {
+            "prompt": {
+              "en": "What stops an agent from reaching data it should not reach?",
+              "zh": "是什么在阻止一个 agent 去碰它不该碰的数据？"
+            },
+            "anchors": [
+              {
+                "level": 100,
+                "text": {
+                  "en": "Honestly, mostly the fact that nobody has tried. Agents run with whatever access the builder had, in whatever environment they built them in.",
+                  "zh": "老实说，主要是因为还没人试过。agent 就带着开发者本人的权限，在他随手用的那个环境里跑。"
+                }
+              },
+              {
+                "level": 200,
+                "text": {
+                  "en": "We have separate environments for some things and documented data rules, but enforcement is manual and depends on people remembering.",
+                  "zh": "有些东西我们分了环境，也有成文的数据规则，但执行靠手工，靠人记得住。"
+                },
+                "short": {
+                  "en": "Some separated environments and documented data rules, enforced manually."
+                }
+              },
+              {
+                "level": 300,
+                "text": {
+                  "en": "Identity, access and data policy are enforced by configuration rather than by instruction, environments are properly separated, and agent activity is logged where we can audit it.",
+                  "zh": "身份、访问与数据策略是靠配置强制的而不是靠通知，环境做了正经隔离，agent 的活动有日志、可审计。"
+                },
+                "short": {
+                  "en": "Identity, access and data policy enforced by configuration, with audit logs."
+                }
+              },
+              {
+                "level": 400,
+                "text": {
+                  "en": "Which connectors and actions an agent may use is itself a governed boundary that varies by agent class, monitoring is continuous, and incident response explicitly covers AI-specific failure modes.",
+                  "zh": "一个 agent 能用哪些连接器和动作，本身就是一条按等级变化的受治理边界；监控是持续的；应急响应明确覆盖了 AI 特有的故障模式。"
+                },
+                "short": {
+                  "en": "An agent's permitted connectors and actions are a governed boundary by class."
+                }
+              },
+              {
+                "level": 500,
+                "text": {
+                  "en": "Posture is validated continuously rather than at release, including adversarial testing, and controls adapt as new agent capabilities and regulations appear.",
+                  "zh": "安全态势是持续验证的而不是发版时验一次，包含对抗性测试；管控会随新的 agent 能力和监管出现而调整。"
+                },
+                "short": {
+                  "en": "Posture validated continuously, including adversarial testing."
+                }
+              }
+            ]
+          },
+          "qb": {
+            "prompt": {
+              "en": "If I asked for the audit trail of everything one agent did last Tuesday, could you produce it? From where?",
+              "zh": "如果我要某个 agent 上周二做过的所有事情的审计记录，你拿得出来吗？从哪儿拿？"
+            }
+          },
+          "qc": {
+            "fires_at": [
+              400,
+              500
+            ],
+            "prompt": {
+              "en": "Which connectors or actions are blocked for your least-trusted agent class, and what enforces that?",
+              "zh": "对你们信任度最低的那类 agent，哪些连接器或动作是被禁的？靠什么强制？"
+            },
+            "pass_test": {
+              "en": "Passes only if a specific restriction and the mechanism enforcing it are named. 'We have policies' is a fail.",
+              "zh": "只有说出具体的限制项和强制它的机制才算通过。「我们有策略」算不通过。"
+            }
+          },
+          "probe2": {
+            "prompt": {
+              "en": "Has an agent ever surfaced information to someone who should not have seen it? What changed afterwards?",
+              "zh": "有没有发生过 agent 把信息暴露给了不该看到的人？之后改了什么？"
+            }
+          },
+          "header": {
+            "en": "C2 Security",
+            "zh": "C2 安全"
+          }
+        },
+        {
+          "id": "C3",
+          "name": {
+            "en": "Operations and lifecycle management",
+            "zh": "运营与生命周期管理"
+          },
+          "source_heading": "Pillar C, Operations and lifecycle block: monitoring, SLAs differentiated by criticality, incident response, continuous improvement, retirement",
+          "rai_bearing": false,
+          "qa": {
+            "prompt": {
+              "en": "When an agent breaks at 9am on a Monday, what happens?",
+              "zh": "周一早上九点某个 agent 挂了，会发生什么？"
+            },
+            "anchors": [
+              {
+                "level": 100,
+                "text": {
+                  "en": "Someone notices and messages whoever they think built it. There is no owner on paper and no monitoring.",
+                  "zh": "有人发现了，就去私信他认为是作者的那个人。纸面上没有 owner，也没有监控。"
+                }
+              },
+              {
+                "level": 200,
+                "text": {
+                  "en": "We would see it in a standard platform report eventually. Support falls to the two or three people who understand it.",
+                  "zh": "我们最终会在平台自带的报表里看到。支持工作落在懂这块的那两三个人身上。"
+                }
+              },
+              {
+                "level": 300,
+                "text": {
+                  "en": "It has a named owner and a support expectation that matches how critical it is, monitoring covers agreed metrics, and there is a documented escalation path people actually follow.",
+                  "zh": "它有具名 owner，支持等级与它的关键程度匹配，监控覆盖了约定指标，而且有一条大家真的会走的成文升级路径。"
+                },
+                "short": {
+                  "en": "A named owner, monitoring, and a documented escalation path people follow."
+                }
+              },
+              {
+                "level": 400,
+                "text": {
+                  "en": "Monitoring catches it before the user does and may remediate it automatically; we tune performance on an ongoing basis and report operational health to stakeholders regularly.",
+                  "zh": "监控会在用户之前发现它，甚至可能自动修复；我们持续做性能调优，并定期向相关方汇报运行健康度。"
+                },
+                "short": {
+                  "en": "Monitoring catches it before the user does and may remediate automatically."
+                }
+              },
+              {
+                "level": 500,
+                "text": {
+                  "en": "Most problems are detected and resolved without anyone being paged, and user feedback feeds directly into what gets fixed next.",
+                  "zh": "大部分问题在没人被叫醒的情况下就被发现并解决了，用户反馈直接决定下一个修什么。"
+                },
+                "short": {
+                  "en": "Most problems resolve without anyone being paged; feedback drives fixes."
+                }
+              }
+            ]
+          },
+          "qb": {
+            "prompt": {
+              "en": "Who is the named owner of your most-used agent, and what is their response expectation?",
+              "zh": "你们用得最多的那个 agent，具名 owner 是谁？他的响应要求是什么？"
+            }
+          },
+          "qc": {
+            "fires_at": [
+              400,
+              500
+            ],
+            "prompt": {
+              "en": "Describe the last agent incident: how was it detected, and how long until it was resolved?",
+              "zh": "描述最近一次 agent 事故：是怎么被发现的？多久解决的？"
+            },
+            "pass_test": {
+              "en": "Passes only if the detection route and a rough duration are given. 'We have not had one' should be probed once more before accepting.",
+              "zh": "只有说出发现途径和大致时长才算通过。「我们没出过事故」需要再追问一次才能接受。"
+            }
+          },
+          "probe2": {
+            "prompt": {
+              "en": "Which agents have you retired, and what triggered the decision?",
+              "zh": "你们下线过哪些 agent？是什么触发了那个决定？"
+            }
+          },
+          "header": {
+            "en": "C3 Ops",
+            "zh": "C3 运维"
+          }
+        }
+      ]
+    },
+    {
+      "id": "D",
+      "name": {
+        "en": "Technology and data",
+        "zh": "技术与数据"
+      },
+      "source": "https://learn.microsoft.com/en-us/agents/adoption-maturity-model/maturity-model-technology",
+      "qb_batched": {
+        "prompt": {
+          "en": "Before we move on: for each answer at 300 or above, name the artifact that supports that dimension. Reply as a keyed mapping: D1: artifact or none; D2: artifact or none; D3: artifact or none.",
+          "zh": "在离开本支柱之前：针对每个 300 及以上的回答，说出支撑该维度的制品。请按维度回答：D1: 制品或无；D2: 制品或无；D3: 制品或无。"
+        },
+        "response_format": "dimension-evidence-map"
+      },
+      "dimensions": [
+        {
+          "id": "D1",
+          "name": {
+            "en": "Platform and architecture standardization",
+            "zh": "平台与架构标准化"
+          },
+          "source_heading": "Pillar D: standardized agent architecture and platforms, approved platforms, reference architectures, when to use Agent Builder vs Copilot Studio vs Microsoft Foundry",
+          "rai_bearing": false,
+          "qa": {
+            "prompt": {
+              "en": "If two teams each need to build an agent next month, how do they decide what to build it on?",
+              "zh": "如果下个月有两个团队各要做一个 agent，他们怎么决定用什么来做？"
+            },
+            "anchors": [
+              {
+                "level": 100,
+                "text": {
+                  "en": "Each team picks whatever they came across. There is no list of approved options and no one could say which is right for which job.",
+                  "zh": "各团队用自己碰巧接触到的东西。没有一份认可的选项清单，也没人说得清什么场景该用什么。"
+                }
+              },
+              {
+                "level": 200,
+                "text": {
+                  "en": "We have drifted towards a couple of platforms, but the choice comes down to what the team already knows rather than what the use case needs.",
+                  "zh": "我们大致收敛到了两三个平台，但选哪个取决于团队已经会什么，而不是这个场景需要什么。"
+                },
+                "short": {
+                  "en": "We drifted towards a couple of platforms, chosen by what the team already knows."
+                }
+              },
+              {
+                "level": 300,
+                "text": {
+                  "en": "There is a written decision rule for which platform fits which kind of agent, plus reference architectures and patterns that teams actually reuse.",
+                  "zh": "有一条成文的决策规则说明什么类型的 agent 该用哪个平台，还有团队真的会复用的参考架构与模式。"
+                },
+                "short": {
+                  "en": "A written rule for which platform fits which agent, plus reusable patterns."
+                }
+              },
+              {
+                "level": 400,
+                "text": {
+                  "en": "The standards are built into the templates and tooling teams start from, so following them is the path of least resistance rather than a review someone has to pass.",
+                  "zh": "标准已经内建在团队起步用的模板与工具里，所以遵守标准是最省事的路径，而不是必须通过的一道评审。"
+                },
+                "short": {
+                  "en": "Standards are built into the templates and tooling teams start from."
+                }
+              },
+              {
+                "level": 500,
+                "text": {
+                  "en": "Standards are revised as new agent patterns appear — multi-agent orchestration, higher autonomy — rather than frozen at the version that was right two years ago.",
+                  "zh": "标准会随新的 agent 模式出现而修订 —— 多 agent 编排、更高自主度 —— 而不是冻结在两年前正确的那个版本。"
+                },
+                "short": {
+                  "en": "Standards get revised as new agent patterns appear, not frozen."
+                }
+              }
+            ]
+          },
+          "qb": {
+            "prompt": {
+              "en": "Where is that decision rule written, and when was it last updated?",
+              "zh": "那条决策规则写在哪儿？上次更新是什么时候？"
+            }
+          },
+          "qc": {
+            "fires_at": [
+              400,
+              500
+            ],
+            "prompt": {
+              "en": "Name the template or repository a team starts from today, and one guardrail that is already in it.",
+              "zh": "说出团队今天起步用的那个模板或代码库，以及里面已经内建的一条护栏。"
+            },
+            "pass_test": {
+              "en": "Passes only if a specific starting point and an embedded guardrail are named. 'We have documentation' is a fail.",
+              "zh": "只有说出具体的起步模板和一条内建护栏才算通过。「我们有文档」算不通过。"
+            }
+          },
+          "probe2": {
+            "prompt": {
+              "en": "When did you last say no to a platform someone wanted to use, and what was the reasoning?",
+              "zh": "上一次你们否掉某人想用的某个平台是什么时候？理由是什么？"
+            }
+          },
+          "header": {
+            "en": "D1 Platform",
+            "zh": "D1 平台"
+          }
+        },
+        {
+          "id": "D2",
+          "name": {
+            "en": "Data foundation and grounding",
+            "zh": "数据基础与知识接地"
+          },
+          "source_heading": "Pillar D: secure governed data and integration access, retrieval strategy, Microsoft 365 for collaboration content and Fabric OneLake for business data, medallion layers, certified datasets",
+          "rai_bearing": false,
+          "qa": {
+            "prompt": {
+              "en": "When an agent needs to answer from your business data, where does that data come from?",
+              "zh": "当一个 agent 需要基于你们的业务数据作答时，那些数据是从哪来的？"
+            },
+            "anchors": [
+              {
+                "level": 100,
+                "text": {
+                  "en": "Mostly documents someone pointed it at, or a direct call into a system. There is no thought-through retrieval approach.",
+                  "zh": "多半是某人随手指给它的文档，或者直接调某个系统。没有想清楚的检索方案。"
+                }
+              },
+              {
+                "level": 200,
+                "text": {
+                  "en": "Collaboration content is reachable, but the structured business data agents really need is still stuck inside systems, so each agent gets its own point integration.",
+                  "zh": "协作类内容能拿到，但 agent 真正需要的结构化业务数据还锁在各个系统里，所以每个 agent 都得自己做点对点集成。"
+                },
+                "short": {
+                  "en": "Collaboration content is reachable, but business data is stuck inside systems."
+                }
+              },
+              {
+                "level": 300,
+                "text": {
+                  "en": "There is a documented pattern for where different kinds of data live and how agents should reach them, and agents ground their answers in sources someone has validated.",
+                  "zh": "有一套成文的模式说明不同种类的数据放在哪、agent 该怎么取，而且 agent 是基于有人验证过的数据源作答的。"
+                },
+                "short": {
+                  "en": "A documented pattern for where data lives and how agents reach it."
+                }
+              },
+              {
+                "level": 400,
+                "text": {
+                  "en": "We can see which systems, APIs and datasets agents actually use across workflows, and access happens through governed paths rather than credentials someone pasted in.",
+                  "zh": "我们能看清 agent 在各流程中实际用了哪些系统、API 和数据集，访问走的是受治理的路径，而不是某人粘贴进去的凭据。"
+                },
+                "short": {
+                  "en": "We can see which systems agents use, reached through governed paths."
+                }
+              },
+              {
+                "level": 500,
+                "text": {
+                  "en": "The data models and integrations agents depend on are maintained as shared enterprise assets with owners, not as a side effect of whoever built the last agent.",
+                  "zh": "agent 依赖的数据模型与集成是作为有 owner 的共享企业资产来维护的，而不是最后一个做 agent 的人留下的副产品。"
+                },
+                "short": {
+                  "en": "Data models and integrations are maintained as shared enterprise assets."
+                }
+              }
+            ]
+          },
+          "qb": {
+            "prompt": {
+              "en": "Name one dataset an agent grounds on, and who is accountable for its quality.",
+              "zh": "说出一个 agent 用来接地的数据集，以及谁对它的质量负责。"
+            }
+          },
+          "qc": {
+            "fires_at": [
+              400,
+              500
+            ],
+            "prompt": {
+              "en": "Can you list which systems your agents currently read from? Where does that list live?",
+              "zh": "你能列出你们的 agent 目前从哪些系统读数据吗？那份清单在哪儿？"
+            },
+            "pass_test": {
+              "en": "Passes only if an actual inventory location is named. Naming systems from memory without an inventory is a partial pass at 300.",
+              "zh": "只有说出真实存在的清单位置才算通过。凭记忆报系统名但没有清单，只能算 300 的部分通过。"
+            },
+            "fail_exemplar": {
+              "en": "I can name the systems from memory, but there is no inventory",
+              "zh": "我能凭记忆报出系统名，但没有清单"
+            }
+          },
+          "probe2": {
+            "prompt": {
+              "en": "What happens today when an agent grounds on stale or wrong data — how would you find out?",
+              "zh": "如果 agent 接地在过期或错误的数据上，今天会怎样？你们怎么才会发现？"
+            }
+          },
+          "header": {
+            "en": "D2 Data",
+            "zh": "D2 数据"
+          }
+        },
+        {
+          "id": "D3",
+          "name": {
+            "en": "Lifecycle, reuse and observability",
+            "zh": "生命周期、复用与可观测性"
+          },
+          "source_heading": "Pillar D: managed automated development lifecycle, reusable components, built-in observability and evaluation; continuous security-posture validation and adversarial testing",
+          "rai_bearing": true,
+          "qa": {
+            "prompt": {
+              "en": "How does a change to an agent get from a developer's hands into production, and how do you know it did not get worse?",
+              "zh": "对 agent 的一次改动，是怎么从开发者手里进到生产的？你们怎么知道它没变差？"
+            },
+            "anchors": [
+              {
+                "level": 100,
+                "text": {
+                  "en": "Someone edits it where it runs. There is no version history and no way to tell whether quality moved.",
+                  "zh": "有人直接在运行的地方改。没有版本历史，也没法判断质量是升是降。"
+                }
+              },
+              {
+                "level": 200,
+                "text": {
+                  "en": "Some agents have separate environments and some do not; promotion is manual, version control is used inconsistently, and quality is judged by trying it.",
+                  "zh": "有些 agent 分了环境有些没有；上线靠手工，版本管理时用时不用，质量靠试一下来判断。"
+                },
+                "short": {
+                  "en": "Environments vary by agent; promotion is manual, quality judged by trying it."
+                }
+              },
+              {
+                "level": 300,
+                "text": {
+                  "en": "Production agents follow a defined lifecycle with source control and separate environments, and common actions and integrations are built once and reused.",
+                  "zh": "生产 agent 走定义好的生命周期，有源码管理和环境隔离，常用动作与集成做一次、多处复用。"
+                },
+                "short": {
+                  "en": "A defined lifecycle with source control, separate environments, and reuse."
+                }
+              },
+              {
+                "level": 400,
+                "text": {
+                  "en": "Deployment is automated with rollback, and quality and safety are checked by automated evaluations rather than by someone trying a few prompts.",
+                  "zh": "部署是自动化的且可回滚，质量与安全靠自动化评测来把关，而不是靠某人试几条 prompt。"
+                },
+                "short": {
+                  "en": "Automated deployment with rollback, and automated quality and safety checks."
+                }
+              },
+              {
+                "level": 500,
+                "text": {
+                  "en": "Security posture and behaviour are validated continuously, including deliberate adversarial testing before releases, and evaluations get updated as agents become more capable.",
+                  "zh": "安全态势与行为是持续验证的，发版前会做有意的对抗性测试，而且评测本身会随 agent 能力增强而更新。"
+                },
+                "short": {
+                  "en": "Continuous validation including deliberate adversarial testing before release."
+                }
+              }
+            ]
+          },
+          "qb": {
+            "prompt": {
+              "en": "Show me where the deployment pipeline or the evaluation results live.",
+              "zh": "给我看看部署流水线或者评测结果在哪儿。"
+            }
+          },
+          "qc": {
+            "fires_at": [
+              400,
+              500
+            ],
+            "prompt": {
+              "en": "What does an automated evaluation actually check before a release, and when did it last block one?",
+              "zh": "发版前那套自动评测究竟检查什么？它上一次拦下一个版本是什么时候？"
+            },
+            "pass_test": {
+              "en": "Passes only if concrete checks are named and a block or near-block is recalled. 'We test before release' is a fail.",
+              "zh": "只有说出具体检查项、并回忆得起某次拦截或接近拦截的情况才算通过。「发版前我们会测」算不通过。"
+            }
+          },
+          "probe2": {
+            "prompt": {
+              "en": "Who would notice first if an agent started answering worse next week, and how?",
+              "zh": "如果下周某个 agent 开始答得更差了，谁会最先发现？怎么发现的？"
+            }
+          },
+          "header": {
+            "en": "D3 Lifecycle",
+            "zh": "D3 生命周期"
+          }
+        }
+      ]
+    },
+    {
+      "id": "E",
+      "name": {
+        "en": "Organization and culture",
+        "zh": "组织与文化"
+      },
+      "source": "https://learn.microsoft.com/en-us/agents/adoption-maturity-model/maturity-model-readiness",
+      "qb_batched": {
+        "prompt": {
+          "en": "Before we finish: for each answer at 300 or above, name the artifact that supports that dimension. Reply as a keyed mapping: E1: artifact or none; E2: artifact or none; E3: artifact or none.",
+          "zh": "在结束之前：针对每个 300 及以上的回答，说出支撑该维度的制品。请按维度回答：E1: 制品或无；E2: 制品或无；E3: 制品或无。"
+        },
+        "response_format": "dimension-evidence-map"
+      },
+      "dimensions": [
+        {
+          "id": "E1",
+          "name": {
+            "en": "AI operating model, roles and ownership",
+            "zh": "AI 运营模式、角色与归属"
+          },
+          "source_heading": "Pillar E, Organization and culture block: decision rights, accountability, intake and escalation, Center of Excellence, agent business owner, operations and support lead",
+          "rai_bearing": false,
+          "qa": {
+            "prompt": {
+              "en": "Someone in a business unit has an idea for an agent. Who do they take it to?",
+              "zh": "某个业务单元的人有了一个 agent 的想法。他该找谁？"
+            },
+            "anchors": [
+              {
+                "level": 100,
+                "text": {
+                  "en": "No idea. They would ask around, or just build it themselves. Nobody owns adoption, value or risk for agents.",
+                  "zh": "不知道。他会到处问，或者干脆自己做。没有人对 agent 的采用、价值或风险负责。"
+                }
+              },
+              {
+                "level": 200,
+                "text": {
+                  "en": "They would go to whichever team has been most active, but who decides what — and who says yes — is not clear, which causes friction.",
+                  "zh": "他会去找最活跃的那个团队，但谁定什么、谁点头，都不清楚，因此常有摩擦。"
+                },
+                "short": {
+                  "en": "People go to whichever team is most active; who decides what is unclear."
+                }
+              },
+              {
+                "level": 300,
+                "text": {
+                  "en": "There is a documented way in — an intake route, a central team or CoE that sets standards, and named roles — while the building itself happens in the business.",
+                  "zh": "有一条成文的入口 —— 需求受理路径、一个制定标准的中心团队或 CoE、以及具名角色 —— 而具体建设发生在业务侧。"
+                },
+                "short": {
+                  "en": "A documented intake route, a central team setting standards, and named roles."
+                }
+              },
+              {
+                "level": 400,
+                "text": {
+                  "en": "The operating model is wired into planning and funding cycles, decision rights are exercised rather than just documented, and business units bring proposals without being asked.",
+                  "zh": "运营模式已经接入规划与预算流程，决策权是被真正行使的而不只是写下来，业务单元不用催就会主动提方案。"
+                },
+                "short": {
+                  "en": "The operating model is wired into planning and funding; rights are exercised."
+                }
+              },
+              {
+                "level": 500,
+                "text": {
+                  "en": "Ideas surface from anywhere, get governed and scaled quickly, and the operating model itself is revised as agent capabilities change.",
+                  "zh": "想法可以从任何地方冒出来，被快速治理并规模化，而且运营模式本身会随 agent 能力变化而修订。"
+                },
+                "short": {
+                  "en": "Ideas surface anywhere, get governed and scaled fast; the model itself evolves."
+                }
+              }
+            ]
+          },
+          "qb": {
+            "prompt": {
+              "en": "Name the role or the team, and where their remit is written down.",
+              "zh": "说出那个角色或团队的名字，以及他们的职责写在哪儿。"
+            }
+          },
+          "qc": {
+            "fires_at": [
+              400,
+              500
+            ],
+            "prompt": {
+              "en": "What was the last agent idea that went through intake, and how long from idea to decision?",
+              "zh": "最近一个走完受理流程的 agent 想法是什么？从提出到决策花了多久？"
+            },
+            "pass_test": {
+              "en": "Passes only if a specific idea and a rough elapsed time are given. 'It usually takes a few weeks' is a fail.",
+              "zh": "只有说出具体是哪个想法、以及大致花了多久才算通过。「一般要几周吧」算不通过。"
+            }
+          },
+          "probe2": {
+            "prompt": {
+              "en": "Who is accountable when an agent stops delivering value — the builder, the business owner, or nobody in particular?",
+              "zh": "当一个 agent 不再产生价值时，谁来担责 —— 建它的人、业务 owner，还是没有特定的人？"
+            }
+          },
+          "header": {
+            "en": "E1 Roles",
+            "zh": "E1 角色"
+          }
+        },
+        {
+          "id": "E2",
+          "name": {
+            "en": "Enablement, skills and learning",
+            "zh": "赋能、技能与学习"
+          },
+          "source_heading": "Pillar E, Organization and culture block: structured onboarding, learning paths, knowledge repositories, upskilling",
+          "rai_bearing": false,
+          "qa": {
+            "prompt": {
+              "en": "How does someone in your organization learn to work with agents?",
+              "zh": "在你们组织里，一个人是怎么学会用 agent 干活的？"
+            },
+            "anchors": [
+              {
+                "level": 100,
+                "text": {
+                  "en": "They figure it out themselves. There is no training and no expectation set about when to use an agent and when not to.",
+                  "zh": "自己摸索。没有培训，也没人说明什么时候该用 agent、什么时候不该用。"
+                }
+              },
+              {
+                "level": 200,
+                "text": {
+                  "en": "There have been some sessions, run when someone had time. Whether you got trained depends on which team you are in.",
+                  "zh": "办过几场，谁有空谁办。你有没有被培训到，取决于你在哪个团队。"
+                }
+              },
+              {
+                "level": 300,
+                "text": {
+                  "en": "There is structured onboarding and a learning path, plus somewhere to look things up, and new joiners get pointed at it as a matter of course.",
+                  "zh": "有结构化的入门培训和学习路径，还有可查的知识库，新人入职时会被理所当然地指过去。"
+                },
+                "short": {
+                  "en": "Structured onboarding, a learning path, and somewhere to look things up."
+                }
+              },
+              {
+                "level": 400,
+                "text": {
+                  "en": "Expectations about agent-assisted work are part of how roles are defined and how performance is discussed, not an optional extra.",
+                  "zh": "对「用 agent 协作」的预期已经写进角色定义、也进了绩效对话，而不是可选项。"
+                },
+                "short": {
+                  "en": "Agent-assisted work is part of how roles are defined and performance discussed."
+                }
+              },
+              {
+                "level": 500,
+                "text": {
+                  "en": "Learning is refreshed continuously as capabilities change, and people know when to trust an agent's output and when to apply their own judgement.",
+                  "zh": "学习内容随能力变化持续刷新，而且大家清楚什么时候可以信 agent 的输出、什么时候要用自己的判断。"
+                },
+                "short": {
+                  "en": "Learning refreshes continuously; people know when to trust an agent's output."
+                }
+              }
+            ]
+          },
+          "qb": {
+            "prompt": {
+              "en": "What does a new joiner get in their first week, and who owns that material?",
+              "zh": "新人第一周会拿到什么？那些材料归谁维护？"
+            }
+          },
+          "qc": {
+            "fires_at": [
+              400,
+              500
+            ],
+            "prompt": {
+              "en": "Where does agent use appear in a role description or a performance conversation? Give an example.",
+              "zh": "「使用 agent」出现在哪份岗位说明或哪次绩效对话里？举个例子。"
+            },
+            "pass_test": {
+              "en": "Passes only if a real role or conversation is described. 'It is encouraged' is a fail.",
+              "zh": "只有描述出真实的岗位或对话才算通过。「我们鼓励大家用」算不通过。"
+            }
+          },
+          "probe2": {
+            "prompt": {
+              "en": "What is the most common thing people get wrong about your agents, and how did you learn that?",
+              "zh": "关于你们的 agent，大家最常搞错的是什么？你是怎么知道的？"
+            }
+          },
+          "header": {
+            "en": "E2 Skills",
+            "zh": "E2 赋能"
+          }
+        },
+        {
+          "id": "E3",
+          "name": {
+            "en": "Community, champions and incentives",
+            "zh": "社区、布道者与激励"
+          },
+          "source_heading": "Pillar E, Organization and culture block: champion networks, showcases, recognition, incentives and performance expectations, adoption and sentiment measurement; Responsible AI block at every level",
+          "rai_bearing": true,
+          "qa": {
+            "prompt": {
+              "en": "What keeps agent adoption going when the initial enthusiasm wears off?",
+              "zh": "当最初那股热情退去之后，是什么在维持 agent 的持续采用？"
+            },
+            "anchors": [
+              {
+                "level": 100,
+                "text": {
+                  "en": "Nothing in particular. A few interested people carry it, and ethical questions about AI have not been discussed.",
+                  "zh": "没有什么特别的。靠几个有兴趣的人扛着，关于 AI 的伦理问题也还没被讨论过。"
+                }
+              },
+              {
+                "level": 200,
+                "text": {
+                  "en": "The same enthusiasts keep it moving and there is an informal chat group. People have heard that responsible AI matters, but it is not reinforced anywhere.",
+                  "zh": "还是那几个热心人在推，有个非正式的群。大家听说过负责任 AI 很重要，但没有任何地方在强化它。"
+                }
+              },
+              {
+                "level": 300,
+                "text": {
+                  "en": "There is a recognised champion network across departments, regular showcases, and responsible-AI expectations are documented and taught to those champions.",
+                  "zh": "跨部门有一张被认可的布道者网络，有定期的成果分享会，负责任 AI 的要求也成文并教给了这些布道者。"
+                },
+                "short": {
+                  "en": "A recognised champion network, regular showcases, and taught RAI expectations."
+                }
+              },
+              {
+                "level": 400,
+                "text": {
+                  "en": "Incentives and performance expectations reinforce responsible agent use, communities run themselves, and leaders visibly model the behaviour rather than just endorsing it.",
+                  "zh": "激励与绩效预期在强化「负责任地使用 agent」，社区自己就能转起来，领导是身体力行而不只是口头支持。"
+                },
+                "short": {
+                  "en": "Incentives reinforce responsible use; leaders visibly model the behaviour."
+                }
+              },
+              {
+                "level": 500,
+                "text": {
+                  "en": "Trust, fairness and transparency are treated as company values that shape everyday decisions, and the community actively upholds the standards rather than the centre policing them.",
+                  "zh": "信任、公平与透明被当作公司价值观，在日常决策中起作用；标准是由社区主动维护的，而不是靠中心去管。"
+                },
+                "short": {
+                  "en": "Trust and fairness are company values the community itself upholds."
+                }
+              }
+            ]
+          },
+          "qb": {
+            "prompt": {
+              "en": "How many champions are there, and what do they get for doing it?",
+              "zh": "有多少个布道者？他们做这件事能得到什么？"
+            }
+          },
+          "qc": {
+            "fires_at": [
+              400,
+              500
+            ],
+            "prompt": {
+              "en": "When did someone last decline to use an agent for ethical or fairness reasons, and what happened?",
+              "zh": "上一次有人因为伦理或公平方面的顾虑而选择不用 agent 是什么时候？后来怎么处理的？"
+            },
+            "pass_test": {
+              "en": "Passes only if a real episode is described. 'People would raise it' is a fail — the value is only demonstrated when it costs something.",
+              "zh": "只有描述出真实发生过的事才算通过。「有问题大家会提的」算不通过 —— 价值观只有在付出代价时才被证明。"
+            }
+          },
+          "probe2": {
+            "prompt": {
+              "en": "Do you measure how people feel about agents, not just whether they use them? What did the last reading say?",
+              "zh": "你们量的是不是只有「用没用」，有没有量「大家怎么看」？最近一次的结果说了什么？"
+            }
+          },
+          "header": {
+            "en": "E3 Community",
+            "zh": "E3 社区"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{"seq":1,"at":"<ISO-8601 timestamp>","kind":"task","task":"<short-lowercase-hyphenated>","schema":"task-ledger/2"}
+{"seq":2,"at":"<brief.md created_at>","kind":"artifact","artifact":"brief","revision":1,"digest":"sha256:<64 lowercase hex of brief.md as drafted>"}
+{"seq":3,"at":"<brief.md approved_at, exactly>","kind":"artifact","artifact":"brief","revision":1,"digest":"sha256:<64 lowercase hex of brief.md as approved>"}
+{"seq":4,"at":"<capabilities.md surveyed_at, exactly>","kind":"artifact","artifact":"capabilities","revision":1,"digest":"sha256:<64 lowercase hex of capabilities.md as resolved>"}
+{"seq":5,"at":"<plan.md created_at>","kind":"artifact","artifact":"plan","revision":1,"digest":"sha256:<64 lowercase hex of plan.md as drafted>"}
+{"seq":6,"at":"<plan.md approved_at, exactly>","kind":"artifact","artifact":"plan","revision":1,"digest":"sha256:<64 lowercase hex of plan.md as approved>"}
+{"seq":7,"at":"<plan.md authorized_at, exactly>","kind":"artifact","artifact":"plan","revision":1,"digest":"sha256:<64 lowercase hex of plan.md as authorized>"}
+{"seq":8,"at":"<the same instant as seq 7>","kind":"plan-authorized","planRevision":1,"planDigest":"sha256:<the digest recorded by seq 7>","steps":[{"id":"<step id>","contract":"sha256:<64 lowercase hex of the ten contract fields>"}]}
+{"seq":9,"at":"<ISO-8601 timestamp>","kind":"step-started","planRevision":1,"id":"<step id>","provider":"<bound provider>"}
+{"seq":10,"at":"<ISO-8601 timestamp>","kind":"step-completed","planRevision":1,"id":"<step id>","evidence":"<artifact or observation named by verify>"}
+{"seq":11,"at":"<ISO-8601 timestamp>","kind":"note","topic":"progress","detail":"<what you now know that you did not before>"}
+{"seq":12,"at":"<ISO-8601 timestamp>","kind":"observation","observed":"artifact","ref":"<path>","planRevision":1,"contentUpdatedAt":"<ISO-8601 timestamp>","contentDigest":"<digest or stable fingerprint>"}
+{"seq":13,"at":"<ISO-8601 timestamp>","kind":"artifact","artifact":"report"}

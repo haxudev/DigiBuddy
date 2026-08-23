@@ -1,0 +1,3 @@
+# Immutable upstream snapshots bundled into the Hosted Agent image.
+haxudev/superclarity@bf479a271dc0d6b9ffa1343e92f6235230a5a65a
+haxudev/agent-maturity-assessment@9ea84848bc347b56802b38a4ef1971b730af1aa7

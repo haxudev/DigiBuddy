@@ -1,0 +1,14 @@
+ask-user
+web-research
+browse-authenticated
+read-local-docs
+run-code
+data-transform
+author-content
+doc-convert
+communicate
+version-control
+cloud-ops
+issue-tracker
+delegate
+domain-expert
