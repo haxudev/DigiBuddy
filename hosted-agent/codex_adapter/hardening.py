@@ -28,10 +28,22 @@ import sys
 logger = logging.getLogger(__name__)
 
 _PR_SET_DUMPABLE = 4
+_hardened_pid: int | None = None
 
 
 def harden_process() -> bool:
-    """Make this process undumpable. Returns whether it took effect."""
+    """Make this process undumpable. Returns whether it took effect.
+
+    Idempotent per process, and deliberately re-evaluated when the pid changes:
+    ``execve`` resets the dumpable flag, so a process that hardened itself at
+    import time is not necessarily still hardened by the time it forks anything.
+    Production measurement caught exactly that -- the flag was set during module
+    import, the server framework replaced the process afterwards, and the Codex
+    child could read its parent's environment.
+    """
+    global _hardened_pid
+    if _hardened_pid == os.getpid():
+        return True
     if not sys.platform.startswith("linux"):
         logger.info("Process hardening skipped: not Linux")
         return False
@@ -51,6 +63,7 @@ def harden_process() -> bool:
             "readable; treat the parent environment as exposed"
         )
         return False
+    _hardened_pid = os.getpid()
     logger.info("Adapter process hardened: /proc entry is no longer self-readable")
     return True
 

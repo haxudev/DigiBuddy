@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 import unittest
+from pathlib import Path
 
 from codex_adapter.hardening import harden_process
 
@@ -12,27 +13,38 @@ class HardeningTests(unittest.TestCase):
     def test_a_same_uid_child_can_no_longer_read_the_parent_environment(self):
         # Run in a subprocess: the flag is irreversible for the process that
         # sets it, and this one has tests left to run.
-        script = """
-import subprocess, sys, os
+        probe = """
+import os, subprocess, sys
 sys.path.insert(0, %r)
-from codex_adapter.hardening import harden_process
+from codex_adapter import hardening
 
-probe = [sys.executable, "-c", "open('/proc/%%d/environ','rb').read()" %% os.getpid()]
-before = subprocess.run(probe, capture_output=True).returncode == 0
-applied = harden_process()
-after = subprocess.run(probe, capture_output=True).returncode == 0
-print(f"{before}:{applied}:{after}")
+hardening.harden_process()
+hardening._hardened_pid = -1          # what a pid change looks like
+applied_again = hardening.harden_process()
+check = [sys.executable, "-c", "open('/proc/%%d/environ','rb').read()" %% os.getpid()]
+child_can_read = subprocess.run(check, capture_output=True).returncode == 0
+print(f"{applied_again}:{child_can_read}")
 """ % os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
         result = subprocess.run(
-            [sys.executable, "-c", script], capture_output=True, text=True
+            [sys.executable, "-c", probe], capture_output=True, text=True
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        before, applied, after = result.stdout.strip().split(":")
+        applied_again, child_can_read = result.stdout.strip().split(":")
 
-        self.assertEqual(before, "True", "the parent environment should start readable")
-        self.assertEqual(applied, "True", "hardening should report success")
-        self.assertEqual(after, "False", "the child must no longer read it")
+        self.assertEqual(applied_again, "True", "a new pid must be hardened again")
+        self.assertEqual(child_can_read, "False", "the child must not read it")
+
+    def test_the_runtime_hardens_before_it_forks_codex(self):
+        """The guarantee is about the process that owns the child, not startup."""
+        source = Path(__file__).resolve().parent.parent / "codex_adapter" / "client.py"
+        body = source.read_text(encoding="utf-8")
+
+        harden = body.index("harden_process()")
+        fork = body.index("create_subprocess_exec")
+        self.assertLess(
+            harden, fork, "hardening must happen before Codex is forked"
+        )
 
     def test_hardening_reports_rather_than_raises_when_it_cannot_apply(self):
         # Never a hard failure: the agent is still useful without the tier, and

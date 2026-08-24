@@ -87,16 +87,19 @@ The response map is stored under the hosted session workspace so session resume 
 
 The claim this section used to make — that Foundry session isolation is the security boundary — was never verified. `scripts/probe_runtime_isolation.py` is what verifies it. Run it from two concurrent conversations, giving the first `--write-probe a`.
 
-Measured on 2026-08-24 against the built image:
+Measured on 2026-08-24 against the built image, and again against production:
 
 | Question | Method | Result |
 | --- | --- | --- |
 | Can a same-UID child read the adapter's environment through procfs? | `/proc/1/environ` from a Codex turn | Readable while the adapter is dumpable |
 | Does making the adapter undumpable close that? | `prctl(PR_SET_DUMPABLE, 0)`, then re-read | Yes — the entry becomes root-owned and the child is refused |
+| Was it actually closed in production? | `scripts/probe_production_isolation.py`, then a targeted `/proc` read from a live turn | **No, on the first attempt.** Hardening ran at module import; the server framework replaces the process afterwards, and `execve` clears the flag. It now runs immediately before Codex is forked, in the process that owns the child |
 | Can the adapter launch Codex under another UID? | `create_subprocess_exec(user=...)` as the unprivileged `agent` user | No — `PermissionError`, so the UID split first drafted is not available |
-| Does one container serve one conversation? | boot id, cgroup and workspace cross-read | **Not yet measured in the deployed environment.** Record the outcome here when it is |
+| Does one container serve one conversation? | Two concurrent production turns comparing `/proc/sys/kernel/random/boot_id` and cross-reading the workspace | Different boot ids, neither saw the other's file. One scheduling outcome, not a guarantee — and note the hostname is `adc-sandbox` in both, so hostname says nothing |
 
-Two probes were deliberately rejected as evidence. `echo $$` reports the shell a command ran in, not the container. Watching whether a second conversation receives the first one's deliverable cannot fail: the second snapshots the workspace at its own turn start, by which time the earlier file is already in its baseline and can never be reported as changed.
+Three probes were rejected as evidence. `echo $$` reports the shell a command ran in. The container hostname is identical across sandboxes. And watching whether a second conversation receives the first one's deliverable cannot fail: the second snapshots the workspace at its own turn start, by which time the earlier file is already in its baseline and can never be reported as changed.
+
+The third row is the reason this section exists. A tier that tests green in an image can still be absent in the deployment, because the deployment decides the process lifecycle. Claim a tier only after measuring it where it runs.
 
 Because a negative cross-read describes one scheduling outcome rather than a guarantee, workspace containment is unconditional and does not wait on this answer.
 

@@ -24,17 +24,14 @@ from codex_adapter import (
 from codex_adapter.artifacts import ARTIFACT_EVENT, artifact_manifest
 from codex_adapter.client import PROFILE_EVENT
 from codex_adapter.events import completion_delta, tool_arguments
-from codex_adapter.hardening import harden_process
 from codex_adapter.profiles import UnknownProfileError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("digibuddy.hosted_agent")
 
-# Before anything spawns Codex: parent and child share a uid, so the model key
-# and every resolved profile credential are readable through this process's
-# /proc entry until it is closed.
-harden_process()
-
+# Hardening deliberately lives next to the fork in `CodexRuntime`, not here.
+# Doing it at import time looked correct and tested green, but the server
+# framework replaces this process afterwards, and execve clears the flag.
 settings = load_settings()
 runtime = CodexRuntime(settings)
 app = ResponsesAgentServerHost(

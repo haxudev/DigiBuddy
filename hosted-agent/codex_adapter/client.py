@@ -27,6 +27,7 @@ from .config import (
 )
 from .config_store import CATALOGUE_DOCUMENT, ConfigStore, build_config_store
 from .events import RuntimeEvent, translate_notification
+from .hardening import harden_process
 from .profiles import AgentProfile, resolve_profile
 from .session_map import ResponseThreadMap
 
@@ -267,6 +268,12 @@ class CodexRuntime:
         environment = prepare_codex_environment(
             settings, self._store, profile, reasoning_effort
         )
+        # Immediately before forking, in the process that will be the child's
+        # parent. Hardening at import time is not enough: the server framework
+        # replaces the process afterwards, and execve resets the flag, so the
+        # child could read the parent environment holding the model key and
+        # every resolved profile credential.
+        harden_process()
         self._process = await asyncio.create_subprocess_exec(
             "codex",
             "app-server",
