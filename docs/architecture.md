@@ -87,19 +87,26 @@ The response map is stored under the hosted session workspace so session resume 
 
 The claim this section used to make — that Foundry session isolation is the security boundary — was never verified. `scripts/probe_runtime_isolation.py` is what verifies it. Run it from two concurrent conversations, giving the first `--write-probe a`.
 
-Measured on 2026-08-24 against the built image, and again against production:
+Measured on 2026-08-24 against the built image, and again against production with `scripts/probe_production_isolation.py` and targeted follow-up turns.
 
 | Question | Method | Result |
 | --- | --- | --- |
-| Can a same-UID child read the adapter's environment through procfs? | `/proc/1/environ` from a Codex turn | Readable while the adapter is dumpable |
-| Does making the adapter undumpable close that? | `prctl(PR_SET_DUMPABLE, 0)`, then re-read | Yes — the entry becomes root-owned and the child is refused |
-| Was it actually closed in production? | `scripts/probe_production_isolation.py`, then a targeted `/proc` read from a live turn | **No, on the first attempt.** Hardening ran at module import; the server framework replaces the process afterwards, and `execve` clears the flag. It now runs immediately before Codex is forked, in the process that owns the child |
+| Can a turn reach the adapter's model key? | Count `CODEX_MODEL_API_KEY` across every process environment a turn can read | **0 occurrences** |
+| Can a turn reach the configuration store? | Same, for `DIGIBUDDY_CONFIG_URI` | **0 occurrences** — T3 holds |
+| Can a turn reach a retired container secret? | Same, for `DIGIBUDDY_GRAPH_CLIENT_SECRET` | **0 occurrences** |
+| Does a turn hold its own model key? | `DIGIBUDDY_MODEL_API_KEY` in the turn's own environment | Present, by design: the child cannot call the model without it |
+| Does `prctl(PR_SET_DUMPABLE, 0)` work in this sandbox? | Self-test from inside a turn: harden, then have a child read back | `prctl_rc=0`, child read denied |
 | Can the adapter launch Codex under another UID? | `create_subprocess_exec(user=...)` as the unprivileged `agent` user | No — `PermissionError`, so the UID split first drafted is not available |
-| Does one container serve one conversation? | Two concurrent production turns comparing `/proc/sys/kernel/random/boot_id` and cross-reading the workspace | Different boot ids, neither saw the other's file. One scheduling outcome, not a guarantee — and note the hostname is `adc-sandbox` in both, so hostname says nothing |
+| Does one container serve one conversation? | Two concurrent turns comparing `/proc/sys/kernel/random/boot_id` and cross-reading the workspace | Different boot ids, neither saw the other's file. One scheduling outcome, not a guarantee |
 
-Three probes were rejected as evidence. `echo $$` reports the shell a command ran in. The container hostname is identical across sandboxes. And watching whether a second conversation receives the first one's deliverable cannot fail: the second snapshots the workspace at its own turn start, by which time the earlier file is already in its baseline and can never be reported as changed.
+Four probes were rejected as evidence, each after producing a confident wrong answer:
 
-The third row is the reason this section exists. A tier that tests green in an image can still be absent in the deployment, because the deployment decides the process lifecycle. Claim a tier only after measuring it where it runs.
+- `echo $$` reports the shell a command ran in.
+- The container hostname is `adc-sandbox` in every sandbox, so it distinguishes nothing.
+- Artifact cross-delivery cannot fail: the second conversation snapshots its workspace at its own turn start, by which time the earlier file is already in its baseline.
+- **`/proc/1` is not the adapter.** Codex runs commands inside a nested sandbox with its own PID namespace, where PID 1 is `codex-linux-sandbox`. Reading `/proc/1/environ` from a turn measures that helper, not the process holding the credentials. An initial reading of this produced a false report that the hardening tier had failed in production.
+
+The lesson is in the last two rows. A probe that returns a plausible answer is not the same as a probe that measures the thing you named, and both wrong answers here were confident and specific. Count the variable you actually care about, in every environment the attacker can actually read.
 
 Because a negative cross-read describes one scheduling outcome rather than a guarantee, workspace containment is unconditional and does not wait on this answer.
 
