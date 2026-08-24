@@ -82,6 +82,8 @@ export default function ArtifactWindow({ artifacts, onClose }: Props) {
     (previewKind === "html" ||
       previewKind === "markdown" ||
       previewKind === "text");
+  const selectedArtifactId = selected?.id ?? "";
+  const selectedArtifactUrl = selected?.url ?? "";
   const previewContent =
     selected?.kind === "link" ? remotePreview?.content ?? "" : selected?.content ?? "";
   const downloadUrl = selected?.managed
@@ -89,9 +91,9 @@ export default function ArtifactWindow({ artifacts, onClose }: Props) {
     : selected?.url ?? "";
 
   useEffect(() => {
-    if (!selected || !needsRemoteText) return;
+    if (!selectedArtifactId || !needsRemoteText) return;
     const controller = new AbortController();
-    fetch(selected.url, { cache: "force-cache", signal: controller.signal })
+    fetch(selectedArtifactUrl, { cache: "force-cache", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error(`Preview failed with HTTP ${response.status}.`);
         const declaredSize = Number(response.headers.get("content-length") || "0");
@@ -103,7 +105,7 @@ export default function ArtifactWindow({ artifacts, onClose }: Props) {
           throw new Error("This file is too large to preview.");
         }
         setRemotePreview({
-          id: selected.id,
+          id: selectedArtifactId,
           loading: false,
           content,
           error: "",
@@ -112,14 +114,14 @@ export default function ArtifactWindow({ artifacts, onClose }: Props) {
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         setRemotePreview({
-          id: selected.id,
+          id: selectedArtifactId,
           loading: false,
           content: "",
           error: error instanceof Error ? error.message : "Preview is unavailable.",
         });
       });
     return () => controller.abort();
-  }, [needsRemoteText, selected]);
+  }, [needsRemoteText, selectedArtifactId, selectedArtifactUrl]);
 
   return (
     <aside

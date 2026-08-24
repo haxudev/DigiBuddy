@@ -1,3 +1,8 @@
+import {
+  MANAGED_ARTIFACT_ID,
+  isManagedArtifactName,
+} from "./artifact-reference.ts";
+
 export type Artifact = {
   id: string;
   title: string;
@@ -16,8 +21,6 @@ const MARKDOWN_LINK = /\[([^\]]+)\]\(([^)\s]+)\)/g;
 const WORKSPACE_PATH = /`?\/workspace\/[^\s`<>()\[\]"']+`?/g;
 const ARTIFACT_COMMENT =
   /<!--\s*digibuddy-artifacts:(\{[\s\S]*?\})\s*-->/g;
-const ARTIFACT_ID = /^[0-9a-f]{32}$/;
-const UNSAFE_ARTIFACT_NAME = /[\u0000-\u001f\u007f<>:"/\\|?*]/u;
 const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
 
 const PREVIEWABLE_EXTENSIONS = new Set([
@@ -57,15 +60,6 @@ function extensionOf(name: string): string {
   return name.slice(index + 1).toLowerCase();
 }
 
-function validArtifactName(name: string): boolean {
-  return (
-    Boolean(name) &&
-    name.length <= 180 &&
-    name === name.replace(/^[ .]+|[ .]+$/gu, "") &&
-    !UNSAFE_ARTIFACT_NAME.test(name)
-  );
-}
-
 function isWorkspaceReference(value: string): boolean {
   if (value.startsWith("/workspace/")) return true;
   try {
@@ -96,8 +90,8 @@ function managedArtifacts(text: string, messageId: string): Artifact[] {
         const mimeType = typeof raw.mimeType === "string" ? raw.mimeType : "";
         const extension = extensionOf(name);
         if (
-          !ARTIFACT_ID.test(id) ||
-          !validArtifactName(name) ||
+          !MANAGED_ARTIFACT_ID.test(id) ||
+          !isManagedArtifactName(name) ||
           !PREVIEWABLE_EXTENSIONS.has(extension) ||
           !Number.isSafeInteger(size) ||
           size <= 0 ||

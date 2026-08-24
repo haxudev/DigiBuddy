@@ -8,6 +8,10 @@
  */
 
 import { SKILL_NAME, bundlePath } from "./skill-bundle.ts";
+import {
+  MANAGED_ARTIFACT_ID,
+  isManagedArtifactName,
+} from "./artifact-reference.ts";
 
 export const MODELS_DOCUMENT = "models.json";
 export const MCP_DOCUMENT = "mcp.json";
@@ -320,8 +324,6 @@ export interface ConfigStore {
 }
 
 const BUNDLE_PATH = /^bundles\/[a-z0-9]+(?:-[a-z0-9]+)*\/[0-9a-f]{64}\.zip$/;
-const ARTIFACT_ID = /^[0-9a-f]{32}$/;
-const UNSAFE_ARTIFACT_NAME = /[\u0000-\u001f\u007f<>:"/\\|?*]/u;
 
 /** Only content-addressed bundle paths may be written; nothing else. */
 function assertBundlePath(path: string): string {
@@ -332,15 +334,10 @@ function assertBundlePath(path: string): string {
 }
 
 export function artifactStoragePath(id: string, filename: string): string {
-  if (!ARTIFACT_ID.test(id)) {
+  if (!MANAGED_ARTIFACT_ID.test(id)) {
     throw new ConfigValidationError("Invalid artifact id.");
   }
-  if (
-    !filename ||
-    filename.length > 180 ||
-    filename !== filename.replace(/^[ .]+|[ .]+$/gu, "") ||
-    UNSAFE_ARTIFACT_NAME.test(filename)
-  ) {
+  if (!isManagedArtifactName(filename)) {
     throw new ConfigValidationError("Invalid artifact filename.");
   }
   return `artifacts/${id}/${filename}`;

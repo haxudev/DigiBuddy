@@ -198,7 +198,7 @@ class BlobConfigStore:
         self._container.upload_blob(
             artifact_path(artifact_id, filename),
             payload,
-            overwrite=False,
+            overwrite=True,
             content_settings=ContentSettings(content_type=content_type),
         )
         return True
