@@ -113,6 +113,27 @@ Because a negative cross-read describes one scheduling outcome rather than a gua
 - Each conversation gets its own workspace, so artifacts are attributed correctly and nothing is read across conversations by accident. Two same-UID Codex processes can still read each other's directories, so this is containment, not isolation; isolation would require a process or container boundary per conversation.
 - Profile skill and tool filtering curates what an agent is offered, and is not itself a sandbox.
 
+## Signing in
+
+Sign-in is App Service Easy Auth, which terminates the flow in front of the app and injects `x-ms-client-principal`. That header is the only thing trusted; a request never names its own user.
+
+The platform is deliberately left allowing anonymous requests. Making it redirect would pick one provider for everyone, so the choice lives in the app and the server refuses unauthenticated work regardless of what the client renders. Which providers are offered is declared through `AUTH_PROVIDERS`, because reading the platform's auth configuration would need management permissions the app has no other reason to hold, and offering an unconfigured provider sends people to a 404.
+
+Two identities are derived from the principal and they are not the same thing:
+
+| Derived | Used for |
+| --- | --- |
+| `principal` | Display, and the `ADMIN_PRINCIPAL_IDS` allowlist |
+| `ownerKey` | Partitioning storage — a hash, so a blob path or a log line never carries an email address |
+
+**The same human signing in with two providers is two accounts.** The console cannot know they are the same person, and merging them would let one provider's account reach another's files. The sign-in screen says so rather than hiding it.
+
+Isolation is enforced in three places, each because the previous one is not enough:
+
+- `/api/agent` refuses a turn without a principal, before the stream opens, so an unauthenticated caller gets a status rather than a run that starts and immediately errors.
+- Generated files are partitioned by `ownerKey`. An unguessable id is a capability, not an authorisation, and it survives in screenshots and browser history. Files created before anyone could sign in stay reachable at the flat path.
+- Conversations are namespaced per account in `localStorage`, because a browser is shared and storage is not. Without it, signing in as someone else would show the previous person's threads and the next turn would resume one that is not theirs.
+
 ## Credentials scoped to an agent
 
 A profile binds credentials to named capability slots, and the runtime hands a Codex process only the bindings of the profile it is running. Because changing profile already replaces that process, one agent's secrets are never present in another's environment.
