@@ -64,6 +64,8 @@ The capability lists the console offers come from `catalogue.json`, published by
 
 Access is guarded by `requireAdmin`: put Easy Auth in front of the container and list the allowed Entra object IDs in `ADMIN_PRINCIPAL_IDS`. An empty list denies everyone. The model API key is write-only — it is never returned to the browser, and leaving the field blank preserves the stored value.
 
+Skills are deployed from a zip. A repository archive holding several skills, a shared library and helper scripts is accepted too: the console explodes it into one self-contained bundle per skill, following a `digibuddy-skills.json` manifest when the archive ships one. Every deployment is confirmed against a preview that writes nothing. Importing straight from a URL is off unless `SKILL_IMPORT_ALLOWED_HOSTS` names the hosts it may fetch from (for example `codeload.github.com`); the fetch is HTTPS-only, refuses private addresses, and re-checks every redirect hop.
+
 Chat users pick a profile in the session panel — the only setting the chat window exposes; it travels to the agent as `metadata.profile`.
 
 ## Container

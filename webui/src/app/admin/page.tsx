@@ -43,6 +43,29 @@ type DeployedSkill = {
   enabled: boolean;
   uploaded_at: string;
   uploaded_by: string;
+  source: string;
+};
+
+/** What an archive would deploy, before anything is written. */
+type BundlePreview = {
+  layout: "single" | "manifest" | "discovered";
+  notes: string[];
+  skills: {
+    name: string;
+    description: string;
+    size: number;
+    sha256: string;
+    entries: string[];
+  }[];
+};
+
+/** A previewed archive waiting for the administrator to confirm it. */
+type Pending = { preview: BundlePreview; file?: File; source?: string };
+
+const LAYOUTS: Record<BundlePreview["layout"], string> = {
+  single: "a single skill, deployed as uploaded",
+  manifest: "described by digibuddy-skills.json",
+  discovered: "discovered from the archive's layout",
 };
 
 type NamedServer = McpServer & { name: string };
@@ -144,6 +167,9 @@ export default function Admin() {
   const [servers, setServers] = useState<NamedServer[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [skills, setSkills] = useState<DeployedSkill[]>([]);
+  const [allowedHosts, setAllowedHosts] = useState<string[]>([]);
+  const [source, setSource] = useState("");
+  const [pending, setPending] = useState<Pending | null>(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -176,6 +202,15 @@ export default function Admin() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Whether importing from a URL is offered at all is a deployment decision, so
+  // ask the server rather than guessing.
+  useEffect(() => {
+    fetch("/api/admin/skills/preview", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : { allowed_hosts: [] }))
+      .then((payload) => setAllowedHosts(payload.allowed_hosts ?? []))
+      .catch(() => setAllowedHosts([]));
+  }, []);
 
   async function save(document: string, value: unknown) {
     setBusy(true);
@@ -220,10 +255,78 @@ export default function Admin() {
     }
   }
 
-  async function upload(file: File) {
-    const body = new FormData();
-    body.append("bundle", file);
-    await callSkills({ method: "POST", body }, "Unable to deploy the bundle.");
+  /**
+   * Deployment is always confirmed against a preview, because an archive can
+   * yield several skills and replace existing ones, and the administrator should
+   * see exactly what will change before it does.
+   */
+  async function preview(pendingBundle: Pick<Pending, "file" | "source">) {
+    setBusy(true);
+    setError("");
+    setStatus("");
+    setPending(null);
+    try {
+      let init: RequestInit;
+      if (pendingBundle.file) {
+        const body = new FormData();
+        body.append("bundle", pendingBundle.file);
+        init = { method: "POST", body };
+      } else {
+        init = {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source: pendingBundle.source }),
+        };
+      }
+      const response = await fetch("/api/admin/skills/preview", init);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to read the archive.");
+      setPending({ ...pendingBundle, preview: payload as BundlePreview });
+    } catch (previewError) {
+      setError(
+        previewError instanceof Error
+          ? previewError.message
+          : "Unable to read the archive.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deploy() {
+    if (!pending) return;
+    setBusy(true);
+    setError("");
+    setStatus("");
+    try {
+      let response: Response;
+      if (pending.file) {
+        const body = new FormData();
+        body.append("bundle", pending.file);
+        response = await fetch("/api/admin/skills", { method: "POST", body });
+      } else {
+        response = await fetch("/api/admin/skills/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source: pending.source }),
+        });
+      }
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to deploy the archive.");
+      setSkills(payload.skills ?? []);
+      setPending(null);
+      setSource("");
+      setStatus(
+        `Deployed ${payload.deployed?.length ?? 0} skill(s). They apply from the next turn.`,
+      );
+      await load();
+    } catch (deployError) {
+      setError(
+        deployError instanceof Error ? deployError.message : "Unable to deploy the archive.",
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   function updateProfile(index: number, patch: Partial<Profile>) {
@@ -490,13 +593,17 @@ export default function Admin() {
           <section className={styles.panel}>
             <h2>Deployed skills</h2>
             <p className={styles.hint}>
-              Upload a skill bundle — a zip holding <code>SKILL.md</code> and its
-              references — and every profile that assembles it loads it on the next
-              turn, without rebuilding the image. Uploading the same skill again
-              replaces it. Skills baked into the image cannot be shadowed.
+              Deploy a skill archive — a zip holding <code>SKILL.md</code> and its
+              references, scripts and tools — and every profile that assembles it
+              loads it on the next turn, without rebuilding the image. A repository
+              archive carrying several skills is unpacked into one self-contained
+              skill each; add a <code>digibuddy-skills.json</code> manifest to say
+              which directories are skills and which libraries they share.
+              Deploying a skill again replaces it. Skills baked into the image
+              cannot be shadowed.
             </p>
             <label className={styles.upload}>
-              Skill bundle (.zip)
+              Skill archive (.zip)
               <input
                 type="file"
                 accept=".zip,.skill,application/zip"
@@ -504,10 +611,76 @@ export default function Admin() {
                 onChange={(event) => {
                   const file = event.target.files?.[0];
                   event.target.value = "";
-                  if (file) void upload(file);
+                  if (file) void preview({ file });
                 }}
               />
             </label>
+            {allowedHosts.length > 0 && (
+              <>
+                <label>
+                  Or import from a URL
+                  <input
+                    type="url"
+                    value={source}
+                    placeholder="https://codeload.github.com/owner/repo/zip/refs/heads/main"
+                    disabled={busy}
+                    onChange={(event) => setSource(event.target.value)}
+                  />
+                </label>
+                <p className={styles.hint}>Allowed hosts: {allowedHosts.join(", ")}</p>
+                <div className={styles.actions}>
+                  <button
+                    type="button"
+                    disabled={busy || !source.trim()}
+                    onClick={() => void preview({ source: source.trim() })}
+                  >
+                    Preview
+                  </button>
+                </div>
+              </>
+            )}
+
+            {pending && (
+              <div className={styles.row}>
+                <div className={styles.rowHeader}>
+                  <strong>
+                    {pending.preview.skills.length} skill(s) ready to deploy
+                  </strong>
+                  <button
+                    className={styles.remove}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setPending(null)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <p className={styles.hint}>{LAYOUTS[pending.preview.layout]}</p>
+                {pending.preview.notes.map((note) => (
+                  <p className={styles.hint} key={note}>
+                    {note}
+                  </p>
+                ))}
+                {pending.preview.skills.map((skill) => (
+                  <div key={skill.name}>
+                    <strong>{skill.name}</strong>
+                    {skills.some((existing) => existing.name === skill.name) && (
+                      <span className={styles.version}> replaces the deployed version</span>
+                    )}
+                    {skill.description && <p>{skill.description}</p>}
+                    <p className={styles.hint}>
+                      {Math.max(1, Math.round(skill.size / 1024))} KB ·{" "}
+                      {skill.entries.length} files · {skill.sha256.slice(0, 12)}
+                    </p>
+                  </div>
+                ))}
+                <div className={styles.actions}>
+                  <button type="button" disabled={busy} onClick={() => void deploy()}>
+                    Deploy
+                  </button>
+                </div>
+              </div>
+            )}
             {skills.length === 0 && (
               <p className={styles.hint}>No skills have been deployed yet.</p>
             )}
@@ -536,6 +709,7 @@ export default function Admin() {
                 <p className={styles.hint}>
                   {Math.max(1, Math.round(skill.size / 1024))} KB · {skill.sha256.slice(0, 12)} ·
                   uploaded {skill.uploaded_at.slice(0, 10)} by {skill.uploaded_by}
+                  {skill.source && ` · from ${skill.source}`}
                 </p>
                 <div className={styles.checks}>
                   <label>
