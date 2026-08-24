@@ -1,0 +1,146 @@
+.root {
+  position: relative;
+  flex: none;
+}
+
+.trigger {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  color: #33454a;
+  background: #f4f7f8;
+  border: 1px solid #e2e8ea;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.trigger:hover {
+  background: #eef4f4;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  background: #2db59d;
+  border-radius: 50%;
+}
+
+.chevron {
+  color: #8b9a9e;
+  font-size: 10px;
+}
+
+.popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  gap: 4px;
+  width: min(340px, 90vw);
+  max-height: min(70vh, 560px);
+  padding: 8px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e2e8ea;
+  border-radius: 14px;
+  box-shadow: 0 18px 44px rgb(22 38 45 / 14%);
+}
+
+.profiles {
+  display: grid;
+  gap: 2px;
+  list-style: none;
+}
+
+.profile {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.profile:hover {
+  background: #f4f7f8;
+}
+
+.profileActive {
+  background: #e9f6f3;
+  border-color: #b9e2d9;
+}
+
+.profileName {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.profileNote {
+  overflow: hidden;
+  color: #7d8b91;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.body {
+  display: grid;
+  gap: 12px;
+  padding: 10px;
+  border-top: 1px solid #eef2f3;
+}
+
+.group h4 {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 7px;
+  color: #7d8b91;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.count {
+  padding: 0 6px;
+  color: #4a5b60;
+  background: #eef4f4;
+  border-radius: 999px;
+  font-size: 10.5px;
+  letter-spacing: 0;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  list-style: none;
+}
+
+.chips li {
+  padding: 3px 9px;
+  color: #33454a;
+  background: #f4f7f8;
+  border: 1px solid #e6ecee;
+  border-radius: 999px;
+  font-size: 11.5px;
+}
+
+.hint {
+  padding: 10px;
+  color: #7d8b91;
+  font-size: 12px;
+  line-height: 1.55;
+}

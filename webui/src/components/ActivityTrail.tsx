@@ -10,10 +10,11 @@ const ICONS: Record<ActivityEntry["kind"], string> = {
   error: "!",
 };
 
+/** Screen readers still need the kind the icon stands for. */
 const LABELS: Record<ActivityEntry["kind"], string> = {
-  thinking: "Thinking",
-  tool: "Tool",
-  error: "Error",
+  thinking: "Reasoning step",
+  tool: "Tool call",
+  error: "Failure",
 };
 
 function Row({ entry }: { entry: ActivityEntry }) {
@@ -32,7 +33,7 @@ function Row({ entry }: { entry: ActivityEntry }) {
         <span className={styles.icon} aria-hidden="true">
           {ICONS[entry.kind]}
         </span>
-        <span className={styles.label}>{LABELS[entry.kind]}</span>
+        <span className={styles.srOnly}>{LABELS[entry.kind]}</span>
         <span className={styles.title}>{entry.title}</span>
         {expandable && (
           <span className={styles.chevron} aria-hidden="true">
