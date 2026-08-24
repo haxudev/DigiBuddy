@@ -103,6 +103,25 @@ Because a negative cross-read describes one scheduling outcome rather than a gua
 - Each conversation gets its own workspace, so artifacts are attributed correctly and nothing is read across conversations by accident. Two same-UID Codex processes can still read each other's directories, so this is containment, not isolation; isolation would require a process or container boundary per conversation.
 - Profile skill and tool filtering curates what an agent is offered, and is not itself a sandbox.
 
+## Credentials scoped to an agent
+
+A profile binds credentials to named capability slots, and the runtime hands a Codex process only the bindings of the profile it is running. Because changing profile already replaces that process, one agent's secrets are never present in another's environment.
+
+Three measures make that claim true rather than aspirational, and one limit makes it honest.
+
+| Tier | What it does | Where |
+| --- | --- | --- |
+| T1 | The child environment is built from an explicit allowlist plus the active profile's bindings, instead of copying this process's environment | `hosted-agent/codex_adapter/config.py` |
+| T2 | The adapter marks itself undumpable, so a same-UID child cannot read its `/proc` entry — where the model key and every resolved credential live | `hosted-agent/codex_adapter/hardening.py` |
+| T3 | The configuration store URI is withheld from the child, so the address of every profile's secrets does not travel with it | `hosted-agent/codex_adapter/config.py` |
+| T4 | Separate Foundry agent deployments, each with its own identity, store and RBAC | Not implemented; the escalation path |
+
+Values live in `credentials.json`, which no read API returns: the console reports which slots are set and offers to rotate or clear one. Slots are a closed set, so a binding cannot shadow `PATH`, `PYTHONPATH` or the model key. The resolved values feed the runtime fingerprint through a per-process keyed digest, so rotating a secret under the same slot still replaces the Codex process, and no secret-derived digest leaves the process.
+
+**The limit.** T1 through T3 stop an agent using a credential it was not granted. They do not stop a prompt injection asking the container's ambient managed identity for a token, because the adapter and Codex share one container identity — and withholding that identity from Codex would also break `src/tools/azure_blob.py`, which uses it deliberately to publish deliverables. A business line that cannot accept that residual risk needs T4, not a further tier here.
+
+Logging is treated as a credential sink for the same reason. Turn events are logged by type, and Codex's stderr by length rather than content, because a tool that prints a token would otherwise persist it in centralised logs long after the profile it belonged to was rotated.
+
 ## Configuration overlay and profiles
 
 `config_store.py` reads five documents — `models.json`, `mcp.json`, `profiles.json`, `skills.json`, and `catalogue.json` — from Azure Blob (`DIGIBUDDY_CONFIG_URI`) or a directory (`DIGIBUDDY_CONFIG_DIR`), behind a short TTL cache. The same private store carries generated deliverables below `artifacts/<random-id>/`; the Web UI exposes only validated same-origin artifact routes.

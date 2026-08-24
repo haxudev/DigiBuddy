@@ -2,11 +2,22 @@
 
 A profile is data, not an image: one runtime image serves every business agent.
 A profile selects a subset of the packaged capabilities (skills, tools, remote
-MCP servers) and optionally overrides the model settings and persona.
+MCP servers), optionally overrides the model settings and persona, and binds the
+credentials its agent is allowed to use.
 
-Filtering is a *visibility* mechanism that keeps the prompt focused. It is not a
-security boundary -- Codex has a full shell. Real isolation must come from the
-credentials each profile is granted.
+Two different things are going on, and they are worth keeping apart.
+
+Capability filtering is *visibility*. It keeps the prompt focused and stops the
+model reaching for something this agent has no business using. It is not a
+sandbox: Codex has a full shell, and a determined turn can look around.
+
+Credential binding is the part with teeth. A profile's values are handed only to
+that profile's Codex process, and switching profile already replaces the
+process, so one agent's secrets are never present in another's environment. That
+holds against the ordinary failure -- an agent using a credential it should not
+have -- but not against a prompt injection reaching the container's ambient
+managed identity. See `credentials.py` and the security notes in
+`docs/architecture.md` for where the line actually falls.
 """
 
 from __future__ import annotations

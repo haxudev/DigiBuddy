@@ -437,10 +437,17 @@ class CodexRuntime:
         )
 
     async def _drain_stderr(self) -> None:
+        """Record that Codex wrote to stderr, not what it wrote.
+
+        Codex relays whatever a tool or MCP server printed, and a tool that
+        prints a token would otherwise persist it in centralised logs, outliving
+        the profile whose credential it was. The length is enough to correlate
+        with a failure; the bytes are not ours to keep.
+        """
         if not self._process or not self._process.stderr:
             return
         while line := await self._process.stderr.readline():
-            logger.info("codex: %s", line.decode("utf-8", errors="replace").rstrip())
+            logger.info("codex stderr: %d bytes", len(line))
 
     async def _restart(self) -> None:
         if self._process and self._process.returncode is None:

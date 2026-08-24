@@ -466,3 +466,115 @@ class KillSwitchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChildEnvironmentTests(unittest.TestCase):
+    """What the Codex process inherits is a security decision, not a default.
+
+    The child is untrusted: it has a shell, network egress and a model that can
+    be talked into using them. So its environment is built from an explicit
+    list plus the active profile's own bindings, never copied wholesale.
+    """
+
+    def _prepared(self, directory, *, profile=None, extra_env=None, credentials=None):
+        configured = payload(directory)
+        store = FileConfigStore(Path(directory) / "config")
+        if credentials is not None:
+            store.write("credentials.json", credentials)
+        environment = {
+            "PATH": "/usr/bin",
+            "HOME": "/home/agent",
+            "DIGIBUDDY_CONFIG_URI": "https://example.blob.core.windows.net/config",
+            "DIGIBUDDY_GRAPH_CLIENT_SECRET": "container-wide-graph-secret",
+            "UNRELATED_BUILD_TOKEN": "should-not-travel",
+            **(extra_env or {}),
+        }
+        with mock.patch.dict(os.environ, environment, clear=True):
+            with mock.patch.dict(
+                os.environ, {"DIGIBUDDY_ENABLE_PROFILE_CREDENTIALS": "true"}
+            ):
+                return prepare_codex_environment(configured, store, profile)
+
+    def test_the_runtime_essentials_survive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            child = self._prepared(directory)
+
+            self.assertEqual(child["PATH"], "/usr/bin")
+            self.assertEqual(child["HOME"], "/home/agent")
+            self.assertIn("DIGIBUDDY_SKILLS_ROOT", child)
+            self.assertIn("DIGIBUDDY_TOOLS_ROOT", child)
+            self.assertIn("PYTHONPATH", child)
+
+    def test_an_unrelated_variable_does_not_travel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertNotIn("UNRELATED_BUILD_TOKEN", self._prepared(directory))
+
+    def test_the_config_store_uri_is_withheld(self):
+        """It is the address of every profile's secrets."""
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertNotIn("DIGIBUDDY_CONFIG_URI", self._prepared(directory))
+
+    def test_a_credential_reaches_only_the_profile_it_is_bound_to(self):
+        credentials = {
+            "credentials": [
+                {"profile": "alpha", "slot": "graph_client_secret", "value": "alpha-secret"},
+                {"profile": "beta", "slot": "graph_client_secret", "value": "beta-secret"},
+            ]
+        }
+        alpha = AgentProfile(name="alpha")
+        beta = AgentProfile(name="beta")
+
+        with tempfile.TemporaryDirectory() as one, tempfile.TemporaryDirectory() as two:
+            for_alpha = self._prepared(one, profile=alpha, credentials=credentials)
+            for_beta = self._prepared(two, profile=beta, credentials=credentials)
+
+        self.assertEqual(for_alpha["DIGIBUDDY_GRAPH_CLIENT_SECRET"], "alpha-secret")
+        self.assertEqual(for_beta["DIGIBUDDY_GRAPH_CLIENT_SECRET"], "beta-secret")
+
+    def test_a_profile_without_a_binding_gets_no_credential_at_all(self):
+        """Inheriting the container-wide value would defeat the whole point."""
+        credentials = {
+            "credentials": [
+                {"profile": "alpha", "slot": "graph_client_secret", "value": "alpha-secret"}
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            child = self._prepared(
+                directory, profile=AgentProfile(name="beta"), credentials=credentials
+            )
+
+        self.assertNotIn("DIGIBUDDY_GRAPH_CLIENT_SECRET", child)
+
+    def test_a_credential_cannot_overwrite_a_runtime_variable(self):
+        credentials = {
+            "credentials": [
+                {"profile": "alpha", "slot": "PATH", "value": "/attacker/bin"},
+                {"profile": "alpha", "slot": "PYTHONPATH", "value": "/attacker/lib"},
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            child = self._prepared(
+                directory, profile=AgentProfile(name="alpha"), credentials=credentials
+            )
+
+        self.assertEqual(child["PATH"], "/usr/bin")
+        self.assertNotIn("/attacker/lib", child["PYTHONPATH"])
+
+    def test_credentials_stay_out_until_the_switch_is_on(self):
+        credentials = {
+            "credentials": [
+                {"profile": "alpha", "slot": "graph_client_secret", "value": "alpha-secret"}
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(directory)
+            store = FileConfigStore(Path(directory) / "config")
+            store.write("credentials.json", credentials)
+            with mock.patch.dict(os.environ, {"PATH": "/usr/bin"}, clear=True):
+                child = prepare_codex_environment(
+                    configured, store, AgentProfile(name="alpha")
+                )
+
+        self.assertNotIn("DIGIBUDDY_GRAPH_CLIENT_SECRET", child)

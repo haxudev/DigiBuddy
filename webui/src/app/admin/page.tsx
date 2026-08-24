@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import {
+  CREDENTIAL_SLOTS,
+  type CredentialStatus,
+} from "@/lib/credentials";
 import styles from "./admin.module.css";
 
 type Catalogue = { skills: string[]; tools: string[]; mcp_servers: string[] };
@@ -158,6 +162,86 @@ function Selector({
   );
 }
 
+/**
+ * Write-only credential entry.
+ *
+ * Values are never read back, so this shows which slots are set and offers to
+ * replace or remove one. That is the whole interaction: an administrator who
+ * needs a different secret rotates it rather than inspecting the current one.
+ */
+function Credentials({
+  profile,
+  statuses,
+  busy,
+  onChange,
+}: {
+  profile: string;
+  statuses: CredentialStatus[];
+  busy: boolean;
+  onChange: (slot: string, action: "rotate" | "clear", value: string) => void;
+}) {
+  const [slot, setSlot] = useState<string>(CREDENTIAL_SLOTS[0]);
+  const [value, setValue] = useState("");
+  const bound = statuses.filter((entry) => entry.profile === profile);
+
+  return (
+    <div className={styles.field}>
+      <span className={styles.label}>Credentials</span>
+      <p className={styles.hint}>
+        Handed only to this profile&apos;s agent process. Values are write-only:
+        rotate to replace one, clear to remove it.
+      </p>
+      {bound.length > 0 && (
+        <ul className={styles.chips}>
+          {bound.map((entry) => (
+            <li key={entry.slot}>
+              {entry.slot} · set
+              <button
+                type="button"
+                disabled={busy}
+                aria-label={`Clear ${entry.slot}`}
+                onClick={() => onChange(entry.slot, "clear", "")}
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className={styles.row}>
+        <select
+          aria-label="Credential slot"
+          value={slot}
+          onChange={(event) => setSlot(event.target.value)}
+        >
+          {CREDENTIAL_SLOTS.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <input
+          type="password"
+          autoComplete="off"
+          placeholder="New value"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+        />
+        <button
+          type="button"
+          disabled={busy || !value.trim() || !profile}
+          onClick={() => {
+            onChange(slot, "rotate", value);
+            setValue("");
+          }}
+        >
+          Rotate
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Admin() {
   const [tab, setTab] = useState<"models" | "mcp" | "skills" | "profiles">("models");
   const [catalogue, setCatalogue] = useState<Catalogue>({
@@ -172,6 +256,7 @@ export default function Admin() {
   const [allowedHosts, setAllowedHosts] = useState<string[]>([]);
   const [source, setSource] = useState("");
   const [revisions, setRevisions] = useState<Record<string, string>>({});
+  const [credentials, setCredentials] = useState<CredentialStatus[]>([]);
   const [pending, setPending] = useState<Pending | null>(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
@@ -209,6 +294,13 @@ export default function Admin() {
 
   // Whether importing from a URL is offered at all is a deployment decision, so
   // ask the server rather than guessing.
+  useEffect(() => {
+    fetch("/api/admin/credentials", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : { credentials: [] }))
+      .then((payload) => setCredentials(payload.credentials ?? []))
+      .catch(() => setCredentials([]));
+  }, []);
+
   useEffect(() => {
     fetch("/api/admin/skills/preview", { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : { allowed_hosts: [] }))
@@ -335,6 +427,36 @@ export default function Admin() {
     } catch (deployError) {
       setError(
         deployError instanceof Error ? deployError.message : "Unable to deploy the archive.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changeCredential(
+    profile: string,
+    slot: string,
+    action: "rotate" | "clear",
+    value: string,
+  ) {
+    setBusy(true);
+    setError("");
+    setStatus("");
+    try {
+      const response = await fetch("/api/admin/credentials", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile, slot, action, value }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Unable to save the credential.");
+      setCredentials(payload.credentials ?? []);
+      setStatus(`Credential ${action === "clear" ? "cleared" : "rotated"}. It applies from the next turn.`);
+    } catch (credentialError) {
+      setError(
+        credentialError instanceof Error
+          ? credentialError.message
+          : "Unable to save the credential.",
       );
     } finally {
       setBusy(false);
@@ -858,6 +980,14 @@ export default function Admin() {
                   available={catalogue.mcp_servers}
                   selection={profile.mcp_servers}
                   onChange={(mcp_servers) => updateProfile(index, { mcp_servers })}
+                />
+                <Credentials
+                  profile={profile.name}
+                  statuses={credentials}
+                  busy={busy}
+                  onChange={(slot, action, value) =>
+                    void changeCredential(profile.name, slot, action, value)
+                  }
                 />
               </div>
             ))}

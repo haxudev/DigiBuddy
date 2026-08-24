@@ -13,11 +13,18 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .config_store import (
+    CREDENTIALS_DOCUMENT,
     MCP_DOCUMENT,
     MODELS_DOCUMENT,
     PROFILES_DOCUMENT,
     ConfigStore,
     NullConfigStore,
+)
+from .credentials import (
+    SLOT_VARIABLES,
+    credential_fingerprint,
+    credentials_for,
+    parse_credentials,
 )
 from .skills import (
     install_deployed_skills,
@@ -60,6 +67,85 @@ def profile_credentials_enabled() -> bool:
 
 def capability_packs_enabled() -> bool:
     return _feature_flag(CAPABILITY_PACKS_ENV)
+
+
+#: What the Codex process inherits from this one, by name.
+#:
+#: An allowlist rather than a filter, because the interesting failure is the
+#: variable nobody thought of. Every entry here was found by reading what the
+#: payload actually uses:
+#:
+#: * ``src/tools/azure_blob.py`` reads the blob settings and ``AZURE_CLIENT_ID``
+#: * ``src/tools/m365_cli.py`` needs ``HOME`` to find its credential cache
+#: * ``src/skills/*/scripts/office`` shell out and need ``PATH`` and the locale
+#: * Node and Python need their own runtime paths
+#:
+#: Deliberately absent: ``DIGIBUDDY_CONFIG_URI``, which is the address of every
+#: profile's secrets, and the Graph client secret, which is now a per-profile
+#: binding instead of a container-wide value.
+#:
+#: Prefix wildcards are not used. Preserving ``NODE_*`` or ``PYTHON_*`` wholesale
+#: would readmit ``NODE_OPTIONS`` and module path overrides, which is a code
+#: execution channel dressed up as a compatibility measure.
+_INHERITED_VARIABLES = frozenset(
+    {
+        # Process basics
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TERM",
+        "TMPDIR",
+        # Locale, or document generation mangles non-ASCII text
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        # Runtimes
+        "PYTHONUNBUFFERED",
+        "PYTHONDONTWRITEBYTECODE",
+        "PYTHONIOENCODING",
+        "NODE_PATH",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        # Outbound proxies, where a deployment uses them
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        # Payload settings that are addresses, not secrets
+        "AZURE_CLIENT_ID",
+        "DIGIBUDDY_BLOB_SERVICE_URI",
+        "DIGIBUDDY_BLOB_CONTAINER",
+        "DIGIBUDDY_BLOB_LINK_TTL_HOURS",
+        "DIGIBUDDY_GRAPH_TENANT_ID",
+        "DIGIBUDDY_GRAPH_CLIENT_ID",
+        "DIGIBUDDY_GRAPH_AUTHORITY_HOST",
+        "DIGIBUDDY_GRAPH_SCOPES",
+        # Codex itself
+        "CODEX_WORKSPACE",
+    }
+)
+
+#: Names the runtime sets itself; a credential binding must never reach them.
+_RESERVED_VARIABLES = frozenset(
+    {
+        "CODEX_HOME",
+        "DIGIBUDDY_PAYLOAD_ROOT",
+        "DIGIBUDDY_SKILLS_ROOT",
+        "DIGIBUDDY_TOOLS_ROOT",
+        "DIGIBUDDY_PROFILE",
+        "DIGIBUDDY_CONFIG_URI",
+        "DIGIBUDDY_CONFIG_DIR",
+        "PYTHONPATH",
+        MODEL_API_KEY_ENV,
+        "OPENAI_API_KEY",
+    }
+    | _INHERITED_VARIABLES
+)
 
 
 @dataclass(frozen=True)
@@ -269,7 +355,13 @@ def load_mcp_servers(
             entry = {"url": url}
             token_env = str(server.get("bearer_token_env_var", "")).strip()
             if token_env:
+                # The name is the deployment's own container-wide variable. A
+                # profile that binds `mcp_bearer_token` overrides it with its
+                # own value, which is the only way two profiles can reach the
+                # same server as different callers.
                 entry["bearer_token_env_var"] = token_env
+            if profile is not None and profile_credentials_enabled():
+                entry["bearer_token_env_var"] = SLOT_VARIABLES["mcp_bearer_token"]
         elif command:
             entry = {"command": command}
             args = server.get("args")
@@ -454,6 +546,11 @@ def runtime_fingerprint(
         registry_fingerprint(load_registry(store)),
         load_instructions(settings, profile),
         profile_fingerprint(profile),
+        # The resolved values, not the bindings that name them: a rotation that
+        # keeps the same slot must still replace the process, or it would keep
+        # running with a credential that has been revoked. Keyed per process so
+        # the digest is never a secret-derived value anyone else can compare.
+        credential_fingerprint(load_credentials(store, profile), _FINGERPRINT_KEY),
         secret_digest,
         settings.approval_policy,
         settings.sandbox,
@@ -568,6 +665,37 @@ def install_global_skills(
     return installed
 
 
+def load_credentials(
+    store: ConfigStore | None, profile: AgentProfile | None
+) -> dict[str, str]:
+    """The environment variables this profile's own credentials contribute.
+
+    Returns nothing while the switch is off, so the Web UI can start writing
+    the document before any runtime acts on it.
+    """
+    if not profile_credentials_enabled() or store is None or profile is None:
+        return {}
+    try:
+        document = store.read(CREDENTIALS_DOCUMENT)
+    except Exception:  # noqa: BLE001 - a missing credential is not fatal
+        logger.warning("Could not read the credential document", exc_info=True)
+        return {}
+    resolved = credentials_for(parse_credentials(document), profile.name)
+    rejected = sorted(name for name in resolved if name in _RESERVED_VARIABLES)
+    if rejected:
+        # Reaching a reserved name would let a credential redirect the
+        # interpreter or the module path rather than authenticate anything.
+        logger.warning(
+            "Ignoring credential bindings for reserved variables: %s",
+            ", ".join(rejected),
+        )
+    return {
+        name: value
+        for name, value in resolved.items()
+        if name not in _RESERVED_VARIABLES
+    }
+
+
 def prepare_codex_environment(
     settings: RuntimeSettings,
     store: ConfigStore | None = None,
@@ -595,19 +723,24 @@ def prepare_codex_environment(
         skills_root = view / "skills"
         tools_root = view / "tools"
 
-    environment = os.environ.copy()
+    # Built, not copied. The child has a shell and a model that can be talked
+    # into using it, so anything it inherits has to be there on purpose.
+    environment = {
+        name: value
+        for name in _INHERITED_VARIABLES
+        if (value := os.environ.get(name)) is not None
+    }
     environment["CODEX_HOME"] = str(settings.codex_home)
     environment["DIGIBUDDY_PAYLOAD_ROOT"] = str(settings.payload_root)
     environment["DIGIBUDDY_SKILLS_ROOT"] = str(skills_root)
     environment["DIGIBUDDY_TOOLS_ROOT"] = str(tools_root)
     environment["DIGIBUDDY_PROFILE"] = active.name
-    environment["PYTHONPATH"] = os.pathsep.join(
-        [str(tools_root), *filter(None, [environment.get("PYTHONPATH")])]
-    )
+    environment["PYTHONPATH"] = str(tools_root)
     if settings.model_api_key:
         environment[MODEL_API_KEY_ENV] = settings.model_api_key
         if not settings.model_endpoint:
             environment["OPENAI_API_KEY"] = settings.model_api_key
+    environment.update(load_credentials(store, active))
     return environment
 
 
@@ -620,6 +753,7 @@ __all__ = [
     "apply_model_overrides",
     "build_catalogue",
     "capability_packs_enabled",
+    "load_credentials",
     "effective_model",
     "effective_reasoning_effort",
     "install_global_skills",
