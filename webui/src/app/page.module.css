@@ -1,6 +1,6 @@
 .shell {
   display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(300px, 420px);
+  grid-template-columns: minmax(240px, 288px) minmax(0, 1fr);
   height: 100vh;
   /* Keeps the console genuinely full screen once mobile browser chrome hides. */
   height: 100dvh;
@@ -10,11 +10,10 @@
 }
 
 /*
- * The slots are invisible on wide screens: their children are the real grid
- * columns. Narrow screens turn them into off-canvas drawers.
+ * The slot is invisible on wide screens: its child is the real grid column.
+ * Narrow screens turn it into an off-canvas drawer.
  */
-.navSlot,
-.panelSlot {
+.navSlot {
   display: contents;
 }
 
@@ -25,56 +24,6 @@
 
 .drawerButton {
   display: none;
-}
-
-.formGrid {
-  display: grid;
-  gap: 14px;
-  max-height: 46vh;
-  padding-right: 4px;
-  overflow-y: auto;
-}
-
-.formGrid label {
-  display: grid;
-  gap: 7px;
-  color: #b8c3c7;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.formGrid input,
-.formGrid select {
-  width: 100%;
-  min-height: 40px;
-  padding: 0 12px;
-  color: #f5f8f9;
-  background: #19272d;
-  border: 1px solid #34454b;
-  border-radius: 8px;
-  outline: none;
-  font: inherit;
-  font-size: 13px;
-}
-
-.formGrid input:focus,
-.formGrid select:focus {
-  border-color: #62c6b7;
-  box-shadow: 0 0 0 3px rgb(98 198 183 / 12%);
-}
-
-.securityNote {
-  padding: 12px;
-  color: #95a5aa;
-  background: rgb(255 255 255 / 4%);
-  border-radius: 8px;
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.securityNote a {
-  color: #75d6c7;
-  text-decoration: underline;
 }
 
 .chat {
@@ -93,7 +42,7 @@
   min-height: 62px;
   padding: 0 24px;
   color: #334148;
-  border-bottom: 1px solid #e5e9eb;
+  border-bottom: 1px solid #eceff1;
   font-size: 14px;
   font-weight: 600;
 }
@@ -107,22 +56,30 @@
   white-space: nowrap;
 }
 
-.protocol {
+.headerActions {
   flex: none;
-  color: #7d8b91;
-  font-size: 12px;
-  font-weight: 500;
+  gap: 8px;
+  overflow: visible;
 }
 
-.statusDot {
-  display: inline-block;
-  flex: none;
-  width: 8px;
-  height: 8px;
-  margin-right: 8px;
-  background: #2db59d;
-  border-radius: 50%;
-  box-shadow: 0 0 0 4px rgb(45 181 157 / 12%);
+.deliverablesButton {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  color: #33454a;
+  background: #f4f7f8;
+  border: 1px solid #e2e8ea;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.deliverablesButton:hover {
+  background: #eef4f4;
 }
 
 .messages {
@@ -311,23 +268,16 @@
 }
 
 .effort {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  color: #66787d;
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-.effort select {
   height: 32px;
   padding: 0 8px;
-  color: #33454a;
+  color: #66787d;
   background: #fff;
-  border: 1px solid #d8dfe2;
-  border-radius: 8px;
+  border: 1px solid #e2e8ea;
+  border-radius: 999px;
+  cursor: pointer;
   font: inherit;
   font-size: 12.5px;
+  font-weight: 600;
 }
 
 .composer button[type="submit"] {
@@ -364,7 +314,7 @@
   background: #e4eeee;
 }
 
-/* Pushes Thinking and Send to the right edge of the composer. */
+/* Pushes the effort and Send controls to the right edge of the composer. */
 .composerSpacer {
   flex: 1 1 auto;
 }
@@ -372,48 +322,6 @@
 .composer button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
-}
-
-@media (max-width: 1180px) {
-  .shell {
-    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
-  }
-
-  /* The deliverable panel becomes a drawer over the conversation. */
-  .panelSlot {
-    display: block;
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 20;
-    width: min(420px, 92vw);
-    transform: translateX(100%);
-    transition: transform 0.22s ease;
-  }
-
-  .shell[data-panel="open"] .panelSlot {
-    transform: translateX(0);
-  }
-
-  .panelSlot > * {
-    height: 100%;
-    box-shadow: -18px 0 44px rgb(22 38 45 / 16%);
-  }
-
-  .shell[data-panel="open"] .backdrop,
-  .shell[data-nav="open"] .backdrop {
-    display: block;
-    position: fixed;
-    inset: 0;
-    z-index: 15;
-    background: rgb(16 27 32 / 42%);
-    cursor: pointer;
-  }
-
-  .chatHeader button.drawerButton:last-child {
-    display: inline-flex;
-  }
 }
 
 @media (max-width: 860px) {
@@ -442,6 +350,15 @@
     box-shadow: 18px 0 44px rgb(22 38 45 / 22%);
   }
 
+  .shell[data-nav="open"] .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 15;
+    background: rgb(16 27 32 / 42%);
+    cursor: pointer;
+  }
+
   .drawerButton {
     display: inline-flex;
     flex: none;
@@ -458,23 +375,10 @@
     font: inherit;
     font-size: 13px;
   }
-
-  .chatHeader > .drawerButton {
-    margin-right: 0;
-  }
-
-  .protocol {
-    display: none;
-  }
-
-  .formGrid {
-    max-height: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .navSlot,
-  .panelSlot {
+  .navSlot {
     transition: none;
   }
 }

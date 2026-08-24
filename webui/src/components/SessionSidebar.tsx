@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useState } from "react";
+import { useState } from "react";
 import type { ChatSession } from "@/lib/sessions";
 import styles from "./session-sidebar.module.css";
 
@@ -11,7 +11,6 @@ type Props = {
   onCreate: () => void;
   onRename: (sessionId: string, title: string) => void;
   onDelete: (sessionId: string) => void;
-  children: ReactNode;
 };
 
 export default function SessionSidebar({
@@ -21,7 +20,6 @@ export default function SessionSidebar({
   onCreate,
   onRename,
   onDelete,
-  children,
 }: Props) {
   const [editingId, setEditingId] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
@@ -35,8 +33,7 @@ export default function SessionSidebar({
   return (
     <aside className={styles.sidebar}>
       <div className={styles.brand}>
-        <p className={styles.eyebrow}>DigiBuddy</p>
-        <h1>Codex Console</h1>
+        <h1>DigiBuddy</h1>
       </div>
 
       <button type="button" className={styles.newSession} onClick={onCreate}>
@@ -95,10 +92,9 @@ export default function SessionSidebar({
         ))}
       </ul>
 
-      <details className={styles.settings}>
-        <summary>Connection settings</summary>
-        {children}
-      </details>
+      <footer className={styles.poweredBy}>
+        Powered by Codex on Microsoft Foundry Hosted Agent
+      </footer>
     </aside>
   );
 }
