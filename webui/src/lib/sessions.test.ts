@@ -151,3 +151,20 @@ test("a non-string profile in storage is discarded, not trusted", () => {
   assert.equal(restored.requestedProfile, "");
   assert.equal(restored.boundProfile, "");
 });
+
+test("a session never stores something that cannot be cloned", () => {
+  // Regression: `createNewSession` was passed to a button as `onClick={onCreate}`,
+  // so React handed it a PointerEvent as the profile name. The session then held
+  // an unclonable object, and the failure surfaced one turn later inside
+  // structuredClone rather than at the click that caused it.
+  const eventLike = { type: "pointerdown", isTrusted: true } as unknown as string;
+
+  const session = createSession(eventLike);
+
+  assert.equal(session.requestedProfile, "");
+  assert.doesNotThrow(() => structuredClone(session));
+});
+
+test("a profile name still survives when it is actually a name", () => {
+  assert.equal(createSession("marketing").requestedProfile, "marketing");
+});

@@ -36,7 +36,15 @@ export default function SessionSidebar({
         <h1>DigiBuddy</h1>
       </div>
 
-      <button type="button" className={styles.newSession} onClick={onCreate}>
+      <button
+        type="button"
+        className={styles.newSession}
+        // Called with no arguments on purpose. Passing the handler by reference
+        // hands React's event object to whatever the parent's first parameter
+        // happens to be, and an event is not clonable, so it poisons any state
+        // it reaches.
+        onClick={() => onCreate()}
+      >
         + New session
       </button>
 

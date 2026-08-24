@@ -365,7 +365,7 @@ export default function Home() {
           sessions={sessions}
           activeId={activeId}
           onSelect={selectSession}
-          onCreate={createNewSession}
+          onCreate={() => createNewSession()}
           onRename={(sessionId, title) =>
             replaceSessions(renameSession(sessions, sessionId, title))
           }

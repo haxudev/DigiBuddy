@@ -159,7 +159,7 @@ export default function ArtifactWindow({ artifacts, onClose }: Props) {
         <button
           type="button"
           className={styles.headerButton}
-          onClick={onClose}
+          onClick={() => onClose()}
           aria-label="Close deliverables"
           title="Close"
         >

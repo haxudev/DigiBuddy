@@ -44,7 +44,11 @@ export function createSession(
     title: DEFAULT_TITLE,
     threadId: newId(),
     previousResponseId: "",
-    requestedProfile,
+    // Guarded because this is the boundary where browser-persisted state is
+    // created, and a caller that passes a handler by reference gets React's
+    // event object here instead of a name. An event is not clonable, so it
+    // would break the next turn rather than the call that created it.
+    requestedProfile: typeof requestedProfile === "string" ? requestedProfile : "",
     boundProfile: "",
     messages: [],
     createdAt: now,
