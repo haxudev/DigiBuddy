@@ -31,6 +31,12 @@ from .session_map import ResponseThreadMap
 
 logger = logging.getLogger(__name__)
 
+#: Emitted once per turn so the console never has to guess which agent ran.
+#: The binding lives on the server, so only the server can answer it: a blank
+#: request may resolve through a deployment default, and a resumed conversation
+#: keeps a profile the browser may no longer remember.
+PROFILE_EVENT = "assistant.profile"
+
 
 class CodexProtocolError(RuntimeError):
     pass
@@ -117,8 +123,31 @@ class CodexRuntime:
     ) -> AsyncIterator[RuntimeEvent]:
         async with self._lock:
             binding = self._thread_map.lookup(previous_response_id)
-            # A resumed conversation keeps the profile it was started with.
-            active = self._resolve(binding.profile if binding else profile)
+            # A resumed conversation keeps the profile it was started with, and
+            # a request that disagrees is reported rather than dropped: the
+            # console used to show one agent while another one ran.
+            requested = (profile or "").strip()
+            bound = binding.profile if binding else ""
+            active = self._resolve(bound or requested or None)
+            status = "bound"
+            if bound and requested and requested != bound:
+                status = "contradicted"
+                logger.warning(
+                    "Turn requested profile %r but the conversation is bound to %r; "
+                    "keeping the binding",
+                    requested,
+                    bound,
+                )
+            yield RuntimeEvent(
+                PROFILE_EVENT,
+                {
+                    "profile": active.name,
+                    "display_name": active.display_name or active.name,
+                    "requested": requested,
+                    "status": status,
+                },
+            )
+
             await self._ensure_started(active, reasoning_effort or "")
 
             thread_id = binding.thread_id if binding else None

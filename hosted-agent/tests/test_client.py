@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from codex_adapter.client import (
+    PROFILE_EVENT,
     CodexProtocolError,
     CodexRuntime,
     _server_request_result,
@@ -11,6 +12,7 @@ from codex_adapter.client import (
 from codex_adapter.artifacts import ARTIFACT_EVENT
 from codex_adapter.config import RuntimeSettings
 from codex_adapter.config_store import NullConfigStore
+from codex_adapter.profiles import UnknownProfileError
 
 
 def settings(directory: str, **overrides):
@@ -161,6 +163,139 @@ class ProtocolTimeoutTests(unittest.TestCase):
                 runtime._restart = restart
                 self.assertIsNone(await runtime._next_turn_message(cancellation))
                 self.assertTrue(restarted)
+
+        asyncio.run(exercise())
+
+
+class ProfileBindingTests(unittest.TestCase):
+    """The server owns the binding, so the server has to report it."""
+
+    def _runtime(self, directory, profiles):
+        class ProfileStore(NullConfigStore):
+            def read(self, name):
+                if name == "profiles.json":
+                    return {"profiles": profiles}
+                return None
+
+        current = settings(directory)
+        current.workspace.mkdir(parents=True, exist_ok=True)
+        runtime = CodexRuntime(current, ProfileStore())
+
+        async def ensure_started(_profile, _reasoning_effort=""):
+            return None
+
+        async def start_thread(_model, _profile):
+            return "thread-1"
+
+        async def resume_thread(_thread_id, _model, _profile):
+            return None
+
+        async def request(_method, _params):
+            return {"turn": {"id": "turn-1"}}
+
+        async def next_message(_cancellation):
+            return {
+                "method": "turn/completed",
+                "params": {"turn": {"id": "turn-1", "status": "completed"}},
+            }
+
+        runtime._ensure_started = ensure_started
+        runtime._start_thread = start_thread
+        runtime._resume_thread = resume_thread
+        runtime._request = request
+        runtime._next_turn_message = next_message
+        return runtime
+
+    async def _run(self, runtime, *, profile=None, previous=None, response_id="r1"):
+        return [
+            event
+            async for event in runtime.stream_turn(
+                "do it",
+                previous_response_id=previous,
+                response_id=response_id,
+                cancellation_signal=asyncio.Event(),
+                profile=profile,
+            )
+        ]
+
+    def test_a_turn_reports_the_profile_it_actually_used(self):
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                runtime = self._runtime(
+                    directory,
+                    [{"name": "digibuddy"}, {"name": "marketing", "display_name": "Marketing"}],
+                )
+
+                events = await self._run(runtime, profile="marketing")
+
+                reported = next(e for e in events if e.type == PROFILE_EVENT)
+                self.assertEqual(reported.data["profile"], "marketing")
+                self.assertEqual(reported.data["display_name"], "Marketing")
+                self.assertEqual(reported.data["status"], "bound")
+
+        asyncio.run(exercise())
+
+    def test_a_blank_request_reports_the_default_it_resolved_to(self):
+        """Blank does not mean "no profile"; the console must be told which one."""
+
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                runtime = self._runtime(directory, [{"name": "digibuddy"}])
+
+                events = await self._run(runtime, profile=None)
+
+                reported = next(e for e in events if e.type == PROFILE_EVENT)
+                self.assertEqual(reported.data["profile"], "digibuddy")
+
+        asyncio.run(exercise())
+
+    def test_a_bound_conversation_keeps_its_profile_and_says_so(self):
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                runtime = self._runtime(
+                    directory, [{"name": "digibuddy"}, {"name": "marketing"}]
+                )
+                await self._run(runtime, profile="marketing", response_id="r1")
+
+                events = await self._run(
+                    runtime, profile="digibuddy", previous="r1", response_id="r2"
+                )
+
+                reported = next(e for e in events if e.type == PROFILE_EVENT)
+                self.assertEqual(reported.data["profile"], "marketing")
+                self.assertEqual(reported.data["status"], "contradicted")
+                self.assertEqual(reported.data["requested"], "digibuddy")
+
+        asyncio.run(exercise())
+
+    def test_an_unknown_profile_fails_instead_of_running_as_the_default(self):
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                runtime = self._runtime(directory, [{"name": "digibuddy"}])
+
+                with self.assertRaises(UnknownProfileError):
+                    await self._run(runtime, profile="deleted-agent")
+
+        asyncio.run(exercise())
+
+    def test_a_bound_profile_that_was_deleted_fails_closed(self):
+        """The dangerous case: a restricted agent resuming as the default."""
+
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                runtime = self._runtime(
+                    directory, [{"name": "digibuddy"}, {"name": "marketing"}]
+                )
+                await self._run(runtime, profile="marketing", response_id="r1")
+
+                runtime._store.read = lambda name: (
+                    {"profiles": [{"name": "digibuddy"}]}
+                    if name == "profiles.json"
+                    else None
+                )
+
+                with self.assertRaises(UnknownProfileError):
+                    await self._run(runtime, previous="r1", response_id="r2")
 
         asyncio.run(exercise())
 

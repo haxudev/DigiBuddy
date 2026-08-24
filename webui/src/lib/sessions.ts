@@ -9,6 +9,15 @@ export type ChatSession = {
   title: string;
   threadId: string;
   previousResponseId: string;
+  /** What this conversation asks the runtime for. Empty means "the default". */
+  requestedProfile: string;
+  /**
+   * The agent the runtime reported actually running. Empty until the first
+   * turn answers; once set, the conversation is bound and the choice is no
+   * longer the reader's to change, because Codex fixes a thread's base
+   * instructions when the thread starts.
+   */
+  boundProfile: string;
   messages: StoredMessage[];
   createdAt: number;
   updatedAt: number;
@@ -26,16 +35,26 @@ function newId(): string {
   return `id-${Math.random().toString(36).slice(2)}-${Date.now()}`;
 }
 
-export function createSession(now = Date.now()): ChatSession {
+export function createSession(
+  now = Date.now(),
+  requestedProfile = "",
+): ChatSession {
   return {
     id: newId(),
     title: DEFAULT_TITLE,
     threadId: newId(),
     previousResponseId: "",
+    requestedProfile,
+    boundProfile: "",
     messages: [],
     createdAt: now,
     updatedAt: now,
   };
+}
+
+/** A bound conversation cannot change agent; only a new one can. */
+export function isBound(session: ChatSession | undefined): boolean {
+  return Boolean(session?.boundProfile);
 }
 
 /**
@@ -126,6 +145,13 @@ export function parseSessions(raw: string | null): ChatSession[] {
         typeof value.previousResponseId === "string"
           ? value.previousResponseId
           : "",
+      // Sessions stored before the runtime reported its binding migrate to
+      // "unknown" rather than to a guess, so the picker asks again instead of
+      // claiming an agent that may never have run.
+      requestedProfile:
+        typeof value.requestedProfile === "string" ? value.requestedProfile : "",
+      boundProfile:
+        typeof value.boundProfile === "string" ? value.boundProfile : "",
       messages,
       createdAt: typeof value.createdAt === "number" ? value.createdAt : 0,
       updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : 0,

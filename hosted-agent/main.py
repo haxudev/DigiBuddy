@@ -21,7 +21,9 @@ from codex_adapter import (
     store_attachments,
 )
 from codex_adapter.artifacts import ARTIFACT_EVENT, artifact_manifest
+from codex_adapter.client import PROFILE_EVENT
 from codex_adapter.events import completion_delta, tool_arguments
+from codex_adapter.profiles import UnknownProfileError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("digibuddy.hosted_agent")
@@ -89,6 +91,61 @@ async def _prepare_prompt(context: ResponseContext) -> str:
     return prompt
 
 
+def _unknown_profile_message(error: UnknownProfileError) -> str:
+    """Say which agent is missing, because the caller cannot see the catalogue.
+
+    This is deliberately an error rather than a silent fall back to the default
+    agent: a conversation bound to a restricted profile that was renamed or
+    deleted would otherwise resume with a different agent's capabilities.
+    """
+    return (
+        f"This conversation is bound to the agent profile '{error.name}', which is "
+        "no longer configured. Start a new conversation with an available agent, "
+        "or ask an administrator to restore it."
+    )
+
+
+async def _turn_events(
+    prompt: str,
+    *,
+    previous_response_id: str | None,
+    response_id: str,
+    cancellation_signal: asyncio.Event,
+    model: str | None,
+    profile: str | None,
+    reasoning_effort: str | None,
+):
+    """Stream the turn, translating a missing profile into something readable."""
+    try:
+        async for event in runtime.stream_turn(
+            prompt,
+            previous_response_id=previous_response_id,
+            response_id=response_id,
+            cancellation_signal=cancellation_signal,
+            model=model,
+            profile=profile,
+            reasoning_effort=reasoning_effort,
+        ):
+            yield event
+    except UnknownProfileError as error:
+        raise RuntimeError(_unknown_profile_message(error)) from error
+
+
+def _profile_manifest(profile: dict[str, object]) -> str:
+    """Tell the console which agent actually ran.
+
+    It travels the same way the artifact manifest does -- an invisible comment
+    on the assistant message -- because the Responses protocol has no field for
+    it and a console that has to guess will eventually guess wrong.
+    """
+    payload = json.dumps(
+        {"version": 1, "profile": profile},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return f"\n\n<!-- digibuddy-profile:{payload} -->"
+
+
 @app.response_handler
 async def handle_response(
     request: CreateResponse,
@@ -118,6 +175,7 @@ async def handle_response(
     output = ""
     artifacts: list[dict[str, object]] = []
     artifact_failures = 0
+    effective_profile: dict[str, object] | None = None
 
     def open_reasoning():
         nonlocal reasoning, reasoning_part, reasoning_text
@@ -137,7 +195,7 @@ async def handle_response(
         reasoning = None
         reasoning_part = None
 
-    async for event in runtime.stream_turn(
+    async for event in _turn_events(
         prompt,
         previous_response_id=(
             previous_response_id if isinstance(previous_response_id, str) else None
@@ -148,12 +206,14 @@ async def handle_response(
         profile=_requested_profile(request),
         reasoning_effort=_requested_reasoning_effort(request),
     ):
-        logger.info(
-            "codex_event %s",
-            json.dumps({"type": event.type, **event.data}, ensure_ascii=False),
-        )
+        # Event payloads can carry whatever a tool printed, so only the shape
+        # is logged. Task 5 tightens this further for credentials.
+        logger.info("codex_event type=%s", event.type)
 
-        if event.type == ARTIFACT_EVENT:
+        if event.type == PROFILE_EVENT:
+            effective_profile = dict(event.data)
+
+        elif event.type == ARTIFACT_EVENT:
             values = event.data.get("artifacts")
             if isinstance(values, list):
                 artifacts.extend(item for item in values if isinstance(item, dict))
@@ -268,6 +328,10 @@ async def handle_response(
         yield message.emit_added()
         text = message.add_text_content()
         yield text.emit_added()
+    if effective_profile is not None:
+        manifest = _profile_manifest(effective_profile)
+        output += manifest
+        yield text.emit_delta(manifest)
     yield text.emit_text_done(output)
     yield text.emit_done()
     yield message.emit_done()

@@ -29,6 +29,10 @@ import {
   stripArtifactMetadata,
   type Artifact,
 } from "@/lib/artifacts";
+import {
+  extractEffectiveProfile,
+  stripProfileMetadata,
+} from "@/lib/effective-profile";
 import { splitMessage } from "@/lib/ask-user";
 import {
   deliveryFocus,
@@ -107,7 +111,6 @@ function toStoredMessages(messages: Message[]): StoredMessage[] {
 }
 
 export default function Home() {
-  const [profile, setProfile] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState("");
@@ -135,6 +138,10 @@ export default function Home() {
   const activeSession =
     sessions.find((session) => session.id === selectedId) ?? sessions[0];
   const activeId = activeSession?.id ?? "";
+  // The agent is a property of the conversation, not of the page: switching
+  // sessions must follow it, and a reload must restore it.
+  const requestedProfile = activeSession?.requestedProfile ?? "";
+  const boundProfile = activeSession?.boundProfile ?? "";
 
   // Each session owns an agent so switching never mixes transcripts or reuses
   // another session's previous response id.
@@ -162,9 +169,17 @@ export default function Home() {
       },
       onMessagesChanged: ({ messages: nextMessages }) => {
         const stored = toStoredMessages(nextMessages as Message[]);
+        // The runtime is the authority on which agent ran, so the binding is
+        // taken from its answer rather than from what this client asked for.
+        const reported = stored
+          .filter((message) => message.role === "assistant")
+          .map((message) => extractEffectiveProfile(message.content))
+          .filter((entry) => entry !== null)
+          .pop();
         updateSession(activeId, (item) => ({
           ...item,
           messages: stored,
+          boundProfile: reported ? reported.profile : item.boundProfile,
           title: item.title === "New session" ? deriveTitle(stored) : item.title,
           updatedAt: Date.now(),
         }));
@@ -248,7 +263,9 @@ export default function Home() {
       try {
         await agent.runAgent({
           forwardedProps: {
-            connection: { profile },
+            // A bound conversation keeps its agent whatever the picker shows,
+            // because the runtime will keep it regardless.
+            connection: { profile: boundProfile || requestedProfile },
             attachments: files,
             reasoningEffort,
           },
@@ -262,7 +279,7 @@ export default function Home() {
         setIsRunning(false);
       }
     },
-    [attachments, isRunning, profile, reasoningEffort],
+    [attachments, boundProfile, isRunning, reasoningEffort, requestedProfile],
   );
 
   async function addFiles(list: FileList | null) {
@@ -295,8 +312,8 @@ export default function Home() {
     setActivity([]);
   }
 
-  function createNewSession() {
-    const session = createSession();
+  function createNewSession(withProfile = "") {
+    const session = createSession(Date.now(), withProfile);
     replaceSessions(upsertSession(sessions, session));
     selectSession(session.id);
   }
@@ -355,8 +372,16 @@ export default function Home() {
             )}
             <AgentCapabilities
               profiles={profiles}
-              selected={profile}
-              onSelect={setProfile}
+              selected={boundProfile || requestedProfile}
+              bound={Boolean(boundProfile)}
+              running={isRunning}
+              onSelect={(name) =>
+                updateSession(activeId, (item) => ({
+                  ...item,
+                  requestedProfile: name,
+                }))
+              }
+              onStartNewSession={(name: string) => createNewSession(name)}
             />
           </div>
         </header>
@@ -382,7 +407,7 @@ export default function Home() {
                 <article className={styles.agentMessage} key={message.id}>
                   <small>DigiBuddy</small>
                   {splitMessage(
-                    stripArtifactMetadata(message.content),
+                    stripProfileMetadata(stripArtifactMetadata(message.content)),
                     message.id,
                   ).map((segment, index) =>
                     segment.kind === "ask" ? (

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   createSession,
   deriveTitle,
+  isBound,
   parseSessions,
   removeSession,
   renameSession,
@@ -90,4 +91,63 @@ test("corrupt storage never breaks the session list", () => {
   ]);
   assert.equal(recovered[0].title, "hi");
   assert.equal(recovered[0].previousResponseId, "");
+});
+
+test("a session carries both the requested and the bound agent", () => {
+  const session = createSession(1000, "marketing");
+
+  assert.equal(session.requestedProfile, "marketing");
+  assert.equal(session.boundProfile, "");
+  assert.equal(isBound(session), false);
+  assert.equal(isBound({ ...session, boundProfile: "marketing" }), true);
+});
+
+test("a stored profile survives a reload", () => {
+  const session = {
+    ...createSession(1000, "marketing"),
+    boundProfile: "marketing",
+  };
+
+  const [restored] = parseSessions(serializeSessions([session]));
+
+  assert.equal(restored.requestedProfile, "marketing");
+  assert.equal(restored.boundProfile, "marketing");
+});
+
+test("a session stored before bindings existed does not claim an agent", () => {
+  const legacy = JSON.stringify([
+    {
+      id: "s1",
+      title: "Old",
+      threadId: "t1",
+      previousResponseId: "resp-1",
+      messages: [],
+      createdAt: 1,
+      updatedAt: 2,
+    },
+  ]);
+
+  const [restored] = parseSessions(legacy);
+
+  assert.equal(restored.requestedProfile, "");
+  assert.equal(restored.boundProfile, "");
+  assert.equal(isBound(restored), false);
+});
+
+test("a non-string profile in storage is discarded, not trusted", () => {
+  const hostile = JSON.stringify([
+    {
+      id: "s1",
+      title: "T",
+      threadId: "t1",
+      requestedProfile: { toString: "nope" },
+      boundProfile: 42,
+      messages: [],
+    },
+  ]);
+
+  const [restored] = parseSessions(hostile);
+
+  assert.equal(restored.requestedProfile, "");
+  assert.equal(restored.boundProfile, "");
 });

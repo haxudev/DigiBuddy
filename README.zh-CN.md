@@ -102,7 +102,7 @@ Web UI 提供 `/admin`，一个面向该存储的三页签控制台：
 
 运行时在每个 turn 边界重新读取该存储，当生效配置发生变化时重启 Codex 引擎，因此管理端的修改无需重新部署即可生效。启动时运行时还会发布 `catalogue.json`，描述镜像实际包含的 skills 与 tools，从而保证控制台不会提供未部署的能力。
 
-聊天用户在设置面板中选择 profile，该选择以 `metadata.profile` 传给 agent；不选则使用运行时默认值。
+聊天用户在对话顶部的控件中选择 agent，该选择以 `metadata.profile` 传给运行时，运行时会回传它实际解析出的 profile。由于 Codex 在 thread 启动时就固定了基础指令，一次对话会一直使用它开始时的 agent：首轮之后该控件转为陈述当前 agent，选择其他 agent 会新建一次对话。不选则使用运行时默认值；指名一个已不存在的 agent 会报错，而不是静默回退。
 
 访问权限由 Easy Auth 主体头之上的 Entra 白名单（`ADMIN_PRINCIPAL_IDS`）守卫，空白名单拒绝所有人。模型 API key 只写不读 —— 永远不会返回给浏览器，留空保存则保留已存的值。详见 [功能](docs/features.md) 与 [API 参考](docs/api.md)。
 
