@@ -44,30 +44,10 @@ import {
 } from "@/lib/sessions";
 import styles from "./page.module.css";
 
-type Connection = {
-  endpoint: string;
-  apiKey: string;
-  authMode: "api-key" | "bearer";
-  model: string;
-  agentName: string;
-  agentVersion: string;
-  profile: string;
-};
-
 type ProfileOption = {
   name: string;
   display_name: string;
   description: string;
-};
-
-const emptyConnection: Connection = {
-  endpoint: "",
-  apiKey: "",
-  authMode: "api-key",
-  model: "",
-  agentName: "",
-  agentVersion: "",
-  profile: "",
 };
 
 const EFFORT_LABELS: Record<string, string> = {
@@ -123,7 +103,7 @@ function toStoredMessages(messages: Message[]): StoredMessage[] {
 }
 
 export default function Home() {
-  const [connection, setConnection] = useState(emptyConnection);
+  const [profile, setProfile] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState("");
@@ -250,7 +230,7 @@ export default function Home() {
       try {
         await agent.runAgent({
           forwardedProps: {
-            connection,
+            connection: { profile },
             attachments: files,
             reasoningEffort,
           },
@@ -264,7 +244,7 @@ export default function Home() {
         setIsRunning(false);
       }
     },
-    [attachments, connection, isRunning, reasoningEffort],
+    [attachments, isRunning, profile, reasoningEffort],
   );
 
   async function addFiles(list: FileList | null) {
@@ -308,13 +288,6 @@ export default function Home() {
     if (sessionId === activeId) selectSession(remaining[0]?.id ?? "");
   }
 
-  function updateConnection<K extends keyof Connection>(
-    key: K,
-    value: Connection[K],
-  ) {
-    setConnection((current) => ({ ...current, [key]: value }));
-  }
-
   return (
     <main
       className={styles.shell}
@@ -337,81 +310,20 @@ export default function Home() {
             <label>
               Agent profile
               <select
-                value={connection.profile}
-                onChange={(event) => updateConnection("profile", event.target.value)}
+                value={profile}
+                onChange={(event) => setProfile(event.target.value)}
               >
                 <option value="">Runtime default</option>
-                {profiles.map((profile) => (
-                  <option key={profile.name} value={profile.name}>
-                    {profile.display_name}
+                {profiles.map((option) => (
+                  <option key={option.name} value={option.name}>
+                    {option.display_name}
                   </option>
                 ))}
               </select>
             </label>
           )}
-          <label>
-            Hosted Agent Responses endpoint
-            <input
-              type="url"
-              value={connection.endpoint}
-              onChange={(event) => updateConnection("endpoint", event.target.value)}
-              placeholder="Server default or https://…/responses"
-            />
-          </label>
-          <label>
-            Endpoint key
-            <input
-              type="password"
-              value={connection.apiKey}
-              onChange={(event) => updateConnection("apiKey", event.target.value)}
-              placeholder="Server default"
-              autoComplete="off"
-            />
-          </label>
-          <label>
-            Authentication
-            <select
-              value={connection.authMode}
-              onChange={(event) =>
-                updateConnection(
-                  "authMode",
-                  event.target.value as Connection["authMode"],
-                )
-              }
-            >
-              <option value="api-key">API key</option>
-              <option value="bearer">OAuth access token</option>
-            </select>
-          </label>
-          <label>
-            Codex model name
-            <input
-              value={connection.model}
-              onChange={(event) => updateConnection("model", event.target.value)}
-              placeholder="Server default"
-            />
-          </label>
-          <label>
-            Hosted Agent name
-            <input
-              value={connection.agentName}
-              onChange={(event) => updateConnection("agentName", event.target.value)}
-              placeholder="Direct endpoint if blank"
-            />
-          </label>
-          <label>
-            Agent version
-            <input
-              value={connection.agentVersion}
-              onChange={(event) =>
-                updateConnection("agentVersion", event.target.value)
-              }
-              placeholder="Server default"
-            />
-          </label>
           <p className={styles.securityNote}>
-            Keys stay in memory and pass only through the server-side proxy. Leave
-            fields blank to use container environment settings.{" "}
+            Endpoints, keys, and models are managed by the runtime.{" "}
             <Link href="/admin">Administer the runtime</Link>
           </p>
         </div>
@@ -556,11 +468,14 @@ export default function Home() {
             />
             <button
               type="button"
-              className={styles.ghostButton}
+              className={styles.attachButton}
               onClick={() => fileInputRef.current?.click()}
+              aria-label="Attach files"
+              title="Attach files"
             >
-              Attach files
+              +
             </button>
+            <span className={styles.composerSpacer} />
             <label className={styles.effort}>
               Thinking
               <select
@@ -576,7 +491,7 @@ export default function Home() {
               </select>
             </label>
             <button disabled={!prompt.trim() || isRunning} type="submit">
-              {isRunning ? "Running…" : "Run task"}
+              {isRunning ? "Sending…" : "Send"}
             </button>
           </div>
         </form>

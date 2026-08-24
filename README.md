@@ -121,7 +121,7 @@ The Web UI serves `/admin`, a three-tab console over that store:
 
 The runtime re-reads the store at each turn boundary and restarts the Codex engine when the effective configuration changes, so administrative edits take effect without a redeploy. At startup it also publishes `catalogue.json`, describing the skills and tools the image actually ships, so the console can never offer a capability that is not deployed.
 
-Chat users pick a profile in the settings panel; it travels to the agent as `metadata.profile`. Selecting nothing uses the runtime default.
+Chat users pick a profile in the session panel — the only chat-side setting, everything else lives here; it travels to the agent as `metadata.profile`. Selecting nothing uses the runtime default.
 
 Access is guarded by an Entra allowlist over the Easy Auth principal header (`ADMIN_PRINCIPAL_IDS`); an empty list denies everyone. The model API key is write-only — it is never returned to the browser, and leaving the field blank preserves the stored value. See [Features](docs/features.md) and the [API Reference](docs/api.md).
 
