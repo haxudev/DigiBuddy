@@ -16,11 +16,26 @@ export const dynamic = "force-dynamic";
  * Only the display name and the opaque owner key are returned. The subject,
  * the tenant and the raw claims stay on the server.
  */
+/**
+ * Which providers this deployment actually offers.
+ *
+ * Declared rather than discovered: reading the platform's auth configuration
+ * would need management permissions the app has no other reason to hold, and
+ * offering a provider that is not configured sends people to a 404.
+ */
+function providers(): string[] {
+  const declared = (process.env.AUTH_PROVIDERS ?? "aad")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => ["aad", "google", "github"].includes(entry));
+  return declared.length > 0 ? [...new Set(declared)] : ["aad"];
+}
+
 export async function GET(request: Request) {
   const principal = optionalPrincipal(request.headers);
   if (!principal) {
     return Response.json(
-      { signedIn: false },
+      { signedIn: false, providers: providers() },
       { headers: { "Cache-Control": "no-store" } },
     );
   }
@@ -30,6 +45,7 @@ export async function GET(request: Request) {
       name: principal.name,
       provider: principal.provider,
       owner: ownerKey(principal),
+      providers: providers(),
     },
     { headers: { "Cache-Control": "no-store" } },
   );

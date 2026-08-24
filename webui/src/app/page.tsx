@@ -16,6 +16,7 @@ import ActivityTrail from "@/components/ActivityTrail";
 import AskUserCard from "@/components/AskUserCard";
 import Markdown from "@/components/Markdown";
 import SessionSidebar from "@/components/SessionSidebar";
+import SignIn from "@/components/SignIn";
 import {
   ACTIVITY_EVENT_NAME,
   isActivityEvent,
@@ -123,6 +124,12 @@ export default function Home() {
   const [error, setError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [profiles, setProfiles] = useState<ProfileCapabilities[]>([]);
+  // `null` while the answer is unknown, so the console does not flash a
+  // sign-in screen at someone who is already signed in.
+  const [identity, setIdentity] = useState<{
+    signedIn: boolean;
+    providers: string[];
+  } | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [attachments, setAttachments] = useState<TurnAttachment[]>([]);
   const [reasoningEffort, setReasoningEffort] = useState("");
@@ -216,9 +223,19 @@ export default function Home() {
   useEffect(() => {
     const controller = new AbortController();
     fetch("/api/me", { signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : { signedIn: false }))
-      .then((me) => setSessionOwner(me.signedIn ? String(me.owner ?? "") : ""))
-      .catch(() => undefined);
+      .then((response) =>
+        response.ok ? response.json() : { signedIn: false, providers: [] },
+      )
+      .then((me) => {
+        setSessionOwner(me.signedIn ? String(me.owner ?? "") : "");
+        setIdentity({
+          signedIn: Boolean(me.signedIn),
+          providers: Array.isArray(me.providers) ? me.providers : [],
+        });
+      })
+      // A deployment with no auth in front of it still has to be usable, and
+      // the server refuses unauthenticated work regardless of what is shown.
+      .catch(() => setIdentity({ signedIn: true, providers: [] }));
     return () => controller.abort();
   }, []);
 
@@ -368,6 +385,10 @@ export default function Home() {
     const remaining = removeSession(sessions, sessionId);
     replaceSessions(remaining);
     if (sessionId === activeId) selectSession(remaining[0]?.id ?? "");
+  }
+
+  if (identity && !identity.signedIn) {
+    return <SignIn providers={identity.providers} />;
   }
 
   return (

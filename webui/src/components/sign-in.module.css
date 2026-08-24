@@ -1,0 +1,74 @@
+.shell {
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  padding: 24px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(420px, 100%);
+  padding: 32px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 16px;
+  background: var(--surface, rgba(255, 255, 255, 0.04));
+  text-align: center;
+}
+
+.mark {
+  font-size: 2rem;
+  opacity: 0.8;
+}
+
+.card h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.card p {
+  margin: 0;
+  font-size: 0.92rem;
+  opacity: 0.78;
+  line-height: 1.5;
+}
+
+.providers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.provider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.16));
+  border-radius: 10px;
+  color: inherit;
+  font-size: 0.95rem;
+  text-decoration: none;
+}
+
+.provider:hover {
+  background: var(--surface-strong, rgba(255, 255, 255, 0.08));
+}
+
+.providerMark {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: var(--surface-strong, rgba(255, 255, 255, 0.1));
+  font-size: 0.8em;
+}
+
+.note {
+  font-size: 0.8rem !important;
+  opacity: 0.6 !important;
+}
