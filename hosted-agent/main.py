@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from azure.ai.agentserver.responses import (
@@ -70,18 +71,21 @@ def _requested_reasoning_effort(request: CreateResponse) -> str | None:
     return effort.strip() if isinstance(effort, str) and effort.strip() else None
 
 
-async def _prepare_prompt(context: ResponseContext) -> str:
+async def _prepare_prompt(context: ResponseContext, workspace: Path) -> str:
     """Combine the user's text with any files attached to the turn.
 
-    Attachments are written into the Codex workspace so the sandboxed agent can
-    open them with ordinary file tools, and the prompt records where they are.
+    Attachments are written into this conversation's own workspace so the
+    sandboxed agent can open them with ordinary file tools, and the prompt
+    records where they are. This happens before the turn starts, which is why
+    the workspace is derived rather than allocated: both this and the runtime
+    have to reach the same directory independently.
     """
     prompt = (await context.get_input_text() or "").strip()
     paths = []
     try:
         items = await context.get_input_items()
         paths = store_attachments(
-            collect_attachments(list(items)), settings.workspace / "uploads"
+            collect_attachments(list(items)), workspace / "uploads"
         )
     except Exception:  # noqa: BLE001 - a bad upload must not fail the turn
         logger.warning("Could not store request attachments", exc_info=True)
@@ -152,13 +156,18 @@ async def handle_response(
     context: ResponseContext,
     cancellation_signal: asyncio.Event,
 ):
-    prompt = await _prepare_prompt(context)
+    previous_response_id = _request_value(request, "previous_response_id")
+    if not isinstance(previous_response_id, str):
+        previous_response_id = None
+    workspace = runtime.conversation_workspace(
+        previous_response_id, context.response_id
+    )
+    prompt = await _prepare_prompt(context, workspace)
 
     stream = ResponseEventStream(response_id=context.response_id, request=request)
     yield stream.emit_created()
     yield stream.emit_in_progress()
 
-    previous_response_id = _request_value(request, "previous_response_id")
     requested_model = _request_value(request, "model")
     if not isinstance(requested_model, str) or not requested_model.strip():
         requested_model = None
@@ -197,9 +206,7 @@ async def handle_response(
 
     async for event in _turn_events(
         prompt,
-        previous_response_id=(
-            previous_response_id if isinstance(previous_response_id, str) else None
-        ),
+        previous_response_id=previous_response_id,
         response_id=context.response_id,
         cancellation_signal=cancellation_signal,
         model=requested_model,

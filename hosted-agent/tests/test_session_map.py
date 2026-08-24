@@ -38,3 +38,27 @@ class ResponseThreadMapTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class WorkspaceBindingTests(unittest.TestCase):
+    """The workspace id has to outlive the process that created it."""
+
+    def test_a_binding_carries_its_workspace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            mapping = ResponseThreadMap(Path(directory) / "map.json")
+            mapping.bind("r1", "thread-1", "marketing", "ws-abc")
+
+            binding = mapping.lookup("r1")
+            self.assertEqual(binding.workspace_id, "ws-abc")
+
+    def test_a_map_written_before_workspaces_existed_still_loads(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "map.json"
+            path.write_text(
+                json.dumps({"r1": {"thread": "t1", "profile": "marketing"}}),
+                encoding="utf-8",
+            )
+
+            binding = ResponseThreadMap(path).lookup("r1")
+
+            self.assertEqual(binding.thread_id, "t1")
+            self.assertEqual(binding.workspace_id, "")

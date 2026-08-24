@@ -80,3 +80,18 @@ class ArtifactPublishingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LegacyRootTests(unittest.TestCase):
+    def test_the_shared_root_does_not_collect_other_conversations(self):
+        """A conversation bound before containment still scans the root."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "mine.md").write_text("# mine", encoding="utf-8")
+            neighbour = root / "conversations" / ("a" * 8)
+            neighbour.mkdir(parents=True)
+            (neighbour / "theirs.md").write_text("# theirs", encoding="utf-8")
+
+            changed = changed_artifacts(root, {})
+
+            self.assertEqual([path.name for path in changed], ["mine.md"])

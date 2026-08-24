@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 class ThreadBinding:
     thread_id: str
     profile: str = ""
+    #: Which conversation directory this thread owns. Empty in maps written
+    #: before workspaces were separated; those conversations keep the shared
+    #: root so a resumed session still finds its own files.
+    workspace_id: str = ""
 
 
 class ResponseThreadMap:
@@ -25,11 +29,23 @@ class ResponseThreadMap:
             return None
         return self._read().get(response_id)
 
-    def bind(self, response_id: str, thread_id: str, profile: str = "") -> None:
+    def bind(
+        self,
+        response_id: str,
+        thread_id: str,
+        profile: str = "",
+        workspace_id: str = "",
+    ) -> None:
         mappings = self._read()
-        mappings[response_id] = ThreadBinding(thread_id=thread_id, profile=profile)
+        mappings[response_id] = ThreadBinding(
+            thread_id=thread_id, profile=profile, workspace_id=workspace_id
+        )
         serialised = {
-            key: {"thread": value.thread_id, "profile": value.profile}
+            key: {
+                "thread": value.thread_id,
+                "profile": value.profile,
+                "workspace": value.workspace_id,
+            }
             for key, value in mappings.items()
         }
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -67,8 +83,10 @@ class ResponseThreadMap:
                 bindings[key] = ThreadBinding(thread_id=item)
             elif isinstance(item, dict) and isinstance(item.get("thread"), str):
                 profile = item.get("profile")
+                workspace = item.get("workspace")
                 bindings[key] = ThreadBinding(
                     thread_id=item["thread"],
                     profile=profile if isinstance(profile, str) else "",
+                    workspace_id=workspace if isinstance(workspace, str) else "",
                 )
         return bindings

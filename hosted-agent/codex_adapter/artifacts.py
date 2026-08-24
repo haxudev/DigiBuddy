@@ -48,6 +48,10 @@ _IGNORED_DIRECTORIES = {
     ".work",
     "__pycache__",
     "build",
+    # Every other conversation lives here. A conversation bound before
+    # workspaces were separated still scans the shared root, and without this
+    # it would collect its neighbours' files as its own deliverables.
+    "conversations",
     "coverage",
     "dist",
     "node_modules",

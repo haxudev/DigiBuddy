@@ -105,12 +105,15 @@ class ProtocolTimeoutTests(unittest.TestCase):
                 async def ensure_started(_profile, _reasoning_effort=""):
                     return None
 
-                async def start_thread(_model, _profile):
+                async def start_thread(_model, _profile, _workspace=None):
                     return "thread-1"
+
+                conversation = runtime.conversation_workspace(None, "response-1")
 
                 async def request(method, _params):
                     self.assertEqual(method, "turn/start")
-                    (current.workspace / "report.md").write_text(
+                    conversation.mkdir(parents=True, exist_ok=True)
+                    (conversation / "report.md").write_text(
                         "# Report", encoding="utf-8"
                     )
                     return {"turn": {"id": "turn-1"}}
@@ -184,10 +187,10 @@ class ProfileBindingTests(unittest.TestCase):
         async def ensure_started(_profile, _reasoning_effort=""):
             return None
 
-        async def start_thread(_model, _profile):
+        async def start_thread(_model, _profile, _workspace=None):
             return "thread-1"
 
-        async def resume_thread(_thread_id, _model, _profile):
+        async def resume_thread(_thread_id, _model, _profile, _workspace=None):
             return None
 
         async def request(_method, _params):
@@ -296,6 +299,118 @@ class ProfileBindingTests(unittest.TestCase):
 
                 with self.assertRaises(UnknownProfileError):
                     await self._run(runtime, previous="r1", response_id="r2")
+
+        asyncio.run(exercise())
+
+
+class WorkspaceContainmentTests(unittest.TestCase):
+    """One conversation's files must not be attributed to another."""
+
+    def _runtime(self, directory):
+        current = settings(directory)
+        current.workspace.mkdir(parents=True, exist_ok=True)
+        return CodexRuntime(current, NullConfigStore())
+
+    def test_two_conversations_resolve_to_different_roots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = self._runtime(directory)
+
+            first = runtime.conversation_workspace(None, "response-a")
+            second = runtime.conversation_workspace(None, "response-b")
+
+            self.assertNotEqual(first, second)
+            self.assertEqual(first, runtime.conversation_workspace(None, "response-a"))
+
+    def test_a_resumed_conversation_returns_to_its_own_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = self._runtime(directory)
+            first = runtime.conversation_workspace(None, "response-a")
+            runtime._thread_map.bind("response-a", "thread-1", "digibuddy", first.name)
+
+            resumed = runtime.conversation_workspace("response-a", "response-b")
+
+            self.assertEqual(resumed, first)
+
+    def test_a_conversation_bound_before_containment_keeps_the_shared_root(self):
+        """An in-flight conversation must not lose the files it already wrote."""
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = self._runtime(directory)
+            runtime._thread_map.bind("legacy", "thread-1", "digibuddy")
+
+            self.assertEqual(
+                runtime.conversation_workspace("legacy", "response-b"),
+                runtime._base_settings.workspace,
+            )
+
+    def test_a_root_is_confined_below_the_workspace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = self._runtime(directory)
+            root = runtime._base_settings.workspace.resolve()
+
+            resolved = runtime.conversation_workspace(None, "../../etc/passwd").resolve()
+
+            self.assertTrue(resolved.is_relative_to(root))
+
+    def test_artifacts_never_cross_conversations(self):
+        class ArtifactStore(NullConfigStore):
+            def __init__(self):
+                self.names = []
+
+            def write_artifact(self, artifact_id, filename, payload, content_type):
+                self.names.append(filename)
+                return True
+
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                current = settings(directory)
+                current.workspace.mkdir(parents=True, exist_ok=True)
+                store = ArtifactStore()
+                runtime = CodexRuntime(current, store)
+
+                other = runtime.conversation_workspace(None, "response-other")
+                other.mkdir(parents=True, exist_ok=True)
+                (other / "not-mine.md").write_text("# theirs", encoding="utf-8")
+
+                mine = runtime.conversation_workspace(None, "response-mine")
+
+                async def ensure_started(_profile, _reasoning_effort=""):
+                    return None
+
+                async def start_thread(_model, _profile, _workspace=None):
+                    return "thread-1"
+
+                async def request(_method, _params):
+                    mine.mkdir(parents=True, exist_ok=True)
+                    (mine / "mine.md").write_text("# mine", encoding="utf-8")
+                    return {"turn": {"id": "turn-1"}}
+
+                async def next_message(_cancellation):
+                    return {
+                        "method": "turn/completed",
+                        "params": {"turn": {"id": "turn-1", "status": "completed"}},
+                    }
+
+                runtime._ensure_started = ensure_started
+                runtime._start_thread = start_thread
+                runtime._request = request
+                runtime._next_turn_message = next_message
+
+                events = [
+                    event
+                    async for event in runtime.stream_turn(
+                        "build it",
+                        previous_response_id=None,
+                        response_id="response-mine",
+                        cancellation_signal=asyncio.Event(),
+                    )
+                ]
+
+                artifact_event = next(
+                    event for event in events if event.type == ARTIFACT_EVENT
+                )
+                delivered = [item["name"] for item in artifact_event.data["artifacts"]]
+                self.assertEqual(delivered, ["mine.md"])
+                self.assertNotIn("not-mine.md", store.names)
 
         asyncio.run(exercise())
 

@@ -6,6 +6,7 @@ import json
 import logging
 from asyncio.subprocess import Process
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 from .artifacts import (
@@ -36,6 +37,23 @@ logger = logging.getLogger(__name__)
 #: request may resolve through a deployment default, and a resumed conversation
 #: keeps a profile the browser may no longer remember.
 PROFILE_EVENT = "assistant.profile"
+
+#: Conversations live side by side under this directory rather than sharing the
+#: workspace root. It keeps artifact detection honest -- a diff of the whole
+#: root reports another conversation's file as this one's deliverable -- and
+#: stops accidental cross-reads. It is containment, not isolation: two Codex
+#: processes run as the same user and can still read each other's directories.
+CONVERSATIONS_DIRECTORY = "conversations"
+
+
+def _workspace_id(response_id: str) -> str:
+    """A stable, opaque directory name for a conversation.
+
+    Derived rather than random because the workspace has to exist before the
+    turn starts -- attachments are stored before the runtime resolves anything
+    -- and both callers must independently arrive at the same directory.
+    """
+    return hashlib.sha256(response_id.encode("utf-8")).hexdigest()[:32]
 
 
 class CodexProtocolError(RuntimeError):
@@ -110,6 +128,23 @@ class CodexRuntime:
     def _resolve(self, requested: str | None) -> AgentProfile:
         return resolve_profile(self.available_profiles(), requested)
 
+    def conversation_workspace(
+        self, previous_response_id: str | None, response_id: str
+    ) -> Path:
+        """Where this conversation's files live.
+
+        Resuming returns the directory the conversation already owns. A
+        conversation bound before workspaces were separated has none, and keeps
+        the shared root so the files it already wrote stay where it left them.
+        """
+        root = self._base_settings.workspace
+        binding = self._thread_map.lookup(previous_response_id)
+        if binding is not None:
+            if not binding.workspace_id:
+                return root
+            return root / CONVERSATIONS_DIRECTORY / binding.workspace_id
+        return root / CONVERSATIONS_DIRECTORY / _workspace_id(response_id)
+
     async def stream_turn(
         self,
         prompt: str,
@@ -150,13 +185,19 @@ class CodexRuntime:
 
             await self._ensure_started(active, reasoning_effort or "")
 
+            workspace = self.conversation_workspace(previous_response_id, response_id)
+            workspace.mkdir(parents=True, exist_ok=True)
+            workspace_id = (
+                "" if workspace == self._base_settings.workspace else workspace.name
+            )
+
             thread_id = binding.thread_id if binding else None
             if thread_id:
-                await self._resume_thread(thread_id, model, active)
+                await self._resume_thread(thread_id, model, active, workspace)
             else:
-                thread_id = await self._start_thread(model, active)
-            self._thread_map.bind(response_id, thread_id, active.name)
-            workspace_before = snapshot_workspace(self._settings.workspace)
+                thread_id = await self._start_thread(model, active, workspace)
+            self._thread_map.bind(response_id, thread_id, active.name, workspace_id)
+            workspace_before = snapshot_workspace(workspace)
 
             result = await self._request(
                 "turn/start",
@@ -194,7 +235,7 @@ class CodexRuntime:
                             raise CodexProtocolError(str(error))
                         break
 
-            paths = changed_artifacts(self._settings.workspace, workspace_before)
+            paths = changed_artifacts(workspace, workspace_before)
             if paths:
                 data = await asyncio.to_thread(artifact_event_data, paths, self._store)
                 yield RuntimeEvent(ARTIFACT_EVENT, data)
@@ -255,10 +296,12 @@ class CodexRuntime:
             raise
         self._active_fingerprint = fingerprint
 
-    def _thread_params(self, model: str | None, profile: AgentProfile) -> dict[str, Any]:
+    def _thread_params(
+        self, model: str | None, profile: AgentProfile, workspace: Path
+    ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "model": model or effective_model(self._settings, profile),
-            "cwd": str(self._settings.workspace),
+            "cwd": str(workspace),
             "approvalPolicy": self._settings.approval_policy,
             "sandbox": self._settings.sandbox,
             "baseInstructions": load_instructions(self._settings, profile),
@@ -267,8 +310,10 @@ class CodexRuntime:
             params["modelProvider"] = self._settings.model_provider
         return params
 
-    async def _start_thread(self, model: str | None, profile: AgentProfile) -> str:
-        params = self._thread_params(model, profile)
+    async def _start_thread(
+        self, model: str | None, profile: AgentProfile, workspace: Path
+    ) -> str:
+        params = self._thread_params(model, profile, workspace)
         result = await self._request("thread/start", params)
         thread = result.get("thread") if isinstance(result, dict) else None
         thread_id = thread.get("id") if isinstance(thread, dict) else None
@@ -278,11 +323,15 @@ class CodexRuntime:
         return thread_id
 
     async def _resume_thread(
-        self, thread_id: str, model: str | None, profile: AgentProfile
+        self,
+        thread_id: str,
+        model: str | None,
+        profile: AgentProfile,
+        workspace: Path,
     ) -> None:
         if thread_id in self._loaded_threads:
             return
-        params = self._thread_params(model, profile)
+        params = self._thread_params(model, profile, workspace)
         params["threadId"] = thread_id
         await self._request("thread/resume", params)
         self._loaded_threads.add(thread_id)
