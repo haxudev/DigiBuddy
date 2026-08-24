@@ -197,9 +197,11 @@ Returns `{ "skills": [...] }`, the deployed registry.
 
 ### `POST`
 
-`multipart/form-data` with the bundle attached as `bundle`, plus optional `version` and `description` fields. The bundle is a zip holding `SKILL.md` at its root, either flat or under a single directory that names the skill.
+`multipart/form-data` with the archive attached as `bundle`, plus optional `version` and `description` fields, which apply only when the archive yields exactly one skill.
 
-The console rejects an archive that is not a zip, is larger than 32 MB, expands beyond 128 MB, holds more than 2000 entries, contains a symlink or an unsafe path, or has no `SKILL.md`. It then stores the bytes at `bundles/<name>/<sha256>.zip` before the registry names them, and returns `{ "skill", "skills", "entries" }`.
+The archive may be a single skill — a zip holding `SKILL.md` at its root, either flat or under a single directory that names the skill — or a whole repository carrying several. In the second case the console *explodes* it into one normalised, self-contained single-skill bundle per skill, each stored and registered on its own. See "Complex archives" below.
+
+The console rejects an archive that is not a zip, is larger than 32 MB, expands beyond 128 MB, holds more than 2000 entries, contains a symlink or an unsafe path, or has no `SKILL.md` anywhere. It then stores the bytes at `bundles/<name>/<sha256>.zip` before the registry names them, and returns `{ "skill", "deployed", "skills", "layout", "notes" }`.
 
 ### `PATCH`
 
@@ -214,6 +216,51 @@ Disabling a skill withdraws it from every agent without deleting the bundle.
 `?name=seo-optimizer` removes the entry and deletes its bundle.
 
 Every deploy, enable, disable and withdrawal is logged with the skill name and the calling administrator.
+
+## Web UI (`/api/admin/skills/preview`)
+
+A dry run. Nothing is written, so an administrator can see what an archive would deploy — and what it would replace — before it does.
+
+`GET` returns `{ "allowed_hosts": [...] }`, the hosts an archive may be imported from. An empty list means URL import is switched off, and the console hides it.
+
+`POST` accepts either the same `multipart/form-data` as a deploy, or `{ "source": "https://…" }` to fetch the archive first. It returns `{ "layout", "notes", "skills": [{ "name", "description", "size", "sha256", "entries" }] }`, where `layout` is `single`, `manifest` or `discovered`.
+
+## Web UI (`/api/admin/skills/import`)
+
+`POST` with `{ "source": "https://…", "description": "…", "version": "…" }` fetches an archive and deploys it exactly as an upload would.
+
+The network is never in the trust path: fetching only supplies bytes, and the archive is still stored content-addressed and still re-verified by the runtime. Even so, an unrestricted fetcher inside the console would be a server-side request forgery primitive, so importing is off until `SKILL_IMPORT_ALLOWED_HOSTS` names the hosts it may reach. Requests must be HTTPS, every redirect is re-checked against the allowlist rather than followed blindly, and a host that resolves to a private or link-local address is refused even if it is allowlisted.
+
+### Complex archives
+
+Many useful skills ship more than markdown — scripts, tools, a shared Python package. A repository archive is onboarded in one of two ways.
+
+Without a manifest, the console discovers skills: every `SKILL.md` at the archive root or directly under `skills/<name>/`. A `SKILL.md` nested deeper is treated as an example inside a skill, not a skill of its own.
+
+With a `digibuddy-skills.json` at the archive root, the repository says so itself:
+
+```json
+{
+  "skills": [{ "name": "agent-maturity-assess", "path": "skills/agent-maturity-assess" }],
+  "shared": [
+    { "path": "src/agent_maturity", "as": "_lib/agent_maturity", "skills": ["agent-maturity-*"] }
+  ],
+  "entrypoints": [
+    {
+      "path": "scripts/amx.py",
+      "module": "agent_maturity.cli",
+      "call": "main",
+      "skills": ["agent-maturity-*"]
+    }
+  ]
+}
+```
+
+`shared` copies a directory into each selected skill, and `entrypoints` generates a small script that puts the vendored library on `sys.path` and calls into it. The result is that each skill is *self-contained*: it needs no `PYTHONPATH`, no MCP server and no sibling skill to run. Selectors are literal names or a single trailing `*`.
+
+A skill's `description` comes from its `SKILL.md` frontmatter. A frontmatter `name` that contradicts the directory is refused rather than guessed at. Executable bits on scripts are preserved; every other mode bit is normalised, so a crafted archive cannot publish a setuid or world-writable file.
+
+Because each skill becomes an ordinary single-skill bundle, none of this reaches the runtime: it still sees the simple case.
 
 ### How a deployed skill reaches an agent
 

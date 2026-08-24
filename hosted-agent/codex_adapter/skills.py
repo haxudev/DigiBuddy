@@ -132,6 +132,20 @@ def _strip_prefix(members: list[zipfile.ZipInfo], name: str) -> str:
     return ""
 
 
+def _file_mode(member: zipfile.ZipInfo) -> int:
+    """Permissions to give an extracted file.
+
+    Skills ship helper scripts, and a script that loses its executable bit fails
+    at the moment the agent runs it rather than at install time. So the owner's
+    execute bit is carried across -- and nothing else is: the rest of the mode is
+    normalised, because the archive is untrusted and must not be able to publish
+    a setuid or world-writable file.
+    """
+    if member.create_system == 3 and (member.external_attr >> 16) & 0o100:
+        return 0o755
+    return 0o644
+
+
 def extract_bundle(payload: bytes, skill: DeployedSkill, destination: Path) -> None:
     """Verify and unpack ``payload`` into ``destination/<skill name>``.
 
@@ -175,6 +189,7 @@ def extract_bundle(payload: bytes, skill: DeployedSkill, destination: Path) -> N
                 path.parent.mkdir(parents=True, exist_ok=True)
                 with archive.open(member) as source, path.open("wb") as sink:
                     shutil.copyfileobj(source, sink, length=64 * 1024)
+                path.chmod(_file_mode(member))
             staging.rename(target)
         finally:
             if staging.exists():

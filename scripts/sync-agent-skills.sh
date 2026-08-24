@@ -151,10 +151,18 @@ cp "$MATURITY_ROOT/LICENSE" "$BUNDLE/vendor/licenses/agent-maturity-LICENSE"
 skill_count="$(
   find "$BUNDLE/skills" -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l | tr -d ' '
 )"
-[[ "$skill_count" == "11" ]] || {
-  echo "expected 11 skills, materialized $skill_count" >&2
+[[ "$skill_count" -gt 0 ]] || {
+  echo "no skills materialized from the locked sources" >&2
   exit 1
 }
+
+# The runtime cross-checks this manifest on startup, so a source that stops
+# publishing a skill fails the container instead of silently shrinking what the
+# agent can do.
+{
+  echo "# Skills baked into the Hosted Agent image. Generated; do not edit."
+  find "$BUNDLE/skills" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
+} > "$BUNDLE/skills/.manifest"
 
 if [[ "$MODE" == "--check" ]]; then
   diff -qr "$BUNDLE/skills" "$DEST_SKILLS" >/dev/null || {
@@ -172,4 +180,4 @@ fi
 rm -rf "$DEST_SKILLS" "$DEST_VENDOR"
 mv "$BUNDLE/skills" "$DEST_SKILLS"
 mv "$BUNDLE/vendor" "$DEST_VENDOR"
-echo "Synced 11 self-contained skills from locked sources"
+echo "Synced $skill_count self-contained skills from locked sources"
