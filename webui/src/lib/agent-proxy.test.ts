@@ -8,6 +8,7 @@ import {
   responseErrorMessage,
   responseText,
   responseTextDelta,
+  responseTexts,
   turnInput,
   turnOptions,
 } from "./agent-proxy.ts";
@@ -159,6 +160,19 @@ test("extracts the most recent user message and response output", () => {
     }),
     "ne",
   );
+});
+
+test("keeps each assistant output item a separate reply", () => {
+  const payload = {
+    output: [
+      { content: [{ type: "output_text", text: "first reply" }] },
+      { content: [{ type: "output_text", text: "second reply" }] },
+    ],
+  };
+  assert.deepEqual(responseTexts(payload), ["first reply", "second reply"]);
+  assert.equal(responseText(payload), "first reply\n\nsecond reply");
+  // The streamed prefix carries the same separator, so nothing is replayed.
+  assert.equal(responseTextDelta("first reply\n\nsecond", payload), " reply");
 });
 
 test("extracts the nested error from a failed Responses event", () => {
