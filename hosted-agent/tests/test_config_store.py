@@ -7,6 +7,7 @@ from codex_adapter.config_store import (
     CachingConfigStore,
     FileConfigStore,
     NullConfigStore,
+    artifact_path,
     build_config_store,
 )
 
@@ -37,6 +38,25 @@ class FileConfigStoreTests(unittest.TestCase):
                 store.read("../../etc/passwd")
             with self.assertRaises(ValueError):
                 store.write("secrets.json", {})
+
+    def test_artifacts_are_pinned_below_the_reserved_prefix(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileConfigStore(Path(directory))
+            artifact_id = "a" * 32
+
+            self.assertTrue(
+                store.write_artifact(
+                    artifact_id, "报告.md", b"# report", "text/markdown"
+                )
+            )
+            self.assertEqual(
+                (Path(directory) / "artifacts" / artifact_id / "报告.md").read_bytes(),
+                b"# report",
+            )
+            with self.assertRaises(ValueError):
+                artifact_path(artifact_id, "../models.json")
+            with self.assertRaises(ValueError):
+                artifact_path("not-an-id", "report.md")
 
 
 class CachingConfigStoreTests(unittest.TestCase):

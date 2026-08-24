@@ -7,6 +7,12 @@ from asyncio.subprocess import Process
 from collections.abc import AsyncIterator
 from typing import Any
 
+from .artifacts import (
+    ARTIFACT_EVENT,
+    artifact_event_data,
+    changed_artifacts,
+    snapshot_workspace,
+)
 from .config import (
     RuntimeSettings,
     apply_model_overrides,
@@ -104,6 +110,7 @@ class CodexRuntime:
             else:
                 thread_id = await self._start_thread(model, active)
             self._thread_map.bind(response_id, thread_id, active.name)
+            workspace_before = snapshot_workspace(self._settings.workspace)
 
             result = await self._request(
                 "turn/start",
@@ -139,7 +146,12 @@ class CodexRuntime:
                         if isinstance(completed, dict) and completed.get("status") == "failed":
                             error = completed.get("error") or "Codex turn failed"
                             raise CodexProtocolError(str(error))
-                        return
+                        break
+
+            paths = changed_artifacts(self._settings.workspace, workspace_before)
+            if paths:
+                data = await asyncio.to_thread(artifact_event_data, paths, self._store)
+                yield RuntimeEvent(ARTIFACT_EVENT, data)
 
     async def _ensure_started(
         self, profile: AgentProfile, reasoning_effort: str = ""

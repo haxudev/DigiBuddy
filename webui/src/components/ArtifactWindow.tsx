@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Artifact } from "@/lib/artifacts";
-import { isImageArtifact } from "@/lib/artifacts";
+import { artifactPreviewKind } from "@/lib/artifacts";
 import Markdown from "./Markdown";
 import styles from "./artifact-panel.module.css";
 
@@ -10,6 +10,8 @@ type Props = {
   artifacts: Artifact[];
   onClose: () => void;
 };
+
+const MAX_TEXT_PREVIEW_BYTES = 2 * 1024 * 1024;
 
 function kindLabel(artifact: Artifact): string {
   if (artifact.kind === "link") return artifact.language.toUpperCase() || "FILE";
@@ -26,6 +28,12 @@ export default function ArtifactWindow({ artifacts, onClose }: Props) {
   const [showSource, setShowSource] = useState(false);
   const [maximised, setMaximised] = useState(false);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [remotePreview, setRemotePreview] = useState<{
+    id: string;
+    loading: boolean;
+    content: string;
+    error: string;
+  } | null>(null);
   const dragRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
 
   useEffect(() => {
@@ -68,6 +76,56 @@ export default function ArtifactWindow({ artifacts, onClose }: Props) {
   const selected =
     artifacts.find((artifact) => artifact.id === selectedId) ??
     artifacts[artifacts.length - 1];
+  const previewKind = selected ? artifactPreviewKind(selected) : "download";
+  const needsRemoteText =
+    selected?.kind === "link" &&
+    (previewKind === "html" ||
+      previewKind === "markdown" ||
+      previewKind === "text");
+  const previewContent =
+    selected?.kind === "link" ? remotePreview?.content ?? "" : selected?.content ?? "";
+  const downloadUrl = selected?.managed
+    ? `${selected.url}?download=1`
+    : selected?.url ?? "";
+
+  useEffect(() => {
+    if (!selected || !needsRemoteText) return;
+    const controller = new AbortController();
+    setRemotePreview({
+      id: selected.id,
+      loading: true,
+      content: "",
+      error: "",
+    });
+    fetch(selected.url, { cache: "force-cache", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Preview failed with HTTP ${response.status}.`);
+        const declaredSize = Number(response.headers.get("content-length") || "0");
+        if (declaredSize > MAX_TEXT_PREVIEW_BYTES) {
+          throw new Error("This file is too large to preview.");
+        }
+        const content = await response.text();
+        if (new Blob([content]).size > MAX_TEXT_PREVIEW_BYTES) {
+          throw new Error("This file is too large to preview.");
+        }
+        setRemotePreview({
+          id: selected.id,
+          loading: false,
+          content,
+          error: "",
+        });
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setRemotePreview({
+          id: selected.id,
+          loading: false,
+          content: "",
+          error: error instanceof Error ? error.message : "Preview is unavailable.",
+        });
+      });
+    return () => controller.abort();
+  }, [needsRemoteText, selected]);
 
   return (
     <aside
@@ -148,47 +206,69 @@ export default function ArtifactWindow({ artifacts, onClose }: Props) {
             <div className={styles.preview}>
               <div className={styles.previewHeader}>
                 <span>{selected.title}</span>
-                {selected.kind === "link" ? (
-                  <a href={selected.url} target="_blank" rel="noreferrer">
-                    Open
-                  </a>
-                ) : (
-                  selected.kind !== "code" && (
+                <span className={styles.previewActions}>
+                  {(previewKind === "html" || previewKind === "markdown") &&
+                    (!needsRemoteText ||
+                      (remotePreview?.id === selected.id &&
+                        !remotePreview.loading &&
+                        !remotePreview.error)) && (
                     <button type="button" onClick={() => setShowSource((value) => !value)}>
                       {showSource ? "Preview" : "Source"}
                     </button>
-                  )
-                )}
+                    )}
+                  {selected.kind === "link" && (
+                    <a href={downloadUrl} target="_blank" rel="noreferrer">
+                      Download
+                    </a>
+                  )}
+                </span>
               </div>
 
               <div className={styles.previewBody}>
-                {selected.kind === "link" ? (
-                  isImageArtifact(selected) ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={selected.url} alt={selected.title} className={styles.image} />
-                  ) : (
-                    <div className={styles.download}>
-                      <p>{selected.title}</p>
-                      <a href={selected.url} target="_blank" rel="noreferrer">
-                        Download
-                      </a>
-                    </div>
-                  )
-                ) : selected.kind === "html" && !showSource ? (
+                {needsRemoteText &&
+                (!remotePreview ||
+                  remotePreview.id !== selected.id ||
+                  remotePreview.loading) ? (
+                  <div className={styles.download}>Loading preview…</div>
+                ) : needsRemoteText && remotePreview?.error ? (
+                  <div className={styles.download}>
+                    <p>{remotePreview.error}</p>
+                    <a href={downloadUrl} target="_blank" rel="noreferrer">
+                      Download
+                    </a>
+                  </div>
+                ) : previewKind === "image" ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={selected.url} alt={selected.title} className={styles.image} />
+                ) : previewKind === "pdf" ? (
                   <iframe
                     className={styles.frame}
                     title={selected.title}
                     sandbox=""
-                    srcDoc={selected.content}
+                    src={selected.url}
                   />
-                ) : selected.kind === "markdown" && !showSource ? (
+                ) : previewKind === "html" && !showSource ? (
+                  <iframe
+                    className={styles.frame}
+                    title={selected.title}
+                    sandbox=""
+                    srcDoc={previewContent}
+                  />
+                ) : previewKind === "markdown" && !showSource ? (
                   <div className={styles.document}>
-                    <Markdown>{selected.content}</Markdown>
+                    <Markdown>{previewContent}</Markdown>
                   </div>
-                ) : (
+                ) : previewKind === "text" || showSource ? (
                   <pre className={styles.source}>
-                    <code>{selected.content}</code>
+                    <code>{previewContent}</code>
                   </pre>
+                ) : (
+                  <div className={styles.download}>
+                    <p>{selected.title}</p>
+                    <a href={downloadUrl} target="_blank" rel="noreferrer">
+                      Download
+                    </a>
+                  </div>
                 )}
               </div>
             </div>

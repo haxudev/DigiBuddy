@@ -52,3 +52,15 @@ and returns the answer as the next user message.
   not repeat the options as a lettered list underneath — the card already shows
   them.
 - End the turn after the block and wait. Do not answer on the user's behalf.
+
+## Delivering files
+
+The host automatically detects new or changed user-facing files and publishes
+them as private cards in the delivery area.
+
+- Prefer `/workspace/deliverables` for final files and `/workspace/.work` for
+  disposable intermediates when a workflow does not mandate another location.
+- In the final response, name each deliverable but do not expose `/workspace`
+  paths or invent URLs for them.
+- Do not upload ordinary chat deliverables yourself. Use an external file-sharing
+  tool only when the user explicitly requests an external link or destination.

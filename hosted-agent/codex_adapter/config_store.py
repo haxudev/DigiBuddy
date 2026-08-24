@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import tempfile
 import time
 from pathlib import Path
@@ -53,6 +54,8 @@ DOCUMENTS = (
 #: container, under a reserved prefix and addressed by their content hash.
 BUNDLE_PREFIX = "bundles/"
 _BUNDLE_PATH = re.compile(r"^bundles/[a-z0-9]+(?:-[a-z0-9]+)*/[0-9a-f]{64}\.zip$")
+ARTIFACT_PREFIX = "artifacts/"
+_ARTIFACT_ID = re.compile(r"^[0-9a-f]{32}$")
 
 
 class ConfigStore(Protocol):
@@ -63,6 +66,10 @@ class ConfigStore(Protocol):
     def write(self, name: str, document: dict[str, Any]) -> None: ...
 
     def read_bundle(self, path: str) -> bytes | None: ...
+
+    def write_artifact(
+        self, artifact_id: str, filename: str, payload: bytes, content_type: str
+    ) -> bool: ...
 
 
 class NullConfigStore:
@@ -76,6 +83,11 @@ class NullConfigStore:
 
     def read_bundle(self, path: str) -> bytes | None:
         return None
+
+    def write_artifact(
+        self, artifact_id: str, filename: str, payload: bytes, content_type: str
+    ) -> bool:
+        return False
 
 
 class FileConfigStore:
@@ -115,6 +127,26 @@ class FileConfigStore:
             return bundle.read_bytes()
         except OSError:
             return None
+
+    def write_artifact(
+        self, artifact_id: str, filename: str, payload: bytes, content_type: str
+    ) -> bool:
+        del content_type
+        target = self._root / artifact_path(artifact_id, filename)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(
+            dir=target.parent, prefix=".artifact-"
+        )
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, target)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+        return True
 
 
 class BlobConfigStore:
@@ -158,6 +190,19 @@ class BlobConfigStore:
         except AzureError:
             return None
 
+    def write_artifact(
+        self, artifact_id: str, filename: str, payload: bytes, content_type: str
+    ) -> bool:
+        from azure.storage.blob import ContentSettings
+
+        self._container.upload_blob(
+            artifact_path(artifact_id, filename),
+            payload,
+            overwrite=False,
+            content_settings=ContentSettings(content_type=content_type),
+        )
+        return True
+
 
 class CachingConfigStore:
     """Time-bounded cache so every turn does not hit the network."""
@@ -185,6 +230,13 @@ class CachingConfigStore:
         # keeping megabytes of archive in memory would buy nothing.
         return self._inner.read_bundle(path)
 
+    def write_artifact(
+        self, artifact_id: str, filename: str, payload: bytes, content_type: str
+    ) -> bool:
+        return self._inner.write_artifact(
+            artifact_id, filename, payload, content_type
+        )
+
 
 def _safe_document_name(name: str) -> str:
     """Reject traversal and nested paths; documents live in a flat namespace."""
@@ -198,6 +250,31 @@ def _safe_bundle_path(path: str) -> str:
     if not _BUNDLE_PATH.fullmatch(path):
         raise ValueError(f"Not a skill bundle path: {path}")
     return path
+
+
+def safe_artifact_filename(name: str) -> str:
+    """Return one portable path segment without losing non-ASCII names."""
+    leaf = str(name or "").replace("\\", "/").rsplit("/", 1)[-1]
+    cleaned = "".join(
+        character
+        for character in leaf
+        if 32 <= ord(character) != 127 and character not in '<>:"/\\|?*'
+    ).strip(" .")
+    return cleaned[:180] or "deliverable"
+
+
+def artifact_path(artifact_id: str, filename: str) -> str:
+    """Pin artifact access to an unguessable id below the reserved prefix."""
+    if not _ARTIFACT_ID.fullmatch(artifact_id):
+        raise ValueError("Invalid artifact id")
+    safe_name = safe_artifact_filename(filename)
+    if safe_name != filename:
+        raise ValueError("Invalid artifact filename")
+    return f"{ARTIFACT_PREFIX}{artifact_id}/{safe_name}"
+
+
+def new_artifact_id() -> str:
+    return secrets.token_hex(16)
 
 
 def build_config_store(

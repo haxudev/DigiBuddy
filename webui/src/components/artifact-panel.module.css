@@ -183,6 +183,12 @@
   font-weight: 600;
 }
 
+.previewActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .previewHeader a,
 .previewHeader button {
   flex: none;
