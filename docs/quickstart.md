@@ -94,7 +94,7 @@ docker run --rm -p 3000:3000 \
   digibuddy-webui
 ```
 
-Both containers read the store with their managed identity, so grant each the **Storage Blob Data Contributor** role on the container. For local development set `DIGIBUDDY_CONFIG_DIR` to a directory and `ADMIN_ALLOW_ANONYMOUS=true` instead; the anonymous opt-in is ignored when `NODE_ENV=production`.
+Both containers use the store with their managed identity, so grant each the **Storage Blob Data Contributor** role on the container. The hosted agent writes generated files below `artifacts/`, and the Web UI reads them back through its same-origin API. Configure a storage lifecycle rule for that prefix when deliverables need a retention limit. For local development set `DIGIBUDDY_CONFIG_DIR` to a shared directory and `ADMIN_ALLOW_ANONYMOUS=true` instead; the anonymous opt-in is ignored when `NODE_ENV=production`.
 
 ::: warning
 Put Easy Auth in front of the Web UI container. `ADMIN_PRINCIPAL_IDS` is matched against the `x-ms-client-principal` header, so without an authentication front end no caller is ever admitted.

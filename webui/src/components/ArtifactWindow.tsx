@@ -91,12 +91,6 @@ export default function ArtifactWindow({ artifacts, onClose }: Props) {
   useEffect(() => {
     if (!selected || !needsRemoteText) return;
     const controller = new AbortController();
-    setRemotePreview({
-      id: selected.id,
-      loading: true,
-      content: "",
-      error: "",
-    });
     fetch(selected.url, { cache: "force-cache", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error(`Preview failed with HTTP ${response.status}.`);

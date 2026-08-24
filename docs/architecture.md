@@ -83,7 +83,7 @@ The response map is stored under the hosted session workspace so session resume 
 
 ## Configuration overlay and profiles
 
-`config_store.py` reads five documents — `models.json`, `mcp.json`, `profiles.json`, `skills.json`, and `catalogue.json` — from Azure Blob (`DIGIBUDDY_CONFIG_URI`) or a directory (`DIGIBUDDY_CONFIG_DIR`), behind a short TTL cache.
+`config_store.py` reads five documents — `models.json`, `mcp.json`, `profiles.json`, `skills.json`, and `catalogue.json` — from Azure Blob (`DIGIBUDDY_CONFIG_URI`) or a directory (`DIGIBUDDY_CONFIG_DIR`), behind a short TTL cache. The same private store carries generated deliverables below `artifacts/<random-id>/`; the Web UI exposes only validated same-origin artifact routes.
 
 At each turn boundary the adapter re-reads the overlay, resolves the requested profile from `metadata.profile`, and fingerprints the resulting model settings and profile. A changed fingerprint restarts the Codex engine, so administrative changes apply without a redeploy. A restricted profile gets a filtered view of the payload, with `DIGIBUDDY_SKILLS_ROOT` and `DIGIBUDDY_TOOLS_ROOT` pointed at it.
 

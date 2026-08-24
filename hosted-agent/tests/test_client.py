@@ -8,6 +8,7 @@ from codex_adapter.client import (
     CodexRuntime,
     _server_request_result,
 )
+from codex_adapter.artifacts import ARTIFACT_EVENT
 from codex_adapter.config import RuntimeSettings
 from codex_adapter.config_store import NullConfigStore
 
@@ -78,6 +79,70 @@ class ProtocolTimeoutTests(unittest.TestCase):
                 with self.assertRaisesRegex(CodexProtocolError, "initialize timed out"):
                     await runtime._request("initialize", {})
                 self.assertTrue(restarted)
+
+        asyncio.run(exercise())
+
+    def test_completed_turn_publishes_new_deliverables(self):
+        class ArtifactStore(NullConfigStore):
+            def __init__(self):
+                self.payloads = []
+
+            def write_artifact(
+                self, artifact_id, filename, payload, content_type
+            ):
+                self.payloads.append((artifact_id, filename, payload, content_type))
+                return True
+
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                current = settings(directory)
+                current.workspace.mkdir()
+                store = ArtifactStore()
+                runtime = CodexRuntime(current, store)
+
+                async def ensure_started(_profile, _reasoning_effort=""):
+                    return None
+
+                async def start_thread(_model, _profile):
+                    return "thread-1"
+
+                async def request(method, _params):
+                    self.assertEqual(method, "turn/start")
+                    (current.workspace / "report.md").write_text(
+                        "# Report", encoding="utf-8"
+                    )
+                    return {"turn": {"id": "turn-1"}}
+
+                async def next_message(_cancellation):
+                    return {
+                        "method": "turn/completed",
+                        "params": {
+                            "turn": {"id": "turn-1", "status": "completed"}
+                        },
+                    }
+
+                runtime._ensure_started = ensure_started
+                runtime._start_thread = start_thread
+                runtime._request = request
+                runtime._next_turn_message = next_message
+
+                events = [
+                    event
+                    async for event in runtime.stream_turn(
+                        "build it",
+                        previous_response_id=None,
+                        response_id="response-1",
+                        cancellation_signal=asyncio.Event(),
+                    )
+                ]
+
+                artifact_event = next(
+                    event for event in events if event.type == ARTIFACT_EVENT
+                )
+                self.assertEqual(
+                    artifact_event.data["artifacts"][0]["name"], "report.md"
+                )
+                self.assertEqual(store.payloads[0][2], b"# Report")
 
         asyncio.run(exercise())
 

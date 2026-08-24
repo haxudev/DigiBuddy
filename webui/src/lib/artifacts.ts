@@ -179,9 +179,8 @@ function artifactKind(language: string): Artifact["kind"] {
 }
 
 /**
- * Deliverables are not a separate transport today: the agent embeds them in its
- * answer as code blocks or as download links. This turns both into preview
- * cards without changing the Responses protocol.
+ * Managed metadata is the primary transport. Named code blocks and external
+ * download links remain supported for older agents and direct integrations.
  */
 export function extractArtifacts(text: string, messageId: string): Artifact[] {
   const artifacts = managedArtifacts(text, messageId);
