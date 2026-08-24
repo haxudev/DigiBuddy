@@ -781,8 +781,81 @@ class PackActivationTests(unittest.TestCase):
             launcher = Path(child["DIGIBUDDY_TOOLS_ROOT"]) / "reporter.py"
             self.assertTrue(launcher.is_file())
             body = launcher.read_text(encoding="utf-8")
-            self.assertIn("from reporter.cli import main", body)
+            # Loaded by location, not by name: the launcher carries the tool's
+            # name and would otherwise resolve back to itself.
+            self.assertIn("spec_from_file_location", body)
+            self.assertIn("reporter/cli.py", body)
             # The artifact reaches sys.path inside the launcher, never through
             # the interpreter's own module path.
             self.assertIn("sys.path.insert", body)
             self.assertNotIn("packs", child["PYTHONPATH"])
+
+
+class ToolLauncherTests(unittest.TestCase):
+    """The launcher is only correct if it actually runs the tool."""
+
+    def _pack(self):
+        import hashlib, io, zipfile
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("release_notes/__init__.py", "VERSION_NOTE = 'v1'\n")
+            archive.writestr(
+                "release_notes/cli.py",
+                "from release_notes import VERSION_NOTE\n\n\n"
+                "def main():\n    print('PACK-TOOL-OK', VERSION_NOTE)\n    return 0\n",
+            )
+        payload = buffer.getvalue()
+        return payload, hashlib.sha256(payload).hexdigest()
+
+    def test_a_published_tool_runs(self):
+        """The launcher shares the tool's name, so it shadows its own package.
+
+        Importing by name resolved back to the launcher file and failed with
+        "not a package" at the moment the agent tried to use the tool.
+        """
+        import subprocess
+        import sys
+
+        from codex_adapter.config import _tool_launcher
+        from codex_adapter.skills import DeployedSkill, extract_bundle
+
+        payload, digest = self._pack()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            packs, tools = root / "packs", root / "tools"
+            packs.mkdir()
+            tools.mkdir()
+            extract_bundle(
+                payload,
+                DeployedSkill(
+                    name="release_notes",
+                    version="1",
+                    description="",
+                    bundle=f"bundles/release_notes/{digest}.zip",
+                    sha256=digest,
+                    kind="tool",
+                    approved_sha256=digest,
+                    declaration={"module": "release_notes.cli", "call": "main"},
+                ),
+                packs,
+            )
+            (tools / "release_notes.py").write_text(
+                _tool_launcher(
+                    "release_notes", packs / "release_notes", "release_notes.cli", "main"
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, "-m", "release_notes"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                env={"PYTHONPATH": str(tools), "PATH": "/usr/bin:/bin"},
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # The package's own relative import has to resolve too, or only the
+        # simplest possible tool would work.
+        self.assertIn("PACK-TOOL-OK v1", result.stdout)
