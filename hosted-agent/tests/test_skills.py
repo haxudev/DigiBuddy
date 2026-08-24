@@ -278,3 +278,43 @@ class AtomicInstallTests(unittest.TestCase):
                 (destination / "demo" / "SKILL.md").read_text(encoding="utf-8"),
                 "# v1",
             )
+
+
+class CapabilityNameTests(unittest.TestCase):
+    """A tool name is a Python identifier; a path validator must accept one."""
+
+    def test_an_underscored_tool_is_storable(self):
+        digest = "a" * 64
+        registry = {
+            "skills": [
+                {
+                    "name": "release_notes",
+                    "kind": "tool",
+                    "sha256": digest,
+                    "bundle": f"bundles/release_notes/{digest}.zip",
+                    "approved_sha256": digest,
+                    "declaration": {"module": "release_notes.cli"},
+                }
+            ]
+        }
+
+        parsed = parse_registry(registry)
+
+        # Rejecting it made every tool pack silently unstorable, and the symptom
+        # was "No module named ..." at the point of use.
+        self.assertEqual([skill.name for skill in parsed], ["release_notes"])
+        self.assertTrue(parsed[0].active)
+
+    def test_a_name_that_is_not_one_path_segment_is_still_refused(self):
+        digest = "a" * 64
+        for bad in ("../escape", "has space", "UPPER", "trailing-", "_leading"):
+            registry = {
+                "skills": [
+                    {
+                        "name": bad,
+                        "sha256": digest,
+                        "bundle": f"bundles/{bad}/{digest}.zip",
+                    }
+                ]
+            }
+            self.assertEqual(parse_registry(registry), (), f"{bad} should be refused")

@@ -193,3 +193,23 @@ class ArtifactOwnerTests(unittest.TestCase):
             artifact_path(artifact, "r.pdf", "b" * 32),
             artifact_path(artifact, "r.pdf", "c" * 32),
         )
+
+
+class BundlePathGrammarTests(unittest.TestCase):
+    def test_both_separators_are_accepted(self):
+        digest = "a" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileConfigStore(Path(directory))
+            for name in ("agent-maturity-assess", "release_notes", "x1"):
+                # Reading a missing bundle is None; the point is that the path
+                # itself is not rejected before the lookup happens.
+                self.assertIsNone(store.read_bundle(f"bundles/{name}/{digest}.zip"))
+
+    def test_a_traversing_bundle_path_is_still_refused(self):
+        digest = "a" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            store = FileConfigStore(Path(directory))
+            for bad in (f"bundles/../{digest}.zip", f"bundles/a b/{digest}.zip",
+                        f"other/x/{digest}.zip", f"bundles/x/{digest}.txt"):
+                with self.assertRaises(ValueError, msg=f"{bad} should be refused"):
+                    store.read_bundle(bad)

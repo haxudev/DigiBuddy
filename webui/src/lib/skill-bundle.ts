@@ -27,6 +27,9 @@ import {
 
 export const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+/** Any capability name, as it appears in a storage path. */
+export const CAPABILITY_NAME = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
+
 /** Mirrors the ceilings in `hosted-agent/codex_adapter/skills.py`. */
 export const MAX_BUNDLE_BYTES = 32 * 1024 * 1024;
 export const MAX_EXTRACTED_BYTES = 128 * 1024 * 1024;

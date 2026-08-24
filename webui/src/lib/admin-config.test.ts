@@ -252,3 +252,28 @@ test("an owner that is not an owner key is refused", () => {
     );
   }
 });
+
+test("a tool name with an underscore is storable", () => {
+  // Tools are Python identifiers, so `release_notes` is a normal name. The
+  // bundle path validator only accepted hyphens, which made every tool pack
+  // silently unstorable and surfaced as "No module named ..." at use.
+  const digest = "a".repeat(64);
+  const document = normaliseSkills({
+    skills: [
+      { name: "release_notes", kind: "tool", sha256: digest, approved_sha256: digest },
+    ],
+  });
+
+  assert.equal(document.skills[0].bundle, `bundles/release_notes/${digest}.zip`);
+});
+
+test("a capability name is still one safe path segment", () => {
+  const digest = "a".repeat(64);
+  for (const bad of ["../escape", "has space", "UPPER", "trailing-", "_leading"]) {
+    assert.throws(
+      () => normaliseSkills({ skills: [{ name: bad, sha256: digest }] }),
+      ConfigValidationError,
+      `${bad} should be refused`,
+    );
+  }
+});

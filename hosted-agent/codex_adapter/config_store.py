@@ -75,7 +75,8 @@ def readable_schema(document: Any) -> bool:
 #: Administrator-uploaded skill bundles live beside the documents in the same
 #: container, under a reserved prefix and addressed by their content hash.
 BUNDLE_PREFIX = "bundles/"
-_BUNDLE_PATH = re.compile(r"^bundles/[a-z0-9]+(?:-[a-z0-9]+)*/[0-9a-f]{64}\.zip$")
+#: A capability name is one path segment. Skills are kebab-case and tools are Python identifiers, so both separators have to be accepted here -- a tool named `release_notes` was silently unstorable, which made the whole tool-pack path dead.
+_BUNDLE_PATH = re.compile(r"^bundles/[a-z0-9]+(?:[-_][a-z0-9]+)*/[0-9a-f]{64}\.zip$")
 ARTIFACT_PREFIX = "artifacts/"
 _ARTIFACT_ID = re.compile(r"^[0-9a-f]{32}$")
 

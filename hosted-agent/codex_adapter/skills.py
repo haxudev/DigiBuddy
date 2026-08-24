@@ -27,6 +27,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 SKILL_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+#: Tools are Python identifiers, so a capability name may also carry underscores.
+CAPABILITY_NAME = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 #: Ceilings on what a single bundle may expand to, so one upload cannot fill the
@@ -105,7 +107,7 @@ def parse_registry(document: Any) -> tuple[DeployedSkill, ...]:
         name = _text(entry.get("name"))
         digest = _text(entry.get("sha256")).lower()
         bundle = _text(entry.get("bundle"))
-        if not SKILL_NAME.fullmatch(name) or not _SHA256.fullmatch(digest):
+        if not CAPABILITY_NAME.fullmatch(name) or not _SHA256.fullmatch(digest):
             continue
         if bundle != f"bundles/{name}/{digest}.zip":
             continue

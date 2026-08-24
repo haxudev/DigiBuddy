@@ -7,7 +7,7 @@
  * Python implementation in `hosted-agent/codex_adapter/config_store.py`.
  */
 
-import { SKILL_NAME, bundlePath } from "./skill-bundle.ts";
+import { CAPABILITY_NAME, bundlePath } from "./skill-bundle.ts";
 import {
   MANAGED_ARTIFACT_ID,
   isManagedArtifactName,
@@ -358,7 +358,7 @@ export function normaliseSkills(input: unknown): SkillsDocument {
     const raw = record(item);
     const name = text(raw.name);
     const sha256 = text(raw.sha256).toLowerCase();
-    if (!SKILL_NAME.test(name)) {
+    if (!CAPABILITY_NAME.test(name)) {
       throw new ConfigValidationError(
         `Skill names may only contain lowercase letters, digits and dashes: ${name}`,
       );
@@ -475,7 +475,10 @@ export interface ConfigStore {
 }
 
 
-const BUNDLE_PATH = /^bundles\/[a-z0-9]+(?:-[a-z0-9]+)*\/[0-9a-f]{64}\.zip$/;
+/**
+ * A capability name is one path segment. Skills are kebab-case and tools are Python identifiers, so both separators have to be accepted here -- a tool named `release_notes` was silently unstorable, which made the whole tool-pack path dead.
+ */
+const BUNDLE_PATH = /^bundles\/[a-z0-9]+(?:[-_][a-z0-9]+)*\/[0-9a-f]{64}\.zip$/;
 
 /**
  * A file store has no ETag, so the stored bytes are their own revision. Two
