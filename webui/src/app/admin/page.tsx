@@ -21,6 +21,8 @@ type Models = {
 
 type McpServer = {
   url: string;
+  command?: string;
+  args?: string[];
   enabled: boolean;
   bearer_token_env_var: string;
   description: string;
@@ -40,11 +42,17 @@ type Profile = {
 
 type DeployedSkill = {
   name: string;
+  kind: "skill" | "tool" | "mcp_server";
   version: string;
   description: string;
   sha256: string;
   size: number;
   enabled: boolean;
+  /** The exact bytes approved to execute; empty means deployed but inert. */
+  approved_sha256: string;
+  approved_at: string;
+  approved_by: string;
+  declaration: Record<string, unknown>;
   uploaded_at: string;
   uploaded_by: string;
   source: string;
@@ -612,10 +620,13 @@ export default function Admin() {
 
         {tab === "mcp" && (
           <section className={styles.panel}>
-            <h2>Remote MCP servers</h2>
+            <h2>MCP servers</h2>
             <p className={styles.hint}>
-              Streamable HTTP servers reachable over HTTPS. Bearer tokens are read from
-              a container environment variable rather than stored here.
+              Remote servers are streamable HTTP over HTTPS. A local server runs
+              as a command inside the container, so it starts with Codex whether
+              or not the agent asks for it — register one only if you would run
+              the same command yourself. Bearer tokens come from a profile
+              credential or a container environment variable, never from here.
             </p>
             {servers.map((server, index) => (
               <div className={styles.row} key={index}>
@@ -663,6 +674,46 @@ export default function Admin() {
                         )
                       }
                       placeholder="https://learn.microsoft.com/api/mcp"
+                      disabled={Boolean(server.command)}
+                    />
+                  </label>
+                  <label>
+                    Local command
+                    <input
+                      value={server.command ?? ""}
+                      onChange={(event) =>
+                        setServers(
+                          servers.map((entry, position) =>
+                            position === index
+                              ? { ...entry, command: event.target.value }
+                              : entry,
+                          ),
+                        )
+                      }
+                      placeholder="python — runs inside the container"
+                      disabled={Boolean(server.url)}
+                    />
+                  </label>
+                  <label>
+                    Command arguments
+                    <input
+                      value={(server.args ?? []).join(" ")}
+                      onChange={(event) =>
+                        setServers(
+                          servers.map((entry, position) =>
+                            position === index
+                              ? {
+                                  ...entry,
+                                  args: event.target.value
+                                    .split(/\s+/)
+                                    .filter(Boolean),
+                                }
+                              : entry,
+                          ),
+                        )
+                      }
+                      placeholder="-m your_package.mcp"
+                      disabled={!server.command}
                     />
                   </label>
                   <label>
@@ -874,6 +925,13 @@ export default function Admin() {
                   uploaded {skill.uploaded_at.slice(0, 10)} by {skill.uploaded_by}
                   {skill.source && ` · from ${skill.source}`}
                 </p>
+                {skill.kind !== "skill" && (
+                  <p className={styles.hint}>
+                    {KINDS[skill.kind]}
+                    {Object.keys(skill.declaration).length > 0 &&
+                      ` · runs ${JSON.stringify(skill.declaration)}`}
+                  </p>
+                )}
                 <div className={styles.checks}>
                   <label>
                     <input
@@ -896,7 +954,41 @@ export default function Admin() {
                     />
                     Enabled
                   </label>
+                  {skill.kind !== "skill" && (
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={skill.approved_sha256 === skill.sha256}
+                        disabled={busy}
+                        onChange={(event) =>
+                          void callSkills(
+                            {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                name: skill.name,
+                                approve: event.target.checked,
+                                // Names the bytes being approved, so approving a
+                                // stale listing is refused rather than applied.
+                                sha256: skill.sha256,
+                              }),
+                            },
+                            "Unable to change the approval.",
+                          )
+                        }
+                      />
+                      Approved to run {skill.sha256.slice(0, 12)}
+                      {skill.approved_by && ` · by ${skill.approved_by}`}
+                    </label>
+                  )}
                 </div>
+                {skill.kind !== "skill" &&
+                  skill.enabled &&
+                  skill.approved_sha256 !== skill.sha256 && (
+                    <p className={styles.hint}>
+                      Enabled but not approved, so the runtime will not start it.
+                    </p>
+                  )}
               </div>
             ))}
             {status && <span className={styles.status}>{status}</span>}

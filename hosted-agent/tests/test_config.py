@@ -578,3 +578,164 @@ class ChildEnvironmentTests(unittest.TestCase):
                 )
 
         self.assertNotIn("DIGIBUDDY_GRAPH_CLIENT_SECRET", child)
+
+
+class PackActivationTests(unittest.TestCase):
+    """Uploaded code runs only when consent names the bytes now in the store."""
+
+    def _store(self, directory, entries):
+        store = FileConfigStore(Path(directory) / "config")
+        store.write("skills.json", {"skills": entries})
+        return store
+
+    def _tool_entry(self, digest, **overrides):
+        base = {
+            "name": "reporter",
+            "kind": "tool",
+            "sha256": digest,
+            "bundle": f"bundles/reporter/{digest}.zip",
+            "enabled": True,
+            "approved_sha256": digest,
+            "declaration": {"module": "reporter.cli", "call": "main"},
+        }
+        base.update(overrides)
+        return base
+
+    def _mcp_entry(self, digest, **overrides):
+        base = {
+            "name": "pack-mcp",
+            "kind": "mcp_server",
+            "sha256": digest,
+            "bundle": f"bundles/pack-mcp/{digest}.zip",
+            "enabled": True,
+            "approved_sha256": digest,
+            "declaration": {
+                "runtime": "python",
+                "entrypoint": "server.py",
+                "env": {"PACK_MODE": "safe"},
+            },
+        }
+        base.update(overrides)
+        return base
+
+    def test_an_approved_mcp_server_is_rendered_from_its_installed_files(self):
+        digest = "c" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(directory)
+            store = self._store(directory, [self._mcp_entry(digest)])
+            with mock.patch.dict(
+                os.environ, {"DIGIBUDDY_ENABLE_CAPABILITY_PACKS": "true"}
+            ):
+                rendered = render_codex_config(configured, store)
+
+            block = tomllib.loads(rendered)["mcp_servers"]["pack-mcp"]
+            self.assertEqual(block["command"], "python")
+            self.assertTrue(block["args"][0].endswith("pack-mcp/server.py"))
+            self.assertEqual(block["env"]["PACK_MODE"], "safe")
+
+    def test_an_unapproved_mcp_server_renders_nothing(self):
+        digest = "c" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(directory)
+            store = self._store(
+                directory, [self._mcp_entry(digest, approved_sha256="")]
+            )
+            with mock.patch.dict(
+                os.environ, {"DIGIBUDDY_ENABLE_CAPABILITY_PACKS": "true"}
+            ):
+                rendered = render_codex_config(configured, store)
+
+            self.assertNotIn("pack-mcp", rendered)
+
+    def test_a_profile_that_does_not_allow_it_never_receives_it(self):
+        digest = "c" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(directory)
+            store = self._store(directory, [self._mcp_entry(digest)])
+            with mock.patch.dict(
+                os.environ, {"DIGIBUDDY_ENABLE_CAPABILITY_PACKS": "true"}
+            ):
+                rendered = render_codex_config(
+                    configured, store, AgentProfile(name="a", mcp_servers=())
+                )
+
+            self.assertNotIn("pack-mcp", rendered)
+
+    def test_pack_capabilities_stay_out_until_the_switch_is_on(self):
+        digest = "c" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(directory)
+            store = self._store(directory, [self._mcp_entry(digest)])
+            with mock.patch.dict(os.environ, {}, clear=True):
+                rendered = render_codex_config(configured, store)
+
+            self.assertNotIn("pack-mcp", rendered)
+
+    def test_an_approved_tool_never_joins_the_global_module_path(self):
+        """A pack directory on PYTHONPATH would run its own sitecustomize."""
+        digest = "d" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(directory)
+            store = self._store(directory, [self._tool_entry(digest)])
+            with mock.patch.dict(
+                os.environ,
+                {"PATH": "/usr/bin", "DIGIBUDDY_ENABLE_CAPABILITY_PACKS": "true"},
+                clear=True,
+            ):
+                child = prepare_codex_environment(configured, store)
+
+            self.assertNotIn("packs", child["PYTHONPATH"])
+
+    def test_the_catalogue_reports_only_what_is_actually_active(self):
+        digest = "e" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(directory)
+            store = self._store(
+                directory,
+                [
+                    self._tool_entry(digest),
+                    self._mcp_entry(digest, approved_sha256=""),
+                ],
+            )
+            with mock.patch.dict(
+                os.environ, {"DIGIBUDDY_ENABLE_CAPABILITY_PACKS": "true"}
+            ):
+                catalogue = build_catalogue(configured, store)
+
+            self.assertIn("reporter", catalogue.tools)
+            self.assertNotIn("pack-mcp", catalogue.mcp_servers)
+
+    def test_an_approved_tool_is_published_behind_a_launcher(self):
+        import zipfile, io, hashlib
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("reporter/reporter/__init__.py", "")
+            archive.writestr("reporter/reporter/cli.py", "def main():\n    return 0\n")
+        artifact = buffer.getvalue()
+        digest = hashlib.sha256(artifact).hexdigest()
+
+        class PackStore(FileConfigStore):
+            def read_bundle(self, path):
+                return artifact
+
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(directory)
+            store = PackStore(Path(directory) / "config")
+            store.write("skills.json", {"skills": [self._tool_entry(digest)]})
+
+            with mock.patch.dict(
+                os.environ,
+                {"PATH": "/usr/bin", "DIGIBUDDY_ENABLE_CAPABILITY_PACKS": "true"},
+                clear=True,
+            ):
+                child = prepare_codex_environment(configured, store)
+
+            launcher = Path(child["DIGIBUDDY_TOOLS_ROOT"]) / "reporter.py"
+            self.assertTrue(launcher.is_file())
+            body = launcher.read_text(encoding="utf-8")
+            self.assertIn("from reporter.cli import main", body)
+            # The artifact reaches sys.path inside the launcher, never through
+            # the interpreter's own module path.
+            self.assertIn("sys.path.insert", body)
+            self.assertNotIn("packs", child["PYTHONPATH"])

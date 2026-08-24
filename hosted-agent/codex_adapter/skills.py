@@ -227,13 +227,15 @@ def extract_bundle(payload: bytes, skill: DeployedSkill, destination: Path) -> N
                 f"bundle for {skill.name} has no {required}"
             )
 
+        # Stage first, then swap. Removing the live directory before extraction
+        # succeeds leaves the capability missing for the whole extraction, and
+        # gone entirely if the archive turns out to be unusable.
         target = destination / skill.name
-        if target.exists():
-            shutil.rmtree(target)
-        # Stage first so a failure mid-extraction never publishes half a skill.
         staging = destination / f".{skill.name}.staging"
-        if staging.exists():
-            shutil.rmtree(staging)
+        replaced = destination / f".{skill.name}.replaced"
+        for path in (staging, replaced):
+            if path.exists():
+                shutil.rmtree(path)
         try:
             for name, member in relative.items():
                 path = staging / name
@@ -241,10 +243,13 @@ def extract_bundle(payload: bytes, skill: DeployedSkill, destination: Path) -> N
                 with archive.open(member) as source, path.open("wb") as sink:
                     shutil.copyfileobj(source, sink, length=64 * 1024)
                 path.chmod(_file_mode(member))
+            if target.exists():
+                target.rename(replaced)
             staging.rename(target)
         finally:
-            if staging.exists():
-                shutil.rmtree(staging)
+            for path in (staging, replaced):
+                if path.exists():
+                    shutil.rmtree(path)
 
 
 def install_deployed_skills(
@@ -291,6 +296,48 @@ def install_deployed_skills(
     return installed
 
 
+#: Where a non-skill artifact is unpacked. Kept out of the skills root so a
+#: tool cannot be discovered as a skill, and out of the payload so an uploaded
+#: module cannot shadow one that shipped in the image.
+PACKS_DIRECTORY = "packs"
+
+
+def install_pack_capabilities(
+    store: Any,
+    skills: tuple[DeployedSkill, ...],
+    destination: Path,
+    *,
+    allows: Any = None,
+) -> dict[str, Path]:
+    """Materialise the executable capabilities, returning where each landed.
+
+    Only the active ones: an artifact whose approval does not name the bytes in
+    the store is deployed but inert, and installing it anyway would make the
+    approval decorative.
+    """
+    installed: dict[str, Path] = {}
+    for skill in skills:
+        if not skill.executable or not skill.active:
+            continue
+        if allows is not None and not allows(skill.name):
+            continue
+        try:
+            payload = store.read_bundle(skill.bundle)
+            if payload is None:
+                raise ValueError("bundle is missing from the store")
+            extract_bundle(payload, skill, destination)
+        except Exception:  # noqa: BLE001 - skip the capability, keep the agent up
+            logger.warning(
+                "Could not install pack capability %s", skill.name, exc_info=True
+            )
+            continue
+        installed[skill.name] = destination / skill.name
+
+    if installed:
+        logger.info("Installed %d pack capabilities into %s", len(installed), destination)
+    return installed
+
+
 def load_registry(store: Any) -> tuple[DeployedSkill, ...]:
     from .config_store import SKILLS_DOCUMENT
 
@@ -302,12 +349,14 @@ def load_registry(store: Any) -> tuple[DeployedSkill, ...]:
 
 
 __all__ = [
+    "PACKS_DIRECTORY",
     "MAX_BUNDLE_BYTES",
     "MAX_ENTRIES",
     "MAX_EXTRACTED_BYTES",
     "DeployedSkill",
     "extract_bundle",
     "install_deployed_skills",
+    "install_pack_capabilities",
     "load_registry",
     "parse_registry",
     "registry_fingerprint",

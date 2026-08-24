@@ -2,6 +2,7 @@ import { requireAdmin } from "@/lib/admin-auth";
 import {
   ConfigValidationError,
   buildConfigStore,
+  isExecutable,
   type DeployedSkill,
 } from "@/lib/admin-config";
 import {
@@ -58,7 +59,14 @@ export async function POST(request: Request) {
   }
 }
 
-/** Enable, disable or re-describe a deployed skill. */
+/**
+ * Enable, disable, re-describe or approve a deployed capability.
+ *
+ * Approval is separate from enabling because they answer different questions.
+ * Enabling asks whether this capability should be offered; approving asks
+ * whether *these bytes* may execute. The approval therefore names the digest it
+ * consents to, so a later deploy of different code cannot inherit it.
+ */
 export async function PATCH(request: Request) {
   try {
     const principal = requireAdmin(request.headers);
@@ -72,8 +80,40 @@ export async function PATCH(request: Request) {
     const target = current.find((skill) => skill.name === name);
     if (!target) throw new ConfigValidationError(`No such deployed skill: ${name}`);
 
+    let approval = {
+      approved_sha256: target.approved_sha256,
+      approved_at: target.approved_at,
+      approved_by: target.approved_by,
+    };
+    const approve = body.approve;
+    if (approve !== undefined) {
+      if (!isExecutable(target)) {
+        throw new ConfigValidationError(
+          `${name} is a skill; it is read, not executed, so there is nothing to approve.`,
+        );
+      }
+      if (approve === false) {
+        approval = { approved_sha256: "", approved_at: "", approved_by: "" };
+      } else {
+        // The caller states which bytes it read. Anything else means the
+        // console was looking at a version that is no longer deployed.
+        const digest = String(body.sha256 ?? "").trim().toLowerCase();
+        if (digest !== target.sha256) {
+          throw new ConfigValidationError(
+            `${name} has changed since it was reviewed. Reload and approve the current version.`,
+          );
+        }
+        approval = {
+          approved_sha256: target.sha256,
+          approved_at: new Date().toISOString(),
+          approved_by: principal.id || principal.name,
+        };
+      }
+    }
+
     const patched: DeployedSkill = {
       ...target,
+      ...approval,
       enabled: typeof body.enabled === "boolean" ? body.enabled : target.enabled,
       description:
         typeof body.description === "string"
@@ -85,7 +125,17 @@ export async function PATCH(request: Request) {
       [...current.filter((skill) => skill.name !== name), patched],
       revision,
     );
-    audit(principal, patched.enabled ? "enabled" : "disabled", name);
+    audit(
+      principal,
+      approve === undefined
+        ? patched.enabled
+          ? "enabled"
+          : "disabled"
+        : patched.approved_sha256
+          ? `approved ${patched.approved_sha256.slice(0, 12)}`
+          : "revoked",
+      name,
+    );
     return Response.json({ skill: patched, skills });
   } catch (error) {
     return failure(error);

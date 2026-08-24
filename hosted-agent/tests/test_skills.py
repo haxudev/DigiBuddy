@@ -251,3 +251,30 @@ class NonSkillBundleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ValueError, "server.py"):
                 extract_bundle(payload, skill, Path(directory))
+
+
+class AtomicInstallTests(unittest.TestCase):
+    def test_a_rejected_archive_leaves_the_installed_version_intact(self):
+        good = bundle({"SKILL.md": "# v1"})
+        digest = hashlib.sha256(good).hexdigest()
+        skill = DeployedSkill(
+            name="demo",
+            version="1",
+            description="",
+            bundle=f"bundles/demo/{digest}.zip",
+            sha256=digest,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory)
+            extract_bundle(good, skill, destination)
+
+            # An archive whose digest does not match must not disturb what is
+            # already installed and working.
+            with self.assertRaises(ValueError):
+                extract_bundle(b"not a zip at all", skill, destination)
+
+            self.assertEqual(
+                (destination / "demo" / "SKILL.md").read_text(encoding="utf-8"),
+                "# v1",
+            )

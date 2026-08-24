@@ -142,6 +142,18 @@ Each hosted agent, at the same turn boundary where it re-reads the overlay, inst
 
 Packaged skills win: an upload that shares a name with a reviewed, image-baked skill is refused rather than allowed to shadow it. The deployed set feeds `runtime_fingerprint`, so deploying, disabling or withdrawing a skill replaces the Codex process instead of silently serving a stale one.
 
+## Capability packs
+
+An administrator uploads one archive; the console explodes it into one content-addressed artifact per declared capability — skill, tool, or MCP server — and records them under one pack receipt. The runtime therefore still receives one simple, digest-verified artifact at a time, which is the property that makes the existing installer safe.
+
+Three consequences are load-bearing:
+
+- **A tool never joins the global module path.** Prepending an uploaded directory to `PYTHONPATH` would let a `sitecustomize.py` inside any pack execute on every unrelated `python -m` call, and let an uploaded module shadow a payload one. A pack tool is published as a generated launcher that puts only its own artifact on `sys.path`.
+- **An MCP server is a runtime plus a path, not a command.** The rendered `[mcp_servers.*]` block is built from the verified artifact, so a pack cannot become `/bin/sh -c`. Packaged servers win a name collision.
+- **Installation stages and swaps.** The previous version is moved aside only once extraction has succeeded, so a rejected archive leaves the working capability in place.
+
+`catalogue.json` reports what is actually active — enabled, and for executable kinds approved against the bytes now in the store — so the console cannot offer a capability the runtime has already refused. It is republished whenever it would differ.
+
 ## Agent payload
 
 The Codex sandbox has no tool registry — only a shell. Capabilities are therefore delivered as files:

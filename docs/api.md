@@ -270,3 +270,60 @@ Because each skill becomes an ordinary single-skill bundle, none of this reaches
 ### How a deployed skill reaches an agent
 
 The runtime reads `skills.json`, downloads each enabled bundle its profile allows, verifies the SHA-256 against the registry, and extracts it into `$CODEX_HOME/skills`. Extraction is staged and renamed, so a rejected bundle never leaves a partial skill. A skill baked into the image always wins over an upload of the same name, and the deployed set feeds the runtime fingerprint so a change replaces the Codex process rather than serving a stale skill.
+
+## Capability packs
+
+A developer ships one archive. The console explodes it into one
+content-addressed artifact per declared capability, so the store, the registry
+and the runtime installer stay one mechanism rather than three.
+
+`digibuddy-skills.json` at the archive root declares what it carries:
+
+```json
+{
+  "schema_version": 1,
+  "skills": [{ "name": "pack-skill", "path": "skills/pack-skill" }],
+  "tools": [{ "name": "reporter", "path": "tools/reporter", "module": "reporter.cli" }],
+  "mcp_servers": [
+    { "name": "pack-mcp", "path": "servers/pack-mcp", "entrypoint": "server.py", "runtime": "python" }
+  ]
+}
+```
+
+A pack may declare any combination, so a tool-only or MCP-only pack is valid.
+Each artifact proves it is what it claims by containing its own entry point.
+
+**An MCP declaration names a runtime and a path inside its own files, never a
+command.** Allowing a command would let a pack run `/bin/sh -c` at Codex start.
+For the same reason a declaration may not set `PATH`, `PYTHONPATH`,
+`NODE_OPTIONS` or anything else that decides what runs, and may not embed a
+value shaped like a credential — a manifest is readable by anyone who can read
+the archive, so a secret written into one is already disclosed. A server that
+needs a credential binds a profile slot instead.
+
+### Approval
+
+A skill is markdown the model reads, so enabling it is enough. A tool and an MCP
+server are code, so they carry a second gate:
+
+| State | Meaning |
+| --- | --- |
+| `enabled` | Should this capability be offered at all |
+| `approved_sha256` | Which exact bytes may execute |
+
+Both must hold, and the approval must name the digest currently in the store.
+Redeploying different bytes therefore drops the approval rather than inheriting
+consent given for other code. `PATCH /api/admin/skills` takes
+`{ "name", "approve": true, "sha256" }` and refuses a digest that is not the one
+deployed, so approving a stale listing fails instead of applying.
+
+Deployment must also present the digest its preview reported. Preview and deploy
+are separate requests and a URL import fetches the archive twice, so without it
+the bytes an administrator read and the bytes that install can differ.
+
+### What the supply chain proves
+
+SHA-256 establishes **integrity**: the runtime re-verifies that the bytes it
+installs are the bytes the registry names. It does not establish **origin** —
+there is no signature, and deployment has one approver. A pack is trusted code
+running in the agent's container, and should be reviewed as such.

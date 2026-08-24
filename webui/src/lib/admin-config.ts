@@ -73,7 +73,15 @@ export type ModelsDocument = {
 };
 
 export type McpServer = {
+  /** Set for a remote server. Mutually exclusive with `command`. */
   url: string;
+  /**
+   * Set for a local stdio server. The runtime has always supported these; the
+   * console exposes them so an operator can register one without a rebuild.
+   */
+  command: string;
+  args: string[];
+  env: Record<string, string>;
   enabled: boolean;
   bearer_token_env_var: string;
   description: string;
@@ -265,12 +273,37 @@ export function normaliseMcp(input: unknown): McpDocument {
     }
     const server = record(value);
     const url = text(server.url);
-    if (!url) {
-      throw new ConfigValidationError(`MCP server ${key} needs a URL.`);
+    const command = text(server.command);
+    if (!url && !command) {
+      throw new ConfigValidationError(
+        `MCP server ${key} needs either a URL or a command.`,
+      );
     }
-    assertHttps(url, `MCP server ${key} URL`);
+    if (url && command) {
+      throw new ConfigValidationError(
+        `MCP server ${key} must be either remote or local, not both.`,
+      );
+    }
+    if (url) assertHttps(url, `MCP server ${key} URL`);
+    if (command && (command.includes(" ") || command.includes("/"))) {
+      // A path or a shell string here would let an operator register
+      // `/bin/sh -c ...` as an MCP server. Arguments go in `args`.
+      throw new ConfigValidationError(
+        `MCP server ${key} command must be a bare executable name; put arguments in args.`,
+      );
+    }
     normalised[key] = {
       url,
+      command,
+      args: Array.isArray(server.args) ? server.args.map((item) => String(item)) : [],
+      env:
+        server.env && typeof server.env === "object" && !Array.isArray(server.env)
+          ? Object.fromEntries(
+              Object.entries(server.env as Record<string, unknown>).map(
+                ([name, entry]) => [name, String(entry)],
+              ),
+            )
+          : {},
       enabled: server.enabled !== false,
       bearer_token_env_var: text(server.bearer_token_env_var),
       description: text(server.description),

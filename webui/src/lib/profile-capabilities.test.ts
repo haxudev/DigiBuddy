@@ -43,8 +43,24 @@ test("a selection is restricted to catalogued entries", () => {
 test("disabled MCP servers are not advertised as capabilities", () => {
   const [described] = describeProfiles([profile({})], catalogue, {
     servers: {
-      github: { url: "https://a", enabled: true, bearer_token_env_var: "", description: "" },
-      stale: { url: "https://b", enabled: false, bearer_token_env_var: "", description: "" },
+      github: {
+        url: "https://a",
+        command: "",
+        args: [],
+        env: {},
+        enabled: true,
+        bearer_token_env_var: "",
+        description: "",
+      },
+      stale: {
+        url: "https://b",
+        command: "",
+        args: [],
+        env: {},
+        enabled: false,
+        bearer_token_env_var: "",
+        description: "",
+      },
     },
   });
   assert.deepEqual(described.mcp_servers, ["github"]);
