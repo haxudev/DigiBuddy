@@ -20,7 +20,7 @@ import logging
 import re
 import shutil
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +36,14 @@ MAX_EXTRACTED_BYTES = 128 * 1024 * 1024
 MAX_ENTRIES = 2000
 
 
+#: What a deployed artifact is, which decides what the runtime does with it.
+#: A skill is markdown the model reads; a tool and an MCP server are code.
+KINDS = frozenset({"skill", "tool", "mcp_server"})
+
+#: The file each kind must contain to be installable at all.
+_REQUIRED_ENTRY = {"skill": "SKILL.md"}
+
+
 @dataclass(frozen=True)
 class DeployedSkill:
     name: str
@@ -44,9 +52,36 @@ class DeployedSkill:
     bundle: str
     sha256: str
     enabled: bool = True
+    kind: str = "skill"
+    #: The exact bytes an administrator approved to execute. Empty means the
+    #: capability is deployed but inert.
+    approved_sha256: str = ""
+    #: How to run it, for the kinds that run.
+    declaration: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def executable(self) -> bool:
+        return self.kind in {"tool", "mcp_server"}
+
+    @property
+    def active(self) -> bool:
+        """Whether the runtime should act on this entry.
+
+        Executable code additionally needs an approval naming the bytes now in
+        the store, so replacing an approved artifact deactivates it instead of
+        inheriting consent given for something else.
+        """
+        if not self.enabled:
+            return False
+        if not self.executable:
+            return True
+        return bool(self.approved_sha256) and self.approved_sha256 == self.sha256
 
     def fingerprint(self) -> str:
-        return f"{self.name}@{self.version}:{self.sha256}:{int(self.enabled)}"
+        return (
+            f"{self.name}@{self.version}:{self.kind}:{self.sha256}:"
+            f"{self.approved_sha256}:{int(self.enabled)}"
+        )
 
 
 def _text(value: Any) -> str:
@@ -74,6 +109,11 @@ def parse_registry(document: Any) -> tuple[DeployedSkill, ...]:
             continue
         if bundle != f"bundles/{name}/{digest}.zip":
             continue
+        kind = _text(entry.get("kind")) or "skill"
+        if kind not in KINDS:
+            continue
+        approved = _text(entry.get("approved_sha256")).lower()
+        declaration = entry.get("declaration")
         skills[name] = DeployedSkill(
             name=name,
             version=_text(entry.get("version")) or "0",
@@ -81,6 +121,10 @@ def parse_registry(document: Any) -> tuple[DeployedSkill, ...]:
             bundle=bundle,
             sha256=digest,
             enabled=entry.get("enabled") is not False,
+            kind=kind,
+            # An approval that names other bytes is stale, not an approval.
+            approved_sha256=approved if approved == digest else "",
+            declaration=declaration if isinstance(declaration, dict) else {},
         )
     return tuple(skills[name] for name in sorted(skills))
 
@@ -173,8 +217,15 @@ def extract_bundle(payload: bytes, skill: DeployedSkill, destination: Path) -> N
             for member in members
             if member.filename.startswith(prefix)
         }
-        if "SKILL.md" not in relative:
-            raise ValueError(f"bundle for {skill.name} has no SKILL.md")
+        # Each kind proves it is what it claims to be. Requiring SKILL.md of
+        # everything would make a tool-only or MCP-only artifact impossible.
+        required = _REQUIRED_ENTRY.get(skill.kind)
+        if skill.kind == "mcp_server":
+            required = str(skill.declaration.get("entrypoint") or "main.py")
+        if required and required not in relative:
+            raise ValueError(
+                f"bundle for {skill.name} has no {required}"
+            )
 
         target = destination / skill.name
         if target.exists():
@@ -211,7 +262,11 @@ def install_deployed_skills(
     """
     installed = 0
     for skill in skills:
-        if not skill.enabled or (allows is not None and not allows(skill.name)):
+        if not skill.active or (allows is not None and not allows(skill.name)):
+            continue
+        if skill.kind != "skill":
+            # Tools and MCP servers are materialised separately; this installer
+            # publishes the skills root.
             continue
         if skill.name in reserved:
             # A packaged skill of the same name is authoritative: the image is

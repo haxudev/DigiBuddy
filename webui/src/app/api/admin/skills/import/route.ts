@@ -32,6 +32,7 @@ export async function POST(request: Request) {
         version: String(body.version ?? "").trim(),
         by: principal.id || principal.name,
         source: archive.url,
+        previewed: String(body.previewed ?? "").trim() || undefined,
       },
     );
     for (const skill of result.deployed) audit(principal, "imported", skill.name);

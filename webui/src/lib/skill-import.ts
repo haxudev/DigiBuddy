@@ -8,6 +8,7 @@
  * from the store and verifies the digest. The network is never in the trust path.
  */
 
+import { createHash } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
@@ -26,6 +27,7 @@ import {
   bundlePath,
   explodeBundle,
   type ExplodedBundle,
+  type ExplodedCapability,
 } from "./skill-bundle.ts";
 
 export function failure(error: unknown): Response {
@@ -225,31 +227,64 @@ export async function fetchArchive(
 
 export type SkillPreview = {
   name: string;
+  kind: ExplodedCapability["kind"];
   description: string;
   size: number;
   sha256: string;
   entries: string[];
+  /** How an executable capability would be run, so it can be judged. */
+  declaration: Record<string, unknown> | null;
 };
 
 export type BundlePreview = {
   layout: ExplodedBundle["layout"];
   notes: string[];
+  /** The exact archive this listing describes. */
+  archive_sha256: string;
   skills: SkillPreview[];
 };
+
+/**
+ * What an administrator approved, as bytes rather than as a description.
+ *
+ * Preview and deployment are separate requests, and a URL import fetches the
+ * archive twice, so without this an archive could change between the listing
+ * someone read and the bytes that were installed. It matters more now that a
+ * pack can carry code that runs at Codex start.
+ */
+export function archiveDigest(payload: Buffer): string {
+  return createHash("sha256").update(payload).digest("hex");
+}
 
 export function previewBundle(payload: Buffer, fileName: string): BundlePreview {
   const exploded = explodeBundle(payload, fileName);
   return {
     layout: exploded.layout,
     notes: exploded.notes,
-    skills: exploded.skills.map(({ name, description, size, sha256, entries }) => ({
-      name,
-      description,
-      size,
-      sha256,
-      entries,
-    })),
+    archive_sha256: archiveDigest(payload),
+    skills: exploded.capabilities.map(
+      ({ name, kind, description, size, sha256, entries, mcp, tool }) => ({
+        name,
+        kind,
+        description,
+        size,
+        sha256,
+        entries,
+        declaration: mcp ?? tool ?? null,
+      }),
+    ),
   };
+}
+
+/** Refuse bytes that are not the ones the preview described. */
+export function assertPreviewed(payload: Buffer, expected: string | undefined): void {
+  if (!expected) return;
+  const actual = archiveDigest(payload);
+  if (actual !== expected) {
+    throw new ConfigValidationError(
+      "The archive changed since it was previewed. Preview it again before deploying.",
+    );
+  }
 }
 
 /** Bundles are content-addressed, so the version is only a human-readable label. */
@@ -268,6 +303,8 @@ export type DeployOptions = {
   version?: string;
   by: string;
   source?: string;
+  /** The digest a preview reported. Deployment refuses anything else. */
+  previewed?: string;
 };
 
 export type DeployResult = {
@@ -289,6 +326,7 @@ export async function deployBundle(
   fileName: string,
   options: DeployOptions,
 ): Promise<DeployResult> {
+  assertPreviewed(payload, options.previewed);
   const exploded = explodeBundle(payload, fileName);
   const { document: currentDocument, revision } = await store.readVersioned(
     SKILLS_DOCUMENT,
@@ -299,10 +337,12 @@ export async function deployBundle(
   const registry = new Map(current.map((skill) => [skill.name, skill]));
   const deployed: DeployedSkill[] = [];
 
-  for (const skill of exploded.skills) {
+  for (const skill of exploded.capabilities) {
     const previous = registry.get(skill.name);
+    const executable = skill.kind !== "skill";
     const entry: DeployedSkill = {
       name: skill.name,
+      kind: skill.kind,
       version: (single && options.version) || nextVersion(previous?.version),
       description:
         (single && options.description) ||
@@ -312,7 +352,18 @@ export async function deployBundle(
       bundle: bundlePath(skill.name, skill.sha256),
       sha256: skill.sha256,
       size: skill.size,
-      enabled: previous?.enabled ?? true,
+      // Executable code deploys inactive whatever it replaces. Inheriting the
+      // previous flag would let new bytes run under an approval given for
+      // different ones.
+      enabled: executable ? false : (previous?.enabled ?? true),
+      approved_sha256: "",
+      approved_at: "",
+      approved_by: "",
+      declaration: skill.mcp
+        ? { ...skill.mcp }
+        : skill.tool
+          ? { ...skill.tool }
+          : {},
       uploaded_at: new Date().toISOString(),
       uploaded_by: options.by,
       source: options.source ?? "",

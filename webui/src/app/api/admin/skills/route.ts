@@ -42,6 +42,7 @@ export async function POST(request: Request) {
       description: String(form.get("description") ?? "").trim(),
       version: String(form.get("version") ?? "").trim(),
       by: principal.id || principal.name,
+      previewed: String(form.get("previewed") ?? "").trim() || undefined,
     });
     for (const skill of result.deployed) audit(principal, "deployed", skill.name);
 

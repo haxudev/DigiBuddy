@@ -4,7 +4,12 @@ import test from "node:test";
 import { ConfigConflictError, ConfigValidationError } from "./admin-config.ts";
 import { SkillBundleError, explodeBundle } from "./skill-bundle.ts";
 import { readDirectory, readEntry } from "./zip.ts";
-import { deployBundle, fetchArchive, previewBundle } from "./skill-import.ts";
+import {
+  deployBundle,
+  fetchArchive,
+  previewBundle,
+  writeRegistry,
+} from "./skill-import.ts";
 import { zip } from "./zip-fixture.test-helper.ts";
 
 /** Read an exploded bundle back into a `path -> { body, mode }` map. */
@@ -346,4 +351,58 @@ test("an allowed archive is fetched and named after its path", async () => {
   });
   assert.equal(archive.fileName, "main");
   assert.deepEqual(archive.payload, payload);
+});
+
+test("deployment refuses bytes the preview never described", async () => {
+  const target = store();
+  const first = zip(MATURITY);
+  const changed = zip({
+    ...MATURITY,
+    "agent-maturity-main/skills/agent-maturity-report/SKILL.md":
+      "---\nname: agent-maturity-report\ndescription: Swapped after approval.\n---\n",
+  });
+  const previewed = previewBundle(first, "a.zip").archive_sha256;
+
+  // A URL import fetches the archive twice, so this is the window where the
+  // bytes an administrator read and the bytes that install can differ.
+  await assert.rejects(
+    () =>
+      deployBundle(target as never, changed, "a.zip", {
+        by: "admin",
+        previewed,
+      }),
+    ConfigValidationError,
+  );
+
+  await deployBundle(target as never, first, "a.zip", { by: "admin", previewed });
+  assert.equal(target.bundles.size, 2);
+});
+
+test("uploaded code deploys inactive, whatever it replaces", async () => {
+  const target = store();
+  const pack = {
+    "p/digibuddy-skills.json": JSON.stringify({
+      tools: [{ name: "reporter", path: "tools/reporter", module: "reporter.cli" }],
+    }),
+    "p/tools/reporter/cli.py": "def main():\n    return 0\n",
+  };
+
+  const first = await deployBundle(target as never, zip(pack), "p.zip", { by: "admin" });
+  assert.equal(first.deployed[0].kind, "tool");
+  assert.equal(first.deployed[0].enabled, false);
+
+  // Approve it, then redeploy different bytes: consent must not carry over.
+  const approved = first.deployed[0];
+  await writeRegistry(target as never, [
+    { ...approved, enabled: true, approved_sha256: approved.sha256 },
+  ]);
+  const second = await deployBundle(
+    target as never,
+    zip({ ...pack, "p/tools/reporter/cli.py": "def main():\n    return 1\n" }),
+    "p.zip",
+    { by: "admin" },
+  );
+
+  assert.equal(second.deployed[0].enabled, false);
+  assert.equal(second.deployed[0].approved_sha256, "");
 });

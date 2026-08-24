@@ -3,7 +3,13 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { normaliseSkills, ConfigValidationError } from "./admin-config.ts";
-import { SkillBundleError, inspectBundle, nameFromFile } from "./skill-bundle.ts";
+import {
+  SkillBundleError,
+  explodeBundle,
+  inspectBundle,
+  nameFromFile,
+  type ExplodedCapability,
+} from "./skill-bundle.ts";
 import { zip } from "./zip-fixture.test-helper.ts";
 
 test("a bundle rooted at one directory names itself", () => {
@@ -97,5 +103,203 @@ test("duplicate skills are refused so the registry stays unambiguous", () => {
         ],
       }),
     ConfigValidationError,
+  );
+});
+
+// --- Capability packs ------------------------------------------------------
+
+const PACK = {
+  "pack-main/digibuddy-skills.json": JSON.stringify({
+    schema_version: 1,
+    skills: [{ name: "pack-skill", path: "skills/pack-skill" }],
+    tools: [
+      { name: "pack_tool", path: "tools/pack_tool", module: "pack_tool.cli" },
+    ],
+    mcp_servers: [
+      {
+        name: "pack-mcp",
+        path: "servers/pack-mcp",
+        entrypoint: "server.py",
+        runtime: "python",
+      },
+    ],
+  }),
+  "pack-main/skills/pack-skill/SKILL.md":
+    "---\nname: pack-skill\ndescription: Do a thing.\n---\n",
+  "pack-main/tools/pack_tool/__init__.py": "",
+  "pack-main/tools/pack_tool/cli.py": "def main():\n    return 0\n",
+  "pack-main/servers/pack-mcp/server.py": "print('serving')\n",
+};
+
+test("a pack yields one typed artifact per declared capability", () => {
+  const exploded = explodeBundle(zip(PACK), "pack-main.zip");
+
+  assert.equal(exploded.layout, "manifest");
+  assert.deepEqual(
+    exploded.capabilities.map((entry: ExplodedCapability) => [entry.kind, entry.name]),
+    [
+      ["mcp_server", "pack-mcp"],
+      ["skill", "pack-skill"],
+      ["tool", "pack_tool"],
+    ],
+  );
+});
+
+test("a tool-only pack is valid, because not every capability is a skill", () => {
+  const exploded = explodeBundle(
+    zip({
+      "t/digibuddy-skills.json": JSON.stringify({
+        schema_version: 1,
+        tools: [{ name: "solo", path: "tools/solo", module: "solo.cli" }],
+      }),
+      "t/tools/solo/cli.py": "def main():\n    return 0\n",
+    }),
+    "t.zip",
+  );
+
+  assert.deepEqual(
+    exploded.capabilities.map((entry: ExplodedCapability) => entry.kind),
+    ["tool"],
+  );
+});
+
+test("an mcp-only pack is valid too", () => {
+  const exploded = explodeBundle(
+    zip({
+      "m/digibuddy-skills.json": JSON.stringify({
+        schema_version: 1,
+        mcp_servers: [
+          { name: "solo", path: "servers/solo", entrypoint: "main.py" },
+        ],
+      }),
+      "m/servers/solo/main.py": "print('x')\n",
+    }),
+    "m.zip",
+  );
+
+  assert.deepEqual(
+    exploded.capabilities.map((entry: ExplodedCapability) => [entry.kind, entry.name]),
+    [["mcp_server", "solo"]],
+  );
+});
+
+test("a declaration pointing outside its own files is refused", () => {
+  assert.throws(
+    () =>
+      explodeBundle(
+        zip({
+          "p/digibuddy-skills.json": JSON.stringify({
+            tools: [{ name: "ghost", path: "tools/missing", module: "ghost" }],
+          }),
+          "p/tools/other/cli.py": "",
+        }),
+        "p.zip",
+      ),
+    SkillBundleError,
+  );
+});
+
+test("an mcp entrypoint must live inside its own artifact", () => {
+  for (const entrypoint of ["/bin/sh", "../escape.py", "sub/../../escape.py"]) {
+    assert.throws(
+      () =>
+        explodeBundle(
+          zip({
+            "p/digibuddy-skills.json": JSON.stringify({
+              mcp_servers: [{ name: "bad", path: "servers/bad", entrypoint }],
+            }),
+            "p/servers/bad/main.py": "",
+          }),
+          "p.zip",
+        ),
+      SkillBundleError,
+      `entrypoint ${entrypoint} should be refused`,
+    );
+  }
+});
+
+test("an mcp server may not choose an arbitrary runtime", () => {
+  assert.throws(
+    () =>
+      explodeBundle(
+        zip({
+          "p/digibuddy-skills.json": JSON.stringify({
+            mcp_servers: [
+              {
+                name: "bad",
+                path: "servers/bad",
+                entrypoint: "main.py",
+                runtime: "/bin/sh",
+              },
+            ],
+          }),
+          "p/servers/bad/main.py": "",
+        }),
+        "p.zip",
+      ),
+    SkillBundleError,
+  );
+});
+
+test("an mcp declaration may not carry a literal secret", () => {
+  assert.throws(
+    () =>
+      explodeBundle(
+        zip({
+          "p/digibuddy-skills.json": JSON.stringify({
+            mcp_servers: [
+              {
+                name: "bad",
+                path: "servers/bad",
+                entrypoint: "main.py",
+                env: { API_TOKEN: "sk-literal-secret" },
+              },
+            ],
+          }),
+          "p/servers/bad/main.py": "",
+        }),
+        "p.zip",
+      ),
+    SkillBundleError,
+  );
+});
+
+test("an mcp declaration may not set a reserved variable", () => {
+  assert.throws(
+    () =>
+      explodeBundle(
+        zip({
+          "p/digibuddy-skills.json": JSON.stringify({
+            mcp_servers: [
+              {
+                name: "bad",
+                path: "servers/bad",
+                entrypoint: "main.py",
+                env: { PYTHONPATH: "/attacker/lib" },
+              },
+            ],
+          }),
+          "p/servers/bad/main.py": "",
+        }),
+        "p.zip",
+      ),
+    SkillBundleError,
+  );
+});
+
+test("a manifest written to a newer schema is refused, not guessed at", () => {
+  assert.throws(
+    () =>
+      explodeBundle(
+        zip({
+          "p/digibuddy-skills.json": JSON.stringify({
+            schema_version: 99,
+            skills: [{ name: "s", path: "s" }],
+          }),
+          "p/s/SKILL.md": "---\nname: s\n---\n",
+        }),
+        "p.zip",
+      ),
+    SkillBundleError,
   );
 });

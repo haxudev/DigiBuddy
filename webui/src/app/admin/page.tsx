@@ -51,16 +51,28 @@ type DeployedSkill = {
 };
 
 /** What an archive would deploy, before anything is written. */
+type CapabilityKind = "skill" | "tool" | "mcp_server";
+
 type BundlePreview = {
   layout: "single" | "manifest" | "discovered";
   notes: string[];
+  /** The exact archive this listing describes; deployment must present it. */
+  archive_sha256: string;
   skills: {
     name: string;
+    kind: CapabilityKind;
     description: string;
     size: number;
     sha256: string;
     entries: string[];
+    declaration: Record<string, unknown> | null;
   }[];
+};
+
+const KINDS: Record<CapabilityKind, string> = {
+  skill: "skill",
+  tool: "tool — code the agent may run",
+  mcp_server: "MCP server — a command the runtime starts with Codex",
 };
 
 /** A previewed archive waiting for the administrator to confirm it. */
@@ -404,15 +416,19 @@ export default function Admin() {
     setStatus("");
     try {
       let response: Response;
+      // The digest travels with the request, so what installs is what was read
+      // above -- a URL import fetches the archive a second time.
+      const previewed = pending.preview.archive_sha256;
       if (pending.file) {
         const body = new FormData();
         body.append("bundle", pending.file);
+        body.append("previewed", previewed);
         response = await fetch("/api/admin/skills", { method: "POST", body });
       } else {
         response = await fetch("/api/admin/skills/import", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ source: pending.source }),
+          body: JSON.stringify({ source: pending.source, previewed }),
         });
       }
       const payload = await response.json();
@@ -778,7 +794,7 @@ export default function Admin() {
               <div className={styles.row}>
                 <div className={styles.rowHeader}>
                   <strong>
-                    {pending.preview.skills.length} skill(s) ready to deploy
+                    {pending.preview.skills.length} capability(s) ready to deploy
                   </strong>
                   <button
                     className={styles.remove}
@@ -795,13 +811,26 @@ export default function Admin() {
                     {note}
                   </p>
                 ))}
+                {pending.preview.skills.some((skill) => skill.kind !== "skill") && (
+                  <p className={styles.hint}>
+                    This archive contains code. Tools and MCP servers deploy
+                    switched off; each one has to be approved separately, and the
+                    approval names the exact bytes below.
+                  </p>
+                )}
                 {pending.preview.skills.map((skill) => (
                   <div key={skill.name}>
                     <strong>{skill.name}</strong>
+                    <span className={styles.version}> {KINDS[skill.kind]}</span>
                     {skills.some((existing) => existing.name === skill.name) && (
-                      <span className={styles.version}> replaces the deployed version</span>
+                      <span className={styles.version}> · replaces the deployed version</span>
                     )}
                     {skill.description && <p>{skill.description}</p>}
+                    {skill.declaration && (
+                      <p className={styles.hint}>
+                        runs {JSON.stringify(skill.declaration)}
+                      </p>
+                    )}
                     <p className={styles.hint}>
                       {Math.max(1, Math.round(skill.size / 1024))} KB ·{" "}
                       {skill.entries.length} files · {skill.sha256.slice(0, 12)}

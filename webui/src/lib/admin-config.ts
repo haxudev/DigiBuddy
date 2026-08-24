@@ -96,8 +96,18 @@ export type ProfileDocument = {
 
 export type ProfilesDocument = { profiles: ProfileDocument[]; schema_version?: number };
 
+/**
+ * A capability an administrator deployed.
+ *
+ * `kind` decides what the runtime does with the bytes. A skill is markdown the
+ * model reads, so it is live as soon as it is enabled. A tool or an MCP server
+ * is code, so it also needs `approved_sha256` to match its own digest before
+ * the runtime will run it -- and any redeploy that changes the bytes drops that
+ * approval.
+ */
 export type DeployedSkill = {
   name: string;
+  kind: "skill" | "tool" | "mcp_server";
   version: string;
   description: string;
   /** `bundles/<name>/<sha256>.zip` — content-addressed, so it never collides. */
@@ -105,11 +115,37 @@ export type DeployedSkill = {
   sha256: string;
   size: number;
   enabled: boolean;
+  /** The exact bytes an administrator approved to execute, if any. */
+  approved_sha256: string;
+  approved_at: string;
+  approved_by: string;
+  /** How to run it, for the kinds that run. Empty for a skill. */
+  declaration: Record<string, unknown>;
   uploaded_at: string;
   uploaded_by: string;
   /** Where the archive came from, when it was imported from a URL. */
   source: string;
 };
+
+export const CAPABILITY_KINDS = ["skill", "tool", "mcp_server"] as const;
+
+/** Executable kinds need a matching approval before the runtime will run them. */
+export function isExecutable(entry: Pick<DeployedSkill, "kind">): boolean {
+  return entry.kind === "tool" || entry.kind === "mcp_server";
+}
+
+/**
+ * Whether the runtime should act on this entry.
+ *
+ * A skill needs only to be enabled. Executable code additionally needs an
+ * approval that names the bytes now in the store, so replacing an approved
+ * artifact with different bytes deactivates it rather than inheriting consent.
+ */
+export function isActive(entry: DeployedSkill): boolean {
+  if (!entry.enabled) return false;
+  if (!isExecutable(entry)) return true;
+  return Boolean(entry.approved_sha256) && entry.approved_sha256 === entry.sha256;
+}
 
 export type SkillsDocument = { skills: DeployedSkill[]; schema_version?: number };
 
@@ -301,8 +337,15 @@ export function normaliseSkills(input: unknown): SkillsDocument {
       throw new ConfigValidationError(`Duplicate skill name: ${name}`);
     }
     seen.add(name);
+    const kindValue = text(raw.kind) || "skill";
+    if (!(CAPABILITY_KINDS as readonly string[]).includes(kindValue)) {
+      throw new ConfigValidationError(`Unknown capability kind for ${name}: ${kindValue}`);
+    }
+    const kind = kindValue as DeployedSkill["kind"];
+    const approved = text(raw.approved_sha256).toLowerCase();
     skills.push({
       name,
+      kind,
       version: text(raw.version) || "1",
       description: text(raw.description),
       // Always derived, never taken from the request, so a crafted registry
@@ -311,6 +354,15 @@ export function normaliseSkills(input: unknown): SkillsDocument {
       sha256,
       size: typeof raw.size === "number" && raw.size > 0 ? raw.size : 0,
       enabled: raw.enabled !== false,
+      // An approval only means anything if it names bytes; one that does not
+      // match the stored digest is stale and is dropped rather than carried.
+      approved_sha256: /^[0-9a-f]{64}$/.test(approved) && approved === sha256 ? approved : "",
+      approved_at: text(raw.approved_at),
+      approved_by: text(raw.approved_by),
+      declaration:
+        raw.declaration && typeof raw.declaration === "object" && !Array.isArray(raw.declaration)
+          ? (raw.declaration as Record<string, unknown>)
+          : {},
       uploaded_at: text(raw.uploaded_at),
       uploaded_by: text(raw.uploaded_by),
       source: text(raw.source),

@@ -175,3 +175,79 @@ class InstallTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CapabilityKindTests(unittest.TestCase):
+    """A pack may carry code, and code needs consent naming the exact bytes."""
+
+    def _entry(self, **overrides):
+        digest = "a" * 64
+        base = {
+            "name": "reporter",
+            "sha256": digest,
+            "bundle": f"bundles/reporter/{digest}.zip",
+            "kind": "tool",
+            "enabled": True,
+        }
+        base.update(overrides)
+        return parse_registry({"skills": [base]})
+
+    def test_a_skill_needs_only_to_be_enabled(self):
+        (skill,) = self._entry(kind="skill")
+        self.assertTrue(skill.active)
+
+    def test_executable_code_without_approval_is_inert(self):
+        (tool,) = self._entry()
+        self.assertFalse(tool.active)
+
+    def test_executable_code_runs_once_its_own_bytes_are_approved(self):
+        (tool,) = self._entry(approved_sha256="a" * 64)
+        self.assertTrue(tool.active)
+
+    def test_an_approval_naming_other_bytes_is_not_an_approval(self):
+        """This is the redeploy case: new code, old consent."""
+        (tool,) = self._entry(approved_sha256="b" * 64)
+        self.assertEqual(tool.approved_sha256, "")
+        self.assertFalse(tool.active)
+
+    def test_an_unknown_kind_is_dropped(self):
+        self.assertEqual(self._entry(kind="daemon"), ())
+
+    def test_approval_state_changes_the_fingerprint(self):
+        (inert,) = self._entry()
+        (approved,) = self._entry(approved_sha256="a" * 64)
+        self.assertNotEqual(inert.fingerprint(), approved.fingerprint())
+
+
+class NonSkillBundleTests(unittest.TestCase):
+    def test_an_mcp_artifact_is_validated_against_its_own_entrypoint(self):
+        payload = bundle({"server.py": "print('x')"}, root="solo")
+        skill = DeployedSkill(
+            name="solo",
+            version="1",
+            description="",
+            bundle=f"bundles/solo/{hashlib.sha256(payload).hexdigest()}.zip",
+            sha256=hashlib.sha256(payload).hexdigest(),
+            kind="mcp_server",
+            declaration={"entrypoint": "server.py", "runtime": "python"},
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            extract_bundle(payload, skill, Path(directory))
+            self.assertTrue((Path(directory) / "solo" / "server.py").is_file())
+
+    def test_an_mcp_artifact_missing_its_entrypoint_is_refused(self):
+        payload = bundle({"other.py": "x"}, root="solo")
+        skill = DeployedSkill(
+            name="solo",
+            version="1",
+            description="",
+            bundle=f"bundles/solo/{hashlib.sha256(payload).hexdigest()}.zip",
+            sha256=hashlib.sha256(payload).hexdigest(),
+            kind="mcp_server",
+            declaration={"entrypoint": "server.py"},
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "server.py"):
+                extract_bundle(payload, skill, Path(directory))

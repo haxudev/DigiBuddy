@@ -59,13 +59,79 @@ export type ExplodedSkill = InspectedBundle & {
   description: string;
 };
 
+/**
+ * What a pack may declare.
+ *
+ * A skill is markdown the model reads. A tool is a module it may run. An MCP
+ * server is a command the runtime executes at Codex start, whether or not the
+ * model asks for it -- which is why the last one is the trust escalation the
+ * approval gate exists for.
+ */
+export type CapabilityKind = "skill" | "tool" | "mcp_server";
+
+/** How an MCP server declared in a pack is started. Never a free-form command. */
+export type McpDeclaration = {
+  runtime: "python" | "node";
+  /** Relative to the artifact's own root, so it cannot name a host path. */
+  entrypoint: string;
+  env: Record<string, string>;
+};
+
+/** How a tool declared in a pack is invoked. */
+export type ToolDeclaration = { module: string; call: string };
+
+export type ExplodedCapability = ExplodedSkill & {
+  kind: CapabilityKind;
+  mcp?: McpDeclaration;
+  tool?: ToolDeclaration;
+};
+
 export type ExplodedBundle = {
+  /** Skill artifacts only, kept for callers that predate typed capabilities. */
   skills: ExplodedSkill[];
-  /** How the skills were found, so the console can explain what it did. */
+  /** Every artifact this archive yields, whatever its kind. */
+  capabilities: ExplodedCapability[];
+  /** How the capabilities were found, so the console can explain what it did. */
   layout: "single" | "manifest" | "discovered";
   /** Non-fatal observations worth showing before an administrator deploys. */
   notes: string[];
 };
+
+/** The manifest shapes this build understands. */
+export const MANIFEST_SCHEMA_VERSION = 1;
+
+/**
+ * Environment names a pack may not set.
+ *
+ * Reaching one of these would let a declaration redirect the interpreter or the
+ * module path rather than configure a server, so the pack would be choosing
+ * what runs instead of what the runtime runs.
+ */
+const RESERVED_ENV = new Set([
+  "PATH",
+  "PYTHONPATH",
+  "PYTHONHOME",
+  "PYTHONSTARTUP",
+  "NODE_OPTIONS",
+  "NODE_PATH",
+  "LD_PRELOAD",
+  "LD_LIBRARY_PATH",
+  "HOME",
+  "CODEX_HOME",
+  "DIGIBUDDY_CONFIG_URI",
+  "DIGIBUDDY_CONFIG_DIR",
+  "DIGIBUDDY_MODEL_API_KEY",
+  "OPENAI_API_KEY",
+]);
+
+/**
+ * A value that looks like a credential rather than a setting.
+ *
+ * A pack manifest is readable by anyone who can read the archive, so a secret
+ * written into one is already disclosed. Profiles bind credentials; packs
+ * declare which slot they need.
+ */
+const SECRET_SHAPED = /^(?:sk-|ghp_|gho_|xox[baprs]-|AKIA|eyJ[A-Za-z0-9_-]{10,})/;
 
 function fail(error: unknown): never {
   if (error instanceof ZipError) throw new SkillBundleError(error.message);
@@ -214,11 +280,106 @@ export function parseFrontmatter(markdown: string): Frontmatter {
 type ManifestSkill = { name: string; path: string; description: string };
 type ManifestShared = { path: string; as: string; skills: string[] };
 type ManifestEntrypoint = { path: string; module: string; call: string; skills: string[] };
+type ManifestTool = {
+  name: string;
+  path: string;
+  description: string;
+  module: string;
+  call: string;
+};
+type ManifestMcp = {
+  name: string;
+  path: string;
+  description: string;
+  runtime: "python" | "node";
+  entrypoint: string;
+  env: Record<string, string>;
+};
 type Manifest = {
   skills: ManifestSkill[];
+  tools: ManifestTool[];
+  mcpServers: ManifestMcp[];
   shared: ManifestShared[];
   entrypoints: ManifestEntrypoint[];
 };
+
+/** A tool's directory name is a Python identifier, not a kebab-case skill name. */
+const TOOL_NAME = /^[a-z_][a-z0-9_]*$/;
+const MCP_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function assertToolName(name: string): string {
+  if (!TOOL_NAME.test(name)) {
+    throw new SkillBundleError(
+      `Tool names must be lowercase Python identifiers: ${name}`,
+    );
+  }
+  return name;
+}
+
+function assertMcpName(name: string): string {
+  if (!MCP_NAME.test(name)) {
+    throw new SkillBundleError(
+      `MCP server names may only contain letters, digits, dot, dash and underscore: ${name}`,
+    );
+  }
+  return name;
+}
+
+/**
+ * An entrypoint is a path inside the artifact, never a command.
+ *
+ * Allowing a command would let a pack run `/bin/sh -c` at Codex start, which is
+ * the whole trust escalation the approval gate is trying to make visible.
+ */
+function assertEntrypoint(value: unknown, name: string): string {
+  const path = asString(value) || "main.py";
+  if (path.startsWith("/") || path.includes("\\")) {
+    throw new SkillBundleError(
+      `The MCP server ${name} must name a path inside its own files, not ${path}.`,
+    );
+  }
+  assertSafe(path);
+  return path;
+}
+
+function assertRuntime(value: unknown, name: string): "python" | "node" {
+  const runtime = asString(value) || "python";
+  if (runtime !== "python" && runtime !== "node") {
+    throw new SkillBundleError(
+      `The MCP server ${name} must run under python or node, not ${runtime}.`,
+    );
+  }
+  return runtime;
+}
+
+function assertDeclaredEnv(
+  value: unknown,
+  name: string,
+): Record<string, string> {
+  const raw = asRecord(value);
+  const environment: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(raw)) {
+    const variable = key.trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(variable)) {
+      throw new SkillBundleError(
+        `The MCP server ${name} declares an unusable environment name: ${key}`,
+      );
+    }
+    if (RESERVED_ENV.has(variable)) {
+      throw new SkillBundleError(
+        `The MCP server ${name} may not set ${variable}; it decides what runs, not how it authenticates.`,
+      );
+    }
+    const text = asString(entry);
+    if (SECRET_SHAPED.test(text)) {
+      throw new SkillBundleError(
+        `The MCP server ${name} appears to embed a credential in ${variable}. Bind it to the profile instead.`,
+      );
+    }
+    environment[variable] = text;
+  }
+  return environment;
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -253,14 +414,56 @@ function selects(patterns: string[], name: string): boolean {
 function parseManifest(raw: unknown): Manifest {
   const document = asRecord(raw);
 
+  const version = document.schema_version;
+  if (version !== undefined && version !== null) {
+    if (typeof version !== "number" || !Number.isInteger(version)) {
+      throw new SkillBundleError(`${BUNDLE_MANIFEST} has an unreadable schema_version.`);
+    }
+    if (version > MANIFEST_SCHEMA_VERSION) {
+      throw new SkillBundleError(
+        `${BUNDLE_MANIFEST} declares schema_version ${version}; this build reads up to ${MANIFEST_SCHEMA_VERSION}.`,
+      );
+    }
+  }
+
   const skills = asList(document.skills).map((item) => {
     const entry = asRecord(item);
     const path = manifestPath(entry.path, "skill");
     const name = assertSkillName(asString(entry.name) || (path.split("/").pop() ?? ""));
     return { name, path, description: asString(entry.description) };
   });
-  if (skills.length === 0) {
-    throw new SkillBundleError(`${BUNDLE_MANIFEST} declares no skills.`);
+
+  const tools = asList(document.tools).map((item) => {
+    const entry = asRecord(item);
+    const path = manifestPath(entry.path, "tool");
+    const name = assertToolName(asString(entry.name) || (path.split("/").pop() ?? ""));
+    const moduleName = asString(entry.module) || name;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/.test(moduleName)) {
+      throw new SkillBundleError(`The tool ${name} has no valid module.`);
+    }
+    const call = asString(entry.call) || "main";
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(call)) {
+      throw new SkillBundleError(`The tool ${name} has no valid call.`);
+    }
+    return { name, path, description: asString(entry.description), module: moduleName, call };
+  });
+
+  const mcpServers = asList(document.mcp_servers).map((item) => {
+    const entry = asRecord(item);
+    const path = manifestPath(entry.path, "MCP server");
+    const name = assertMcpName(asString(entry.name) || (path.split("/").pop() ?? ""));
+    return {
+      name,
+      path,
+      description: asString(entry.description),
+      runtime: assertRuntime(entry.runtime, name),
+      entrypoint: assertEntrypoint(entry.entrypoint, name),
+      env: assertDeclaredEnv(entry.env, name),
+    };
+  });
+
+  if (skills.length + tools.length + mcpServers.length === 0) {
+    throw new SkillBundleError(`${BUNDLE_MANIFEST} declares no capabilities.`);
   }
 
   const shared = asList(document.shared).map((item) => {
@@ -290,7 +493,7 @@ function parseManifest(raw: unknown): Manifest {
     };
   });
 
-  return { skills, shared, entrypoints };
+  return { skills, tools, mcpServers, shared, entrypoints };
 }
 
 /**
@@ -482,6 +685,68 @@ function fileMode(entry: ZipEntry): number {
 }
 
 /**
+ * Package one declared directory as its own content-addressed artifact.
+ *
+ * Same shape as a skill bundle -- rooted at the capability's name, digested
+ * over the bytes -- so the store, the registry and the runtime installer stay
+ * one mechanism rather than three.
+ */
+function buildCapability(
+  archive: Archive,
+  root: string,
+  kind: CapabilityKind,
+  declared: { name: string; path: string; description: string },
+  required: string | null,
+): ExplodedCapability {
+  const base = root ? `${root}/${declared.path}` : declared.path;
+  const files = subtree(archive, base);
+  if (files.size === 0) {
+    throw new SkillBundleError(`The bundle has nothing at ${declared.path}.`);
+  }
+  if (required && !files.has(required)) {
+    throw new SkillBundleError(
+      `${declared.path} does not contain ${required}, which it declares as its entry point.`,
+    );
+  }
+
+  const writable: WritableEntry[] = [];
+  let total = 0;
+  for (const relative of [...files.keys()].sort()) {
+    const entry = files.get(relative)!;
+    const body = read(archive, `${base}/${relative}`, MAX_SKILL_BYTES);
+    total += body.length;
+    if (total > MAX_SKILL_BYTES) {
+      throw new SkillBundleError(
+        `The capability ${declared.name} expands beyond the size limit.`,
+      );
+    }
+    writable.push({
+      name: `${declared.name}/${relative}`,
+      body,
+      mode: fileMode(entry),
+    });
+  }
+
+  const payload = writeZip(writable);
+  if (payload.length > MAX_BUNDLE_BYTES) {
+    throw new SkillBundleError(
+      `The capability ${declared.name} is larger than the bundle size limit.`,
+    );
+  }
+  return {
+    kind,
+    name: declared.name,
+    description: declared.description,
+    payload,
+    sha256: createHash("sha256").update(payload).digest("hex"),
+    size: payload.length,
+    entries: writable
+      .map((entry) => entry.name.slice(declared.name.length + 1))
+      .sort(),
+  };
+}
+
+/**
  * Split an uploaded archive into deployable single-skill bundles.
  *
  * A plain single-skill zip passes through untouched, so its digest stays the
@@ -515,10 +780,12 @@ export function explodeBundle(payload: Buffer, fileName: string): ExplodedBundle
         `SKILL.md declares the name "${front.name}" but the bundle is "${inspected.name}".`,
       );
     }
+    const only = { ...inspected, payload, description: front.description };
     return {
       layout: "single",
       notes,
-      skills: [{ ...inspected, payload, description: front.description }],
+      skills: [only],
+      capabilities: [{ ...only, kind: "skill" as const }],
     };
   }
 
@@ -551,6 +818,8 @@ export function explodeBundle(payload: Buffer, fileName: string): ExplodedBundle
         path,
         description: "",
       })),
+      tools: [],
+      mcpServers: [],
       shared: [],
       entrypoints: [],
     };
@@ -560,22 +829,61 @@ export function explodeBundle(payload: Buffer, fileName: string): ExplodedBundle
     );
   }
 
-  if (manifest.skills.length > MAX_SKILLS_PER_BUNDLE) {
+  const declaredCount =
+    manifest.skills.length + manifest.tools.length + manifest.mcpServers.length;
+  if (declaredCount > MAX_SKILLS_PER_BUNDLE) {
     throw new SkillBundleError(
-      `An archive may yield at most ${MAX_SKILLS_PER_BUNDLE} skills.`,
+      `An archive may yield at most ${MAX_SKILLS_PER_BUNDLE} capabilities.`,
     );
   }
 
-  const skills: ExplodedSkill[] = [];
+  const capabilities: ExplodedCapability[] = [];
+  // One namespace across kinds. Two capabilities sharing a name would install
+  // over each other, and which one survived would depend on ordering.
   const seen = new Set<string>();
-  for (const declared of manifest.skills) {
-    if (seen.has(declared.name)) {
-      throw new SkillBundleError(`The archive yields two skills named ${declared.name}.`);
+  const claim = (name: string) => {
+    if (seen.has(name)) {
+      throw new SkillBundleError(`The archive yields two capabilities named ${name}.`);
     }
-    seen.add(declared.name);
-    skills.push(buildSkill(archive, root, declared, manifest, notes));
+    seen.add(name);
+  };
+
+  for (const declared of manifest.skills) {
+    claim(declared.name);
+    capabilities.push({
+      ...buildSkill(archive, root, declared, manifest, notes),
+      kind: "skill" as const,
+    });
+  }
+  for (const declared of manifest.tools) {
+    claim(declared.name);
+    capabilities.push({
+      ...buildCapability(archive, root, "tool", declared, null),
+      tool: { module: declared.module, call: declared.call },
+    });
+  }
+  for (const declared of manifest.mcpServers) {
+    claim(declared.name);
+    capabilities.push({
+      ...buildCapability(archive, root, "mcp_server", declared, declared.entrypoint),
+      mcp: {
+        runtime: declared.runtime,
+        entrypoint: declared.entrypoint,
+        env: declared.env,
+      },
+    });
   }
 
-  skills.sort((left, right) => left.name.localeCompare(right.name));
-  return { skills, layout, notes };
+  // Codepoint order, not locale order: this becomes a registry that two
+  // runtimes compare, and localeCompare treats `-` and `_` as ignorable, so the
+  // same archive could sort differently on different hosts.
+  capabilities.sort((left, right) =>
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+  );
+  return {
+    skills: capabilities.filter((entry) => entry.kind === "skill"),
+    capabilities,
+    layout,
+    notes,
+  };
 }
