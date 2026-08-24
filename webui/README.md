@@ -9,7 +9,7 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:3000`. Configure the Responses endpoint, key, model, and optional Foundry agent reference in the settings panel, or set the variables listed in `environment.example`.
+Open `http://localhost:3000`. The chat window carries no connection settings. The Responses endpoint, key, model, and optional Foundry agent reference come from the variables listed in `environment.example` or from the `/admin` control plane.
 
 The browser speaks AG-UI only to `/api/agent`. The Next.js route validates the endpoint, keeps server-configured keys out of browser responses, invokes the Foundry Responses API, and translates its stream into AG-UI events.
 
@@ -25,7 +25,7 @@ Thinking summaries, tool calls, and failures appear under the answer as one-line
 
 ### Composer
 
-Attach local files with **Attach files** — images, PDF, Office documents, CSV, and plain text. Files are read in the browser as data URLs and sent as Responses `input_image` or `input_file` parts; anything without inline bytes, or beyond the 25 MB per-turn budget the hosted agent enforces, is dropped. The hosted agent writes them into the Codex workspace and appends their paths to the prompt. Attachments belong to the turn that sends them, so the tray empties on submit.
+Attach local files with the **+** button in the composer — images, PDF, Office documents, CSV, and plain text. Files are read in the browser as data URLs and sent as Responses `input_image` or `input_file` parts; anything without inline bytes, or beyond the 25 MB per-turn budget the hosted agent enforces, is dropped. The hosted agent writes them into the Codex workspace and appends their paths to the prompt. Attachments belong to the turn that sends them, so the tray empties on submit.
 
 **Thinking** sets the reasoning effort (`minimal`, `low`, `medium`, `high`) for the turn; leaving it on *Default* sends no `reasoning` field and lets the runtime configuration decide. Changing the effort restarts the Codex engine through its configuration fingerprint.
 
@@ -64,7 +64,7 @@ The capability lists the console offers come from `catalogue.json`, published by
 
 Access is guarded by `requireAdmin`: put Easy Auth in front of the container and list the allowed Entra object IDs in `ADMIN_PRINCIPAL_IDS`. An empty list denies everyone. The model API key is write-only — it is never returned to the browser, and leaving the field blank preserves the stored value.
 
-Chat users pick a profile in the settings panel; it travels to the agent as `metadata.profile`.
+Chat users pick a profile in the session panel — the only setting the chat window exposes; it travels to the agent as `metadata.profile`.
 
 ## Container
 

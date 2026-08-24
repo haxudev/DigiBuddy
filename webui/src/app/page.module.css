@@ -333,7 +333,6 @@
 .composer button[type="submit"] {
   min-width: 104px;
   height: 40px;
-  margin-left: auto;
   color: #fff;
   background: #176f65;
   border: 0;
@@ -343,21 +342,31 @@
   font-weight: 700;
 }
 
-.ghostButton {
+/* The attach control is a round "+" so the composer reads as one row of icons. */
+.attachButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
   height: 32px;
-  padding: 0 12px;
+  padding: 0;
   color: #33454a;
   background: #eef4f4;
   border: 1px solid #dde5e7;
-  border-radius: 8px;
+  border-radius: 50%;
   cursor: pointer;
   font: inherit;
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: 20px;
+  line-height: 1;
 }
 
-.ghostButton:hover {
+.attachButton:hover {
   background: #e4eeee;
+}
+
+/* Pushes Thinking and Send to the right edge of the composer. */
+.composerSpacer {
+  flex: 1 1 auto;
 }
 
 .composer button:disabled {

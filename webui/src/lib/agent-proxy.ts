@@ -182,23 +182,38 @@ export function latestUserText(messages: Message[]): string {
   throw new Error("A non-empty user message is required.");
 }
 
-export function responseText(payload: unknown): string {
-  if (!payload || typeof payload !== "object") return "";
+/**
+ * A turn can carry several assistant output items — one per reply the agent
+ * wrote. They are separate messages, so they are kept apart instead of being
+ * glued into a single paragraph.
+ */
+export const OUTPUT_ITEM_SEPARATOR = "\n\n";
+
+export function responseTexts(payload: unknown): string[] {
+  if (!payload || typeof payload !== "object") return [];
   const response = payload as Record<string, unknown>;
-  if (typeof response.output_text === "string") return response.output_text;
-  if (!Array.isArray(response.output)) return "";
+  if (typeof response.output_text === "string") {
+    return response.output_text ? [response.output_text] : [];
+  }
+  if (!Array.isArray(response.output)) return [];
   return response.output
-    .flatMap((item) => {
-      if (!item || typeof item !== "object") return [];
+    .map((item) => {
+      if (!item || typeof item !== "object") return "";
       const content = (item as Record<string, unknown>).content;
-      return Array.isArray(content) ? content : [];
+      if (!Array.isArray(content)) return "";
+      return content
+        .map((part) => {
+          if (!part || typeof part !== "object") return "";
+          const text = (part as Record<string, unknown>).text;
+          return typeof text === "string" ? text : "";
+        })
+        .join("");
     })
-    .map((content) => {
-      if (!content || typeof content !== "object") return "";
-      const text = (content as Record<string, unknown>).text;
-      return typeof text === "string" ? text : "";
-    })
-    .join("");
+    .filter((text) => text !== "");
+}
+
+export function responseText(payload: unknown): string {
+  return responseTexts(payload).join(OUTPUT_ITEM_SEPARATOR);
 }
 
 export function responseTextDelta(streamed: string, payload: unknown): string {

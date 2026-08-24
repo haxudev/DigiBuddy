@@ -4,12 +4,14 @@ import {
   type BaseEvent,
 } from "@ag-ui/core";
 import {
+  OUTPUT_ITEM_SEPARATOR,
   latestUserText,
   resolveAuthHeaders,
   resolveConnection,
   responseErrorMessage,
   responseText,
   responseTextDelta,
+  responseTexts,
   turnInput,
   turnOptions,
 } from "@/lib/agent-proxy";
@@ -67,7 +69,8 @@ export async function POST(request: Request) {
       const keepAliveTimer = setInterval(() => {
         enqueue(keepAlive());
       }, KEEP_ALIVE_INTERVAL_MS);
-      const messageId = crypto.randomUUID();
+      let messageId = "";
+      let currentItemId = "";
       let messageStarted = false;
       let assistantText = "";
       let previousResponseId =
@@ -78,9 +81,22 @@ export async function POST(request: Request) {
           : "";
 
       const emit = (event: BaseEvent) => enqueue(sse(event));
-      const emitText = (delta: string) => {
+      const endMessage = () => {
+        if (!messageId) return;
+        emit({ type: EventType.TEXT_MESSAGE_END, messageId });
+        messageId = "";
+      };
+      // Each assistant output item is a reply of its own, so it gets its own
+      // message id and therefore its own frame in the transcript.
+      const emitText = (delta: string, itemId: string = currentItemId) => {
         if (!delta) return;
-        if (!messageStarted) {
+        if (!messageId || itemId !== currentItemId) {
+          if (messageId) {
+            endMessage();
+            assistantText += OUTPUT_ITEM_SEPARATOR;
+          }
+          currentItemId = itemId;
+          messageId = crypto.randomUUID();
           emit({
             type: EventType.TEXT_MESSAGE_START,
             messageId,
@@ -158,10 +174,11 @@ export async function POST(request: Request) {
         const contentType = upstream.headers.get("content-type") || "";
         if (!contentType.includes("text/event-stream")) {
           const payload = await upstream.json();
-          const text = responseText(payload);
           const responseId =
             payload && typeof payload.id === "string" ? payload.id : "";
-          emitText(text);
+          responseTexts(payload).forEach((text, index) =>
+            emitText(text, `output-${index}`),
+          );
           if (responseId) previousResponseId = responseId;
         } else {
           if (!upstream.body) throw new Error("Hosted Agent returned no stream.");
@@ -201,7 +218,13 @@ export async function POST(request: Request) {
 
               if (eventType === "response.output_text.delta") {
                 const delta = typeof event.delta === "string" ? event.delta : "";
-                emitText(delta);
+                const itemId =
+                  typeof event.item_id === "string"
+                    ? event.item_id
+                    : typeof event.output_index === "number"
+                      ? `output-${event.output_index}`
+                      : currentItemId;
+                emitText(delta, itemId);
               }
               if (eventType === "response.completed") {
                 const completedText = responseText(response);
@@ -224,7 +247,7 @@ export async function POST(request: Request) {
         if (!messageStarted) {
           throw new Error("Hosted Agent completed without assistant output.");
         }
-        emit({ type: EventType.TEXT_MESSAGE_END, messageId });
+        endMessage();
         emit({
           type: EventType.STATE_SNAPSHOT,
           snapshot: {
@@ -241,6 +264,7 @@ export async function POST(request: Request) {
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Agent request failed";
+        endMessage();
         emitActivity({ kind: "error", id: crypto.randomUUID(), message });
         emit({
           type: EventType.RUN_ERROR,
