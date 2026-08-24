@@ -468,6 +468,53 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class CredentialSlotTests(unittest.TestCase):
+    """The slot map is the only thing deciding which variables a binding sets."""
+
+    def test_no_slot_targets_a_reserved_variable(self):
+        from codex_adapter.config import _RESERVED_VARIABLES
+        from codex_adapter.credentials import SLOT_VARIABLES
+
+        collisions = sorted(
+            set(SLOT_VARIABLES.values()) & set(_RESERVED_VARIABLES)
+        )
+        self.assertEqual(
+            collisions,
+            [],
+            "a slot pointing at a reserved name can never be bound, so the "
+            "binding would be silently discarded",
+        )
+
+    def test_every_slot_is_reachable_by_a_binding(self):
+        """Production showed bindings vanishing because the target was reserved."""
+        from codex_adapter.credentials import SLOT_VARIABLES
+
+        credentials = {
+            "credentials": [
+                {"profile": "alpha", "slot": slot, "value": f"value-for-{slot}"}
+                for slot in SLOT_VARIABLES
+            ]
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(directory)
+            store = FileConfigStore(Path(directory) / "config")
+            store.write("credentials.json", credentials)
+            with mock.patch.dict(
+                os.environ,
+                {"PATH": "/usr/bin", "DIGIBUDDY_ENABLE_PROFILE_CREDENTIALS": "true"},
+                clear=True,
+            ):
+                child = prepare_codex_environment(
+                    configured, store, AgentProfile(name="alpha")
+                )
+
+        missing = sorted(
+            slot for slot, name in SLOT_VARIABLES.items()
+            if child.get(name) != f"value-for-{slot}"
+        )
+        self.assertEqual(missing, [], "these bindings never reached the child")
+
+
 class ChildEnvironmentTests(unittest.TestCase):
     """What the Codex process inherits is a security decision, not a default.
 

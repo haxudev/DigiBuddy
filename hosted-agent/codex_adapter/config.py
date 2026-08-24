@@ -133,21 +133,39 @@ _INHERITED_VARIABLES = frozenset(
     }
 )
 
-#: Names the runtime sets itself; a credential binding must never reach them.
+#: Names a credential binding must never reach.
+#:
+#: Deliberately *not* the whole inherited set. A binding exists precisely to
+#: override a deployment-wide default like the Graph client id, so reserving
+#: everything inheritable silently discarded every binding that mattered --
+#: which is exactly what production showed. What must stay unreachable is the
+#: set the runtime decides: where code is loaded from, and which key talks to
+#: the model.
 _RESERVED_VARIABLES = frozenset(
     {
+        # Where code and configuration come from
+        "PATH",
+        "HOME",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONSTARTUP",
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        # Runtime-owned locations
         "CODEX_HOME",
+        "CODEX_WORKSPACE",
         "DIGIBUDDY_PAYLOAD_ROOT",
         "DIGIBUDDY_SKILLS_ROOT",
         "DIGIBUDDY_TOOLS_ROOT",
         "DIGIBUDDY_PROFILE",
         "DIGIBUDDY_CONFIG_URI",
         "DIGIBUDDY_CONFIG_DIR",
-        "PYTHONPATH",
+        # The inference credential, which is shared by design
         MODEL_API_KEY_ENV,
         "OPENAI_API_KEY",
     }
-    | _INHERITED_VARIABLES
 )
 
 
