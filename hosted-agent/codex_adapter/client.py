@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from asyncio.subprocess import Process
@@ -66,20 +67,36 @@ class CodexRuntime:
         self._loaded_threads: set[str] = set()
         self._pending_notifications: list[dict[str, Any]] = []
         self._active_fingerprint: str | None = None
+        self._published_catalogue: str | None = None
         self._thread_map = ResponseThreadMap(
             settings.codex_home / "digibuddy-response-threads.json"
         )
         self._publish_catalogue()
 
     def _publish_catalogue(self) -> None:
-        """Tell the admin console exactly what this image ships."""
+        """Tell the admin console exactly what this image ships.
+
+        Republished whenever the catalogue would differ, because a capability
+        deployed after start-up is otherwise invisible to the console until the
+        container happens to restart, and the console would keep offering a
+        capability the runtime has already rejected.
+        """
         try:
-            self._store.write(
-                CATALOGUE_DOCUMENT,
-                build_catalogue(self._base_settings, self._store).as_document(),
-            )
+            catalogue = build_catalogue(self._base_settings, self._store).as_document()
+        except Exception:  # noqa: BLE001 - publishing must never block a turn
+            logger.warning("Could not build the capability catalogue", exc_info=True)
+            return
+        fingerprint = hashlib.sha256(
+            json.dumps(catalogue, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        if fingerprint == self._published_catalogue:
+            return
+        try:
+            self._store.write(CATALOGUE_DOCUMENT, catalogue)
         except Exception:  # noqa: BLE001 - publishing must never block startup
             logger.warning("Could not publish the capability catalogue", exc_info=True)
+            return
+        self._published_catalogue = fingerprint
 
     def available_profiles(self) -> dict[str, AgentProfile]:
         return load_profiles(self._base_settings, self._store)
@@ -163,6 +180,9 @@ class CodexRuntime:
         fingerprint = runtime_fingerprint(
             settings, self._store, profile, reasoning_effort
         )
+        # The catalogue is a function of the same inputs, so this is where a
+        # capability deployed since start-up becomes visible to the console.
+        self._publish_catalogue()
         running = self._process is not None and self._process.returncode is None
         if running and fingerprint == self._active_fingerprint:
             return

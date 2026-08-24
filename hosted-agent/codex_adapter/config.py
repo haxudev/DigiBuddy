@@ -34,12 +34,32 @@ from .profiles import (
 )
 
 MODEL_API_KEY_ENV = "DIGIBUDDY_MODEL_API_KEY"
+
+#: Both new planes ship off. The Web UI and the hosted agent are separate
+#: images on separate rollouts, so a feature that spans them must be able to
+#: exist in one and stay dormant in the other.
+PROFILE_CREDENTIALS_ENV = "DIGIBUDDY_ENABLE_PROFILE_CREDENTIALS"
+CAPABILITY_PACKS_ENV = "DIGIBUDDY_ENABLE_CAPABILITY_PACKS"
+
 logger = logging.getLogger(__name__)
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
 _FALSE_VALUES = {"0", "false", "no", "off"}
 _NETWORK_CAPABLE_SANDBOX = "workspace-write"
 _FINGERPRINT_KEY = secrets.token_bytes(32)
+
+
+def _feature_flag(name: str) -> bool:
+    """A feature switch is off unless it is explicitly and legibly on."""
+    return (os.environ.get(name) or "").strip().lower() in _TRUE_VALUES
+
+
+def profile_credentials_enabled() -> bool:
+    return _feature_flag(PROFILE_CREDENTIALS_ENV)
+
+
+def capability_packs_enabled() -> bool:
+    return _feature_flag(CAPABILITY_PACKS_ENV)
 
 
 @dataclass(frozen=True)
@@ -592,11 +612,14 @@ def prepare_codex_environment(
 
 
 __all__ = [
+    "CAPABILITY_PACKS_ENV",
     "MODEL_API_KEY_ENV",
+    "PROFILE_CREDENTIALS_ENV",
     "NullConfigStore",
     "RuntimeSettings",
     "apply_model_overrides",
     "build_catalogue",
+    "capability_packs_enabled",
     "effective_model",
     "effective_reasoning_effort",
     "install_global_skills",
@@ -605,6 +628,7 @@ __all__ = [
     "load_profiles",
     "load_settings",
     "prepare_codex_environment",
+    "profile_credentials_enabled",
     "render_codex_config",
     "runtime_fingerprint",
     "validate_settings",

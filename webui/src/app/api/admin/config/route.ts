@@ -4,6 +4,7 @@ import {
   type AdminPrincipal,
 } from "@/lib/admin-auth";
 import {
+  ConfigConflictError,
   ConfigValidationError,
   DOCUMENTS,
   MODELS_DOCUMENT,
@@ -23,6 +24,11 @@ export const dynamic = "force-dynamic";
 function failure(error: unknown): Response {
   if (error instanceof AdminAuthError) {
     return Response.json({ error: error.message }, { status: 403 });
+  }
+  if (error instanceof ConfigConflictError) {
+    // Someone else saved between this reader's load and its save. Reporting it
+    // is the whole point: overwriting would discard their change silently.
+    return Response.json({ error: error.message }, { status: 409 });
   }
   if (error instanceof ConfigValidationError) {
     return Response.json({ error: error.message }, { status: 400 });
@@ -48,13 +54,20 @@ export async function GET(request: Request) {
     const store = buildConfigStore();
     const entries = await Promise.all(
       DOCUMENTS.map(async (name) => {
-        const document = await store.read(name);
-        return [name, redactDocument(name, document)] as const;
+        const { document, revision } = await store.readVersioned(name);
+        return [name, { value: redactDocument(name, document), revision }] as const;
       }),
     );
-    return Response.json(Object.fromEntries(entries), {
-      headers: { "Cache-Control": "no-store" },
-    });
+    const documents = Object.fromEntries(
+      entries.map(([name, entry]) => [name, entry.value]),
+    );
+    const revisions = Object.fromEntries(
+      entries.map(([name, entry]) => [name, entry.revision]),
+    );
+    return Response.json(
+      { ...documents, revisions },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     return failure(error);
   }
@@ -75,6 +88,8 @@ export async function PUT(request: Request) {
         ? (payload as Record<string, unknown>)
         : {};
     const name = assertWritableDocument(String(body.document ?? ""));
+    const expectedRevision =
+      typeof body.revision === "string" ? body.revision : undefined;
 
     const store = buildConfigStore();
     let document: JsonDocument;
@@ -87,9 +102,13 @@ export async function PUT(request: Request) {
       document = normaliseDocument(name, body.value);
     }
 
-    await store.write(name, document);
+    const revision = await store.write(name, document, expectedRevision);
     audit(principal, name);
-    return Response.json({ document: name, value: redactDocument(name, document) });
+    return Response.json({
+      document: name,
+      value: redactDocument(name, document),
+      revision,
+    });
   } catch (error) {
     return failure(error);
   }

@@ -5,13 +5,17 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  ConfigConflictError,
   ConfigValidationError,
+  SCHEMA_VERSION,
   artifactStoragePath,
+  assertReadableSchema,
   assertWritableDocument,
   buildConfigStore,
   normaliseMcp,
   normaliseModels,
   normaliseProfiles,
+  normaliseSkills,
   preserveSecret,
   redactDocument,
 } from "./admin-config.ts";
@@ -159,4 +163,68 @@ test("an unconfigured store is refused rather than silently empty", () => {
     () => buildConfigStore({ DIGIBUDDY_CONFIG_URI: "http://example.com/c" }),
     ConfigValidationError,
   );
+});
+
+test("every normalised document declares the schema it was written to", () => {
+  assert.equal(normaliseModels({ model: "a" }).schema_version, SCHEMA_VERSION);
+  assert.equal(normaliseMcp({ servers: {} }).schema_version, SCHEMA_VERSION);
+  assert.equal(
+    normaliseProfiles({ profiles: [{ name: "a" }] }).schema_version,
+    SCHEMA_VERSION,
+  );
+  assert.equal(normaliseSkills({ skills: [] }).schema_version, SCHEMA_VERSION);
+});
+
+test("a document written to a newer schema is refused rather than reinterpreted", () => {
+  assert.throws(
+    () => assertReadableSchema({ schema_version: SCHEMA_VERSION + 1 }),
+    ConfigValidationError,
+  );
+  assert.throws(
+    () => assertReadableSchema({ schema_version: "one" }),
+    ConfigValidationError,
+  );
+  // The legacy unversioned shape still reads, so an existing deployment keeps
+  // working across the upgrade.
+  assert.doesNotThrow(() => assertReadableSchema({ profiles: [] }));
+});
+
+test("a conditional write refuses to overwrite a document that moved", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "digibuddy-cas-"));
+  try {
+    const store = buildConfigStore({ DIGIBUDDY_CONFIG_DIR: directory });
+    const first = await store.write("profiles.json", { profiles: [{ name: "a" }] });
+
+    // A second administrator saved between this reader's load and its save.
+    await store.write("profiles.json", { profiles: [{ name: "b" }] }, first);
+
+    await assert.rejects(
+      () => store.write("profiles.json", { profiles: [{ name: "c" }] }, first),
+      ConfigConflictError,
+    );
+    const current = await store.readVersioned("profiles.json");
+    assert.deepEqual(
+      (current.document as { profiles: { name: string }[] }).profiles,
+      [{ name: "b" }],
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("a first write only succeeds when no document is expected", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "digibuddy-cas-new-"));
+  try {
+    const store = buildConfigStore({ DIGIBUDDY_CONFIG_DIR: directory });
+    const empty = await store.readVersioned("profiles.json");
+    assert.equal(empty.document, null);
+
+    await store.write("profiles.json", { profiles: [] }, empty.revision);
+    await assert.rejects(
+      () => store.write("profiles.json", { profiles: [] }, empty.revision),
+      ConfigConflictError,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

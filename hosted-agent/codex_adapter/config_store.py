@@ -36,11 +36,18 @@ CONFIG_URI_ENV = "DIGIBUDDY_CONFIG_URI"
 CONFIG_DIR_ENV = "DIGIBUDDY_CONFIG_DIR"
 CONFIG_TTL_ENV = "DIGIBUDDY_CONFIG_TTL_SECONDS"
 
+#: The document shapes this build understands. A document written to a newer
+#: schema is refused rather than reinterpreted, because the fields this build
+#: would ignore are exactly the ones a newer console added to restrict something.
+SCHEMA_VERSION = 1
+SCHEMA_FIELD = "schema_version"
+
 MODELS_DOCUMENT = "models.json"
 MCP_DOCUMENT = "mcp.json"
 PROFILES_DOCUMENT = "profiles.json"
 CATALOGUE_DOCUMENT = "catalogue.json"
 SKILLS_DOCUMENT = "skills.json"
+CREDENTIALS_DOCUMENT = "credentials.json"
 
 DOCUMENTS = (
     MODELS_DOCUMENT,
@@ -48,7 +55,22 @@ DOCUMENTS = (
     PROFILES_DOCUMENT,
     CATALOGUE_DOCUMENT,
     SKILLS_DOCUMENT,
+    CREDENTIALS_DOCUMENT,
 )
+
+
+def readable_schema(document: Any) -> bool:
+    """Whether this build may interpret ``document``.
+
+    An absent version is the legacy unversioned shape and is still readable, so
+    an existing deployment keeps working across the upgrade.
+    """
+    if not isinstance(document, dict):
+        return False
+    version = document.get(SCHEMA_FIELD)
+    if version is None:
+        return True
+    return isinstance(version, int) and not isinstance(version, bool) and version <= SCHEMA_VERSION
 
 #: Administrator-uploaded skill bundles live beside the documents in the same
 #: container, under a reserved prefix and addressed by their content hash.
@@ -63,6 +85,8 @@ class ConfigStore(Protocol):
 
     def read(self, name: str) -> dict[str, Any] | None: ...
 
+    def read_raw(self, name: str) -> dict[str, Any] | None: ...
+
     def write(self, name: str, document: dict[str, Any]) -> None: ...
 
     def read_bundle(self, path: str) -> bytes | None: ...
@@ -76,6 +100,9 @@ class NullConfigStore:
     """Used when no overlay is configured; always falls back to the payload."""
 
     def read(self, name: str) -> dict[str, Any] | None:
+        return None
+
+    def read_raw(self, name: str) -> dict[str, Any] | None:
         return None
 
     def write(self, name: str, document: dict[str, Any]) -> None:
@@ -97,6 +124,19 @@ class FileConfigStore:
         self._root = root
 
     def read(self, name: str) -> dict[str, Any] | None:
+        document = self.read_raw(name)
+        if document is None:
+            return None
+        if not readable_schema(document):
+            logger.warning(
+                "config overlay %s declares an unsupported %s; ignoring",
+                name,
+                SCHEMA_FIELD,
+            )
+            return None
+        return document
+
+    def read_raw(self, name: str) -> dict[str, Any] | None:
         path = self._root / _safe_document_name(name)
         if not path.is_file():
             return None
@@ -161,6 +201,19 @@ class BlobConfigStore:
         )
 
     def read(self, name: str) -> dict[str, Any] | None:
+        document = self.read_raw(name)
+        if document is None:
+            return None
+        if not readable_schema(document):
+            logger.warning(
+                "config overlay blob %s declares an unsupported %s; ignoring",
+                name,
+                SCHEMA_FIELD,
+            )
+            return None
+        return document
+
+    def read_raw(self, name: str) -> dict[str, Any] | None:
         from azure.core.exceptions import AzureError
 
         try:
@@ -205,21 +258,51 @@ class BlobConfigStore:
 
 
 class CachingConfigStore:
-    """Time-bounded cache so every turn does not hit the network."""
+    """Time-bounded cache so every turn does not hit the network.
+
+    It also holds the last document this build could read. A document the
+    backend later replaces with an unsupported schema reads as absent, and
+    "absent" means "fall back to the packaged payload" -- which for a profiles
+    document would quietly drop every administrator restriction. Serving the
+    last good value instead keeps the restriction in force until an operator
+    fixes the document or upgrades the runtime.
+    """
 
     def __init__(self, inner: ConfigStore, ttl_seconds: float):
         self._inner = inner
         self._ttl = max(ttl_seconds, 0.0)
         self._cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
+        self._last_good: dict[str, dict[str, Any]] = {}
 
     def read(self, name: str) -> dict[str, Any] | None:
         now = time.monotonic()
         cached = self._cache.get(name)
         if cached and now - cached[0] < self._ttl:
             return cached[1]
-        document = self._inner.read(name)
+
+        raw = self._inner.read_raw(name)
+        if raw is None:
+            # Genuinely absent, so the packaged payload is the right answer and
+            # there is nothing to protect.
+            document = None
+            self._last_good.pop(name, None)
+        elif readable_schema(raw):
+            document = raw
+            self._last_good[name] = raw
+        else:
+            logger.warning(
+                "config overlay %s declares an unsupported %s; keeping the last "
+                "readable version",
+                name,
+                SCHEMA_FIELD,
+            )
+            document = self._last_good.get(name)
+
         self._cache[name] = (now, document)
         return document
+
+    def read_raw(self, name: str) -> dict[str, Any] | None:
+        return self._inner.read_raw(name)
 
     def write(self, name: str, document: dict[str, Any]) -> None:
         self._inner.write(name, document)

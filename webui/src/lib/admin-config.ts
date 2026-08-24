@@ -18,6 +18,7 @@ export const MCP_DOCUMENT = "mcp.json";
 export const PROFILES_DOCUMENT = "profiles.json";
 export const CATALOGUE_DOCUMENT = "catalogue.json";
 export const SKILLS_DOCUMENT = "skills.json";
+export const CREDENTIALS_DOCUMENT = "credentials.json";
 
 export const DOCUMENTS = [
   MODELS_DOCUMENT,
@@ -25,9 +26,26 @@ export const DOCUMENTS = [
   PROFILES_DOCUMENT,
   CATALOGUE_DOCUMENT,
   SKILLS_DOCUMENT,
+  CREDENTIALS_DOCUMENT,
 ] as const;
 
 export type DocumentName = (typeof DOCUMENTS)[number];
+
+/**
+ * The document shapes this build writes and understands.
+ *
+ * A document written by a newer console is refused rather than reinterpreted:
+ * the fields an older build would silently drop are exactly the ones a newer
+ * one added to restrict something.
+ */
+export const SCHEMA_VERSION = 1;
+export const SCHEMA_FIELD = "schema_version";
+
+/** Identifies the stored bytes, so a write can refuse to clobber a newer save. */
+export type DocumentRevision = string;
+
+/** No document is stored yet; only a create may use this as its expectation. */
+export const ABSENT_REVISION: DocumentRevision = "absent";
 
 /** Documents an administrator may write. The catalogue is published by the runtime. */
 export const WRITABLE_DOCUMENTS: DocumentName[] = [
@@ -35,6 +53,7 @@ export const WRITABLE_DOCUMENTS: DocumentName[] = [
   MCP_DOCUMENT,
   PROFILES_DOCUMENT,
   // skills.json is written atomically by /api/admin/skills.
+  // credentials.json is write-only through /api/admin/credentials.
 ];
 
 export const REASONING_EFFORTS = ["minimal", "low", "medium", "high"] as const;
@@ -50,6 +69,7 @@ export type ModelsDocument = {
   reasoning_effort: string;
   /** Present only when the administrator is rotating it; never read back out. */
   api_key?: string;
+  schema_version?: number;
 };
 
 export type McpServer = {
@@ -59,7 +79,7 @@ export type McpServer = {
   description: string;
 };
 
-export type McpDocument = { servers: Record<string, McpServer> };
+export type McpDocument = { servers: Record<string, McpServer>; schema_version?: number };
 
 export type ProfileDocument = {
   name: string;
@@ -74,7 +94,7 @@ export type ProfileDocument = {
   reasoning_effort: string;
 };
 
-export type ProfilesDocument = { profiles: ProfileDocument[] };
+export type ProfilesDocument = { profiles: ProfileDocument[]; schema_version?: number };
 
 export type DeployedSkill = {
   name: string;
@@ -91,7 +111,7 @@ export type DeployedSkill = {
   source: string;
 };
 
-export type SkillsDocument = { skills: DeployedSkill[] };
+export type SkillsDocument = { skills: DeployedSkill[]; schema_version?: number };
 
 export type Catalogue = {
   skills: string[];
@@ -100,6 +120,36 @@ export type Catalogue = {
 };
 
 export class ConfigValidationError extends Error {}
+
+/**
+ * Another writer changed the document between this caller's read and its write.
+ *
+ * The profiles document and the capability registry are both read-modify-write
+ * from two independent surfaces, so overwriting blindly would silently discard
+ * whichever administrator saved second.
+ */
+export class ConfigConflictError extends Error {}
+
+/** Refuse a document this build cannot read, rather than reinterpreting it. */
+export function assertReadableSchema(document: unknown): void {
+  const version = record(document)[SCHEMA_FIELD];
+  if (version === undefined || version === null) return; // legacy, still readable
+  if (typeof version !== "number" || !Number.isInteger(version)) {
+    throw new ConfigValidationError(
+      `${SCHEMA_FIELD} must be an integer, got ${JSON.stringify(version)}.`,
+    );
+  }
+  if (version > SCHEMA_VERSION) {
+    throw new ConfigValidationError(
+      `This build reads ${SCHEMA_FIELD} up to ${SCHEMA_VERSION}, but the stored document declares ${version}.`,
+    );
+  }
+}
+
+function versioned<T extends JsonDocument>(document: T): T {
+  return { [SCHEMA_FIELD]: SCHEMA_VERSION, ...document };
+}
+
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -164,7 +214,7 @@ export function normaliseModels(input: unknown): ModelsDocument {
   };
   const apiKey = text(raw.api_key);
   if (apiKey) document.api_key = apiKey;
-  return document;
+  return versioned(document);
 }
 
 export function normaliseMcp(input: unknown): McpDocument {
@@ -190,12 +240,12 @@ export function normaliseMcp(input: unknown): McpDocument {
       description: text(server.description),
     };
   }
-  return { servers: normalised };
+  return versioned({ servers: normalised });
 }
 
 export function normaliseProfiles(input: unknown): ProfilesDocument {
   const entries = record(input).profiles;
-  if (!Array.isArray(entries)) return { profiles: [] };
+  if (!Array.isArray(entries)) return versioned({ profiles: [] });
 
   const profiles: ProfileDocument[] = [];
   const seen = new Set<string>();
@@ -226,12 +276,12 @@ export function normaliseProfiles(input: unknown): ProfilesDocument {
       reasoning_effort: reasoningEffort(raw.reasoning_effort),
     });
   }
-  return { profiles };
+  return versioned({ profiles });
 }
 
 export function normaliseSkills(input: unknown): SkillsDocument {
   const entries = record(input).skills;
-  if (!Array.isArray(entries)) return { skills: [] };
+  if (!Array.isArray(entries)) return versioned({ skills: [] });
 
   const skills: DeployedSkill[] = [];
   const seen = new Set<string>();
@@ -267,7 +317,7 @@ export function normaliseSkills(input: unknown): SkillsDocument {
     });
   }
   skills.sort((left, right) => left.name.localeCompare(right.name));
-  return { skills };
+  return versioned({ skills });
 }
 
 export function normaliseDocument(
@@ -315,7 +365,23 @@ export function normaliseCatalogue(input: unknown): Catalogue {
 
 export interface ConfigStore {
   read(name: DocumentName): Promise<JsonDocument | null>;
-  write(name: DocumentName, document: JsonDocument): Promise<void>;
+  /** The document plus the revision a later conditional write must expect. */
+  readVersioned(
+    name: DocumentName,
+  ): Promise<{ document: JsonDocument | null; revision: DocumentRevision }>;
+  /**
+   * Write the document and return its new revision.
+   *
+   * Passing `expectedRevision` makes the write conditional: it throws
+   * `ConfigConflictError` when the stored document has moved since it was read.
+   * Omitting it is a deliberate last-writer-wins overwrite, which is only
+   * correct for a document with exactly one writer.
+   */
+  write(
+    name: DocumentName,
+    document: JsonDocument,
+    expectedRevision?: DocumentRevision,
+  ): Promise<DocumentRevision>;
   /** Skill bundles share the container with the documents, under `bundles/`. */
   writeBundle(path: string, payload: Buffer): Promise<void>;
   deleteBundle(path: string): Promise<void>;
@@ -323,7 +389,19 @@ export interface ConfigStore {
   readArtifact(id: string, filename: string): Promise<Buffer | null>;
 }
 
+
 const BUNDLE_PATH = /^bundles\/[a-z0-9]+(?:-[a-z0-9]+)*\/[0-9a-f]{64}\.zip$/;
+
+/**
+ * A file store has no ETag, so the stored bytes are their own revision. Two
+ * saves that produce identical bytes are genuinely interchangeable, so
+ * colliding on content is the correct behaviour rather than a weakness.
+ */
+async function fileRevision(body: string): Promise<DocumentRevision> {
+  const { createHash } = await import("node:crypto");
+  return `sha256:${createHash("sha256").update(body).digest("hex")}`;
+}
+
 
 /** Only content-addressed bundle paths may be written; nothing else. */
 function assertBundlePath(path: string): string {
@@ -351,30 +429,59 @@ class FileConfigStore implements ConfigStore {
   }
 
   async read(name: DocumentName): Promise<JsonDocument | null> {
-    const { readFile } = await import("node:fs/promises");
-    const { join } = await import("node:path");
-    try {
-      const raw = await readFile(join(this.directory, assertDocumentName(name)), "utf-8");
-      const parsed: unknown = JSON.parse(raw);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as JsonDocument)
-        : null;
-    } catch {
-      return null;
-    }
+    return (await this.readVersioned(name)).document;
   }
 
-  async write(name: DocumentName, document: JsonDocument): Promise<void> {
+  async readVersioned(
+    name: DocumentName,
+  ): Promise<{ document: JsonDocument | null; revision: DocumentRevision }> {
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    let raw: string;
+    try {
+      raw = await readFile(join(this.directory, assertDocumentName(name)), "utf-8");
+    } catch {
+      return { document: null, revision: ABSENT_REVISION };
+    }
+    const revision = await fileRevision(raw);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { document: null, revision };
+    }
+    const document =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as JsonDocument)
+        : null;
+    if (document) assertReadableSchema(document);
+    return { document, revision };
+  }
+
+  async write(
+    name: DocumentName,
+    document: JsonDocument,
+    expectedRevision?: DocumentRevision,
+  ): Promise<DocumentRevision> {
     const { mkdir, writeFile, rename } = await import("node:fs/promises");
     const { join } = await import("node:path");
     await mkdir(this.directory, { recursive: true });
     const target = join(this.directory, assertDocumentName(name));
+
+    if (expectedRevision !== undefined) {
+      const current = await this.readVersioned(name);
+      if (current.revision !== expectedRevision) {
+        throw new ConfigConflictError(
+          `${name} changed since it was read; reload and try again.`,
+        );
+      }
+    }
+
+    const body = JSON.stringify(document, null, 2);
     const temporary = `${target}.${process.pid}.tmp`;
-    await writeFile(temporary, JSON.stringify(document, null, 2), {
-      encoding: "utf-8",
-      mode: 0o600,
-    });
+    await writeFile(temporary, body, { encoding: "utf-8", mode: 0o600 });
     await rename(temporary, target);
+    return fileRevision(body);
   }
 
   async writeBundle(path: string, payload: Buffer): Promise<void> {
@@ -405,6 +512,17 @@ class FileConfigStore implements ConfigStore {
   }
 }
 
+async function streamToBuffer(
+  stream: NodeJS.ReadableStream | undefined,
+): Promise<Buffer> {
+  if (!stream) return Buffer.alloc(0);
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+  }
+  return Buffer.concat(chunks);
+}
+
 class BlobConfigStore implements ConfigStore {
   readonly containerUri: string;
 
@@ -419,29 +537,71 @@ class BlobConfigStore implements ConfigStore {
   }
 
   async read(name: DocumentName): Promise<JsonDocument | null> {
+    return (await this.readVersioned(name)).document;
+  }
+
+  async readVersioned(
+    name: DocumentName,
+  ): Promise<{ document: JsonDocument | null; revision: DocumentRevision }> {
     const blob = (await this.container()).getBlockBlobClient(
       assertDocumentName(name),
     );
+    let buffer: Buffer;
+    let revision: DocumentRevision = ABSENT_REVISION;
     try {
-      const buffer = await blob.downloadToBuffer();
-      const parsed: unknown = JSON.parse(buffer.toString("utf-8"));
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      const response = await blob.download();
+      revision = response.etag ?? ABSENT_REVISION;
+      buffer = await streamToBuffer(response.readableStreamBody);
+    } catch {
+      return { document: null, revision: ABSENT_REVISION };
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(buffer.toString("utf-8"));
+    } catch {
+      return { document: null, revision };
+    }
+    const document =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
         ? (parsed as JsonDocument)
         : null;
-    } catch {
-      return null;
-    }
+    if (document) assertReadableSchema(document);
+    return { document, revision };
   }
 
-  async write(name: DocumentName, document: JsonDocument): Promise<void> {
+  async write(
+    name: DocumentName,
+    document: JsonDocument,
+    expectedRevision?: DocumentRevision,
+  ): Promise<DocumentRevision> {
     const container = await this.container();
     await container.createIfNotExists();
     const body = JSON.stringify(document, null, 2);
-    await container
-      .getBlockBlobClient(assertDocumentName(name))
-      .upload(body, Buffer.byteLength(body), {
-        blobHTTPHeaders: { blobContentType: "application/json" },
-      });
+    // The ETag makes this a real compare-and-swap at the storage layer, so two
+    // administrators saving at once cannot silently lose one of the saves.
+    const conditions =
+      expectedRevision === undefined
+        ? undefined
+        : expectedRevision === ABSENT_REVISION
+          ? { ifNoneMatch: "*" }
+          : { ifMatch: expectedRevision };
+    try {
+      const response = await container
+        .getBlockBlobClient(assertDocumentName(name))
+        .upload(body, Buffer.byteLength(body), {
+          blobHTTPHeaders: { blobContentType: "application/json" },
+          conditions,
+        });
+      return response.etag ?? ABSENT_REVISION;
+    } catch (error) {
+      const status = (error as { statusCode?: number }).statusCode;
+      if (status === 412 || status === 409) {
+        throw new ConfigConflictError(
+          `${name} changed since it was read; reload and try again.`,
+        );
+      }
+      throw error;
+    }
   }
 
   async writeBundle(path: string, payload: Buffer): Promise<void> {

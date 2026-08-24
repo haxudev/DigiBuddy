@@ -10,6 +10,7 @@ import {
   deployBundle,
   failure,
   readRegistry,
+  readRegistryVersioned,
   writeRegistry,
 } from "@/lib/skill-import";
 
@@ -66,7 +67,7 @@ export async function PATCH(request: Request) {
     const name = String(body.name ?? "").trim();
 
     const store = buildConfigStore();
-    const current = await readRegistry(store);
+    const { skills: current, revision } = await readRegistryVersioned(store);
     const target = current.find((skill) => skill.name === name);
     if (!target) throw new ConfigValidationError(`No such deployed skill: ${name}`);
 
@@ -78,10 +79,11 @@ export async function PATCH(request: Request) {
           ? body.description.trim()
           : target.description,
     };
-    const skills = await writeRegistry(store, [
-      ...current.filter((skill) => skill.name !== name),
-      patched,
-    ]);
+    const skills = await writeRegistry(
+      store,
+      [...current.filter((skill) => skill.name !== name), patched],
+      revision,
+    );
     audit(principal, patched.enabled ? "enabled" : "disabled", name);
     return Response.json({ skill: patched, skills });
   } catch (error) {
@@ -96,15 +98,18 @@ export async function DELETE(request: Request) {
     const name = new URL(request.url).searchParams.get("name")?.trim() ?? "";
 
     const store = buildConfigStore();
-    const current = await readRegistry(store);
+    const { skills: current, revision } = await readRegistryVersioned(store);
     const target = current.find((skill) => skill.name === name);
     if (!target) throw new ConfigValidationError(`No such deployed skill: ${name}`);
 
+    // The registry entry goes; the content-addressed bundle stays. It is the
+    // only copy of bytes an administrator already approved, and a withdrawal
+    // that destroys them cannot be undone.
     const skills = await writeRegistry(
       store,
       current.filter((skill) => skill.name !== name),
+      revision,
     );
-    await store.deleteBundle(target.bundle).catch(() => undefined);
     audit(principal, "withdrawn", name);
     return Response.json({ skills });
   } catch (error) {

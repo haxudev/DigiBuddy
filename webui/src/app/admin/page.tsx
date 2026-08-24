@@ -97,6 +97,8 @@ type ConfigPayload = {
   "profiles.json"?: { profiles?: Profile[] };
   "catalogue.json"?: Partial<Catalogue>;
   "skills.json"?: { skills?: DeployedSkill[] };
+  /** What each document looked like when it was loaded, so a save can be conditional. */
+  revisions?: Record<string, string>;
 };
 
 async function fetchConfig(): Promise<ConfigPayload> {
@@ -169,6 +171,7 @@ export default function Admin() {
   const [skills, setSkills] = useState<DeployedSkill[]>([]);
   const [allowedHosts, setAllowedHosts] = useState<string[]>([]);
   const [source, setSource] = useState("");
+  const [revisions, setRevisions] = useState<Record<string, string>>({});
   const [pending, setPending] = useState<Pending | null>(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
@@ -186,6 +189,7 @@ export default function Admin() {
         );
         setProfiles(payload["profiles.json"]?.profiles ?? []);
         setSkills(payload["skills.json"]?.skills ?? []);
+        setRevisions(payload.revisions ?? {});
         setCatalogue({
           skills: [],
           tools: [],
@@ -220,10 +224,18 @@ export default function Admin() {
       const response = await fetch("/api/admin/config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ document, value }),
+        // The revision makes the save conditional: if another administrator
+        // saved in the meantime, this reports it instead of discarding theirs.
+        body: JSON.stringify({ document, value, revision: revisions[document] }),
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Unable to save.");
+      if (!response.ok) {
+        throw new Error(
+          response.status === 409
+            ? "Someone else changed this while you were editing. Reload to see their version."
+            : payload.error || "Unable to save.",
+        );
+      }
       setStatus(`Saved ${document}. It applies from the next turn.`);
       await load();
     } catch (saveError) {

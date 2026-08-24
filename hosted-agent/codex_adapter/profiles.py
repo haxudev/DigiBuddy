@@ -22,6 +22,26 @@ _PROFILE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 REASONING_EFFORTS = frozenset({"minimal", "low", "medium", "high"})
 
+#: Sentinel for "the key was not present at all", which is the only thing that
+#: may widen a profile to the whole catalogue.
+_ABSENT = object()
+
+
+class UnknownProfileError(LookupError):
+    """A caller named a profile that this configuration does not define.
+
+    Resolving it to the default would hand a conversation the capabilities of a
+    different agent, so an explicit name that cannot be found is an error.
+    """
+
+    def __init__(self, name: str):
+        super().__init__(f"Unknown agent profile: {name}")
+        self.name = name
+
+
+class MalformedProfileError(ValueError):
+    """A profile entry could not be read the way it was written."""
+
 
 @dataclass(frozen=True)
 class AgentProfile:
@@ -55,9 +75,18 @@ DEFAULT_PROFILE = AgentProfile(
 
 
 def _names(value: Any) -> tuple[str, ...] | None:
-    """``None`` (absent) keeps everything; a list restricts to those entries."""
-    if not isinstance(value, list):
+    """``None`` (absent) keeps everything; a list restricts to those entries.
+
+    Anything else is malformed. It deliberately does *not* degrade to "keep
+    everything": a selection that cannot be read is far more likely to be a bad
+    edit than an intent to grant the full catalogue.
+    """
+    if value is _ABSENT or value is None:
         return None
+    if not isinstance(value, list):
+        raise MalformedProfileError(
+            f"a capability selection must be a list, got {type(value).__name__}"
+        )
     return tuple(
         stripped
         for item in value
@@ -87,14 +116,22 @@ def parse_profiles(document: Any) -> dict[str, AgentProfile]:
         if not _PROFILE_NAME.fullmatch(name):
             continue
         effort = _text(entry.get("reasoning_effort")).lower()
+        try:
+            skills = _names(entry.get("skills", _ABSENT))
+            tools = _names(entry.get("tools", _ABSENT))
+            mcp_servers = _names(entry.get("mcp_servers", _ABSENT))
+        except MalformedProfileError:
+            # Dropping the profile makes it unresolvable, which fails closed.
+            # Keeping it with an unreadable selection would fail open.
+            continue
         profiles[name] = AgentProfile(
             name=name,
             display_name=_text(entry.get("display_name")) or name,
             description=_text(entry.get("description")),
             persona=_text(entry.get("persona")),
-            skills=_names(entry.get("skills")),
-            tools=_names(entry.get("tools")),
-            mcp_servers=_names(entry.get("mcp_servers")),
+            skills=skills,
+            tools=tools,
+            mcp_servers=mcp_servers,
             model_name=_text(entry.get("model")),
             reasoning_effort=effort if effort in REASONING_EFFORTS else "",
         )
@@ -104,10 +141,17 @@ def parse_profiles(document: Any) -> dict[str, AgentProfile]:
 def resolve_profile(
     profiles: dict[str, AgentProfile], requested: str | None
 ) -> AgentProfile:
-    """Pick the requested profile, else the configured default, else everything."""
+    """Pick the requested profile, or the default when none was requested.
+
+    An explicitly named profile that is not configured raises rather than
+    falling back: a renamed or deleted restricted agent must not silently
+    resume as the unrestricted default.
+    """
     name = (requested or "").strip()
-    if name and name in profiles:
-        return profiles[name]
+    if name:
+        if name in profiles:
+            return profiles[name]
+        raise UnknownProfileError(name)
     if DEFAULT_PROFILE_NAME in profiles:
         return profiles[DEFAULT_PROFILE_NAME]
     return DEFAULT_PROFILE

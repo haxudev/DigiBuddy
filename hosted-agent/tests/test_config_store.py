@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from codex_adapter.config_store import (
+    SCHEMA_VERSION,
     CachingConfigStore,
     FileConfigStore,
     NullConfigStore,
@@ -81,6 +82,58 @@ class CachingConfigStoreTests(unittest.TestCase):
             store.write("models.json", {"model": "b"})
 
             self.assertEqual(store.read("models.json"), {"model": "b"})
+
+    def test_an_unreadable_future_schema_keeps_the_last_good_document(self):
+        """A newer console must not be able to silently widen an older runtime.
+
+        Reinterpreting a document written to a schema this build does not know
+        is how a capability restriction quietly disappears, so the runtime keeps
+        what it last understood instead.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            inner = FileConfigStore(Path(directory))
+            inner.write(
+                "profiles.json",
+                {"schema_version": SCHEMA_VERSION, "profiles": [{"name": "good"}]},
+            )
+            store = CachingConfigStore(inner, ttl_seconds=0)
+            self.assertEqual(store.read("profiles.json")["profiles"], [{"name": "good"}])
+
+            inner.write(
+                "profiles.json",
+                {"schema_version": SCHEMA_VERSION + 1, "profiles": [{"name": "future"}]},
+            )
+
+            self.assertEqual(store.read("profiles.json")["profiles"], [{"name": "good"}])
+
+
+class SchemaVersionTests(unittest.TestCase):
+    def test_a_legacy_unversioned_document_is_still_readable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "profiles.json").write_text(
+                json.dumps({"profiles": [{"name": "legacy"}]}), encoding="utf-8"
+            )
+
+            document = FileConfigStore(Path(directory)).read("profiles.json")
+
+            self.assertEqual(document["profiles"], [{"name": "legacy"}])
+
+    def test_a_future_schema_reads_as_absent_without_a_last_good_value(self):
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "profiles.json").write_text(
+                json.dumps({"schema_version": SCHEMA_VERSION + 1, "profiles": []}),
+                encoding="utf-8",
+            )
+
+            self.assertIsNone(FileConfigStore(Path(directory)).read("profiles.json"))
+
+    def test_a_non_integer_schema_version_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "profiles.json").write_text(
+                json.dumps({"schema_version": "one", "profiles": []}), encoding="utf-8"
+            )
+
+            self.assertIsNone(FileConfigStore(Path(directory)).read("profiles.json"))
 
 
 class BuildConfigStoreTests(unittest.TestCase):

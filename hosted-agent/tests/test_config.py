@@ -1,19 +1,23 @@
 import json
+import os
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from codex_adapter.config import (
     PACKAGED_SKILL_MANIFEST,
     RuntimeSettings,
     apply_model_overrides,
     build_catalogue,
+    capability_packs_enabled,
     install_global_skills,
     load_instructions,
     load_mcp_servers,
     load_profiles,
     prepare_codex_environment,
+    profile_credentials_enabled,
     render_codex_config,
     runtime_fingerprint,
     validate_settings,
@@ -426,6 +430,38 @@ class ProfileSourceTests(unittest.TestCase):
             store.write("profiles.json", {"profiles": [{"name": "admin"}]})
 
             self.assertEqual(list(load_profiles(configured, store)), ["admin"])
+
+
+class KillSwitchTests(unittest.TestCase):
+    """Both new planes ship off, so the console and the runtime can roll apart."""
+
+    def test_both_features_default_to_off(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(profile_credentials_enabled())
+            self.assertFalse(capability_packs_enabled())
+
+    def test_each_switch_is_read_independently(self):
+        with mock.patch.dict(
+            os.environ,
+            {"DIGIBUDDY_ENABLE_PROFILE_CREDENTIALS": "true"},
+            clear=True,
+        ):
+            self.assertTrue(profile_credentials_enabled())
+            self.assertFalse(capability_packs_enabled())
+
+        with mock.patch.dict(
+            os.environ, {"DIGIBUDDY_ENABLE_CAPABILITY_PACKS": "1"}, clear=True
+        ):
+            self.assertFalse(profile_credentials_enabled())
+            self.assertTrue(capability_packs_enabled())
+
+    def test_an_unparsable_switch_stays_off(self):
+        with mock.patch.dict(
+            os.environ,
+            {"DIGIBUDDY_ENABLE_CAPABILITY_PACKS": "perhaps"},
+            clear=True,
+        ):
+            self.assertFalse(capability_packs_enabled())
 
 
 if __name__ == "__main__":

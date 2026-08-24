@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ConfigValidationError } from "./admin-config.ts";
+import { ConfigConflictError, ConfigValidationError } from "./admin-config.ts";
 import { SkillBundleError, explodeBundle } from "./skill-bundle.ts";
 import { readDirectory, readEntry } from "./zip.ts";
 import { deployBundle, fetchArchive, previewBundle } from "./skill-import.ts";
@@ -172,14 +172,29 @@ test("a manifest path that escapes the archive is refused", () => {
 function store() {
   const documents = new Map<string, unknown>();
   const bundles = new Map<string, Buffer>();
+  const revisions = new Map<string, string>();
+  let counter = 0;
   return {
     documents,
     bundles,
     async read(name: string) {
       return (documents.get(name) ?? null) as never;
     },
-    async write(name: string, document: unknown) {
+    async readVersioned(name: string) {
+      return {
+        document: (documents.get(name) ?? null) as never,
+        revision: revisions.get(name) ?? "absent",
+      };
+    },
+    async write(name: string, document: unknown, expectedRevision?: string) {
+      const current = revisions.get(name) ?? "absent";
+      if (expectedRevision !== undefined && expectedRevision !== current) {
+        throw new ConfigConflictError(`${name} changed since it was read.`);
+      }
       documents.set(name, document);
+      const next = `rev-${++counter}`;
+      revisions.set(name, next);
+      return next;
     },
     async writeBundle(path: string, payload: Buffer) {
       bundles.set(path, payload);
@@ -211,9 +226,14 @@ test("deploying an archive registers every skill it yields", async () => {
   }
 });
 
-test("redeploying replaces the superseded bundle and bumps the version", async () => {
+test("redeploying bumps the version and keeps the superseded bytes", async () => {
   const target = store();
-  await deployBundle(target as never, zip(MATURITY), "a.zip", { by: "admin" });
+  const first = await deployBundle(target as never, zip(MATURITY), "a.zip", {
+    by: "admin",
+  });
+  const previousReport = first.skills.find(
+    (skill) => skill.name === "agent-maturity-report",
+  )!;
   const changed = {
     ...MATURITY,
     "agent-maturity-main/skills/agent-maturity-report/SKILL.md":
@@ -225,8 +245,31 @@ test("redeploying replaces the superseded bundle and bumps the version", async (
 
   const report = result.skills.find((skill) => skill.name === "agent-maturity-report")!;
   assert.equal(report.version, "2");
-  assert.equal(target.bundles.size, 2);
   assert.ok(target.bundles.has(report.bundle));
+  // The previous bytes survive, because they are the only thing a rollback
+  // could restore.
+  assert.notEqual(report.bundle, previousReport.bundle);
+  assert.ok(target.bundles.has(previousReport.bundle));
+});
+
+test("a registry that moved since it was read is reported, not overwritten", async () => {
+  const target = store();
+  await deployBundle(target as never, zip(MATURITY), "a.zip", { by: "admin" });
+
+  // Simulate a second administrator saving between this caller's read and write.
+  const racing = {
+    ...target,
+    async readVersioned(name: string) {
+      const current = await target.readVersioned(name);
+      await target.write(name, current.document, current.revision);
+      return current;
+    },
+  };
+
+  await assert.rejects(
+    () => deployBundle(racing as never, zip(MATURITY), "a.zip", { by: "admin" }),
+    ConfigConflictError,
+  );
 });
 
 test("a preview reports the skills without writing anything", () => {

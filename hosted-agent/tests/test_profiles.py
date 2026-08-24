@@ -2,6 +2,7 @@ import unittest
 
 from codex_adapter.profiles import (
     DEFAULT_PROFILE,
+    UnknownProfileError,
     parse_profiles,
     profile_fingerprint,
     resolve_profile,
@@ -65,19 +66,59 @@ class ParseProfilesTests(unittest.TestCase):
 
         self.assertEqual(profiles["a"].reasoning_effort, "")
 
+    def test_a_malformed_selection_rejects_the_profile_instead_of_widening_it(self):
+        """A non-list selection must never be read as "every capability".
+
+        The old parser turned anything that was not a list into ``None``, which
+        the profile reads as unrestricted, so one bad edit silently promoted a
+        restricted agent to the full catalogue.
+        """
+        profiles = parse_profiles(
+            {
+                "profiles": [
+                    {"name": "broken-skills", "skills": "pptx"},
+                    {"name": "broken-tools", "tools": 7},
+                    {"name": "broken-mcp", "mcp_servers": {"a": 1}},
+                    {"name": "good", "skills": ["pptx"]},
+                ]
+            }
+        )
+
+        self.assertEqual(list(profiles), ["good"])
+
+    def test_an_explicit_null_selection_still_means_every_capability(self):
+        profiles = parse_profiles({"profiles": [{"name": "a", "skills": None}]})
+
+        self.assertIsNone(profiles["a"].skills)
+        self.assertTrue(profiles["a"].allows_skill("anything"))
+
 
 class ResolveProfileTests(unittest.TestCase):
-    def test_unknown_request_falls_back_to_the_default_profile(self):
+    def test_no_request_falls_back_to_the_configured_default(self):
         profiles = parse_profiles(
             {"profiles": [{"name": "digibuddy"}, {"name": "marketing"}]}
         )
 
-        self.assertEqual(resolve_profile(profiles, "missing").name, "digibuddy")
         self.assertEqual(resolve_profile(profiles, None).name, "digibuddy")
+        self.assertEqual(resolve_profile(profiles, "  ").name, "digibuddy")
         self.assertEqual(resolve_profile(profiles, "marketing").name, "marketing")
 
-    def test_empty_catalogue_falls_back_to_the_unrestricted_profile(self):
-        self.assertIs(resolve_profile({}, "marketing"), DEFAULT_PROFILE)
+    def test_an_unknown_named_profile_fails_closed(self):
+        """Falling back would hand a deleted restricted agent the full catalogue."""
+        profiles = parse_profiles(
+            {"profiles": [{"name": "digibuddy"}, {"name": "marketing"}]}
+        )
+
+        with self.assertRaises(UnknownProfileError) as raised:
+            resolve_profile(profiles, "missing")
+        self.assertIn("missing", str(raised.exception))
+
+    def test_an_unknown_profile_fails_closed_even_with_no_catalogue(self):
+        with self.assertRaises(UnknownProfileError):
+            resolve_profile({}, "marketing")
+
+    def test_no_request_and_no_catalogue_uses_the_unrestricted_default(self):
+        self.assertIs(resolve_profile({}, None), DEFAULT_PROFILE)
 
 
 class FingerprintTests(unittest.TestCase):

@@ -13,6 +13,7 @@ import { isIP } from "node:net";
 
 import { AdminAuthError, type AdminPrincipal } from "./admin-auth.ts";
 import {
+  ConfigConflictError,
   ConfigValidationError,
   SKILLS_DOCUMENT,
   normaliseSkills,
@@ -30,6 +31,9 @@ import {
 export function failure(error: unknown): Response {
   if (error instanceof AdminAuthError) {
     return Response.json({ error: error.message }, { status: 403 });
+  }
+  if (error instanceof ConfigConflictError) {
+    return Response.json({ error: error.message }, { status: 409 });
   }
   if (error instanceof SkillBundleError || error instanceof ConfigValidationError) {
     return Response.json({ error: error.message }, { status: 400 });
@@ -71,10 +75,19 @@ export async function bundleFromForm(
 export async function writeRegistry(
   store: ConfigStore,
   skills: DeployedSkill[],
+  expectedRevision?: string,
 ): Promise<DeployedSkill[]> {
   const document = normaliseSkills({ skills });
-  await store.write(SKILLS_DOCUMENT, document);
+  await store.write(SKILLS_DOCUMENT, document, expectedRevision);
   return document.skills;
+}
+
+/** Read the registry together with the revision a later write must expect. */
+export async function readRegistryVersioned(
+  store: ConfigStore,
+): Promise<{ skills: DeployedSkill[]; revision: string }> {
+  const { document, revision } = await store.readVersioned(SKILLS_DOCUMENT);
+  return { skills: normaliseSkills(document).skills, revision };
 }
 
 /**
@@ -277,12 +290,14 @@ export async function deployBundle(
   options: DeployOptions,
 ): Promise<DeployResult> {
   const exploded = explodeBundle(payload, fileName);
-  const current = await readRegistry(store);
+  const { document: currentDocument, revision } = await store.readVersioned(
+    SKILLS_DOCUMENT,
+  );
+  const current = normaliseSkills(currentDocument).skills;
   const single = exploded.skills.length === 1;
 
   const registry = new Map(current.map((skill) => [skill.name, skill]));
   const deployed: DeployedSkill[] = [];
-  const superseded: string[] = [];
 
   for (const skill of exploded.skills) {
     const previous = registry.get(skill.name);
@@ -303,16 +318,18 @@ export async function deployBundle(
       source: options.source ?? "",
     };
     await store.writeBundle(entry.bundle, skill.payload);
-    if (previous && previous.bundle !== entry.bundle) superseded.push(previous.bundle);
     registry.set(entry.name, entry);
     deployed.push(entry);
   }
 
+  // The write is conditional, so a concurrent deploy or approval is reported
+  // rather than silently overwritten.
   const document = normaliseSkills({ skills: [...registry.values()] });
-  await store.write(SKILLS_DOCUMENT, document);
-  for (const bundle of superseded) {
-    await store.deleteBundle(bundle).catch(() => undefined);
-  }
+  await store.write(SKILLS_DOCUMENT, document, revision);
+
+  // A superseded bundle is deliberately *not* deleted here. It is the only copy
+  // of the previous known-good bytes, and removing it inside the transaction
+  // that replaces it leaves nothing to roll back to.
 
   return {
     deployed,
