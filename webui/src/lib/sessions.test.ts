@@ -68,7 +68,7 @@ test("sessions are upserted, renamed, and removed by id", () => {
 
 test("stored sessions survive a round trip", () => {
   const session = {
-    ...createSession(1),
+    ...createSession("", 1),
     title: "Parser work",
     previousResponseId: "resp_1",
     messages: [{ id: "m1", role: "user" as const, content: "hi" }],
@@ -94,7 +94,7 @@ test("corrupt storage never breaks the session list", () => {
 });
 
 test("a session carries both the requested and the bound agent", () => {
-  const session = createSession(1000, "marketing");
+  const session = createSession("marketing", 1000);
 
   assert.equal(session.requestedProfile, "marketing");
   assert.equal(session.boundProfile, "");
@@ -104,7 +104,7 @@ test("a session carries both the requested and the bound agent", () => {
 
 test("a stored profile survives a reload", () => {
   const session = {
-    ...createSession(1000, "marketing"),
+    ...createSession("marketing", 1000),
     boundProfile: "marketing",
   };
 

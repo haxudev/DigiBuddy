@@ -33,6 +33,12 @@ import {
   extractEffectiveProfile,
   stripProfileMetadata,
 } from "@/lib/effective-profile";
+import {
+  matchProfiles,
+  mentionQuery,
+  resolveMention,
+  stripMention,
+} from "@/lib/mentions";
 import { splitMessage } from "@/lib/ask-user";
 import {
   deliveryFocus,
@@ -216,6 +222,27 @@ export default function Home() {
 
   const messages = useMemo(() => activeSession?.messages ?? [], [activeSession]);
 
+  // `@` is meaningful only where it can still change something: the first
+  // message of a conversation that has not been bound yet.
+  const mention = mentionQuery(prompt);
+  const mentionMatches = useMemo(
+    () => (mention ? matchProfiles(profiles, mention.query) : []),
+    [mention, profiles],
+  );
+  const mentionOpen = mention !== null && profiles.length > 0;
+
+  function chooseMention(name: string) {
+    const rest = stripMention(prompt);
+    setPrompt(rest);
+    if (boundProfile) {
+      // The runtime keeps the agent this conversation started with, so the
+      // only honest way to reach another one is a new conversation.
+      createNewSession(name);
+    } else {
+      updateSession(activeId, (item) => ({ ...item, requestedProfile: name }));
+    }
+  }
+
 
   useEffect(() => {
     const transcript = transcriptRef.current;
@@ -297,6 +324,13 @@ export default function Home() {
 
   function submit(event: FormEvent) {
     event.preventDefault();
+    if (mention) {
+      // The composer holds only a mention, so this is agent selection, not a
+      // message. Sending "@marketing" to the agent would be nonsense.
+      const resolved = resolveMention(profiles, mention.query);
+      if (resolved) chooseMention(resolved.name);
+      return;
+    }
     const value = prompt;
     setPrompt("");
     void send(value);
@@ -313,7 +347,7 @@ export default function Home() {
   }
 
   function createNewSession(withProfile = "") {
-    const session = createSession(Date.now(), withProfile);
+    const session = createSession(withProfile);
     replaceSessions(upsertSession(sessions, session));
     selectSession(session.id);
   }
@@ -446,6 +480,34 @@ export default function Home() {
         )}
 
         <form className={styles.composer} onSubmit={submit}>
+          {mentionOpen && (
+            <div className={styles.mentions} role="listbox" aria-label="Choose an agent">
+              {boundProfile && (
+                <p className={styles.mentionNote}>
+                  This conversation runs{" "}
+                  {profiles.find((entry) => entry.name === boundProfile)
+                    ?.display_name ?? boundProfile}
+                  . Choosing another agent starts a new conversation.
+                </p>
+              )}
+              {mentionMatches.length === 0 ? (
+                <p className={styles.mentionNote}>No agent matches that name.</p>
+              ) : (
+                mentionMatches.map((entry) => (
+                  <button
+                    key={entry.name}
+                    type="button"
+                    role="option"
+                    aria-selected={entry.name === requestedProfile}
+                    onClick={() => chooseMention(entry.name)}
+                  >
+                    <strong>{entry.display_name}</strong>
+                    {entry.description && <span>{entry.description}</span>}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
           {attachments.length > 0 && (
             <ul className={styles.attachments}>
               {attachments.map((attachment, index) => (
@@ -470,12 +532,21 @@ export default function Home() {
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
             onKeyDown={(event) => {
+              if (event.key === "Escape" && mentionOpen) {
+                event.preventDefault();
+                setPrompt("");
+                return;
+              }
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 event.currentTarget.form?.requestSubmit();
               }
             }}
-            placeholder="Describe the coding outcome you need…"
+            placeholder={
+              requestedProfile || boundProfile
+                ? "Describe the outcome you need…"
+                : "Describe the outcome you need, or type @ to choose an agent…"
+            }
             rows={3}
           />
           <div className={styles.composerControls}>
@@ -514,8 +585,15 @@ export default function Home() {
                 </option>
               ))}
             </select>
-            <button disabled={!prompt.trim() || isRunning} type="submit">
-              {isRunning ? "Sending…" : "Send"}
+            <button
+              disabled={
+                !prompt.trim() ||
+                isRunning ||
+                (mention !== null && !resolveMention(profiles, mention.query))
+              }
+              type="submit"
+            >
+              {mention ? "Choose agent" : isRunning ? "Sending…" : "Send"}
             </button>
           </div>
         </form>

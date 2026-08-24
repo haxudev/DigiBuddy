@@ -75,10 +75,19 @@ A profile assembles a subset of the payload into a business-specific agent. One 
 | `skills`, `tools` | Restrict what the profile sees; absent means everything |
 | `mcp_servers` | Restrict the rendered `[mcp_servers.*]` blocks |
 | `model` | Override the model for this profile |
+| `credential_bindings` | Which credential slots this agent's process receives |
 
-For a restricted profile the runtime builds a filtered view of the payload and points `DIGIBUDDY_SKILLS_ROOT` and `DIGIBUDDY_TOOLS_ROOT` at it; unrestricted profiles point straight at the payload. Filtering controls what the agent is offered, not what the sandbox can reach — Codex still has a shell, so it is a curation mechanism rather than a security boundary.
+For a restricted profile the runtime builds a filtered view of the payload and points `DIGIBUDDY_SKILLS_ROOT` and `DIGIBUDDY_TOOLS_ROOT` at it; unrestricted profiles point straight at the payload. Filtering controls what the agent is offered, not what the sandbox can reach — Codex still has a shell, so it is curation rather than a boundary.
 
-Chat clients select a profile with `metadata.profile` on the Responses request. Selecting nothing uses the runtime default.
+Credentials are the part with teeth. A profile binds values to named slots, and the runtime hands a Codex process only its own profile's bindings; because switching profile already replaces the process, one agent's secrets are never present in another's environment. Values live in a document no read API returns, so the console reports which slots are set and offers to rotate or clear one.
+
+### Addressing an agent
+
+Type `@` at the start of an empty message to choose an agent, or use the control in the chat header. The choice belongs to the conversation, not to the browser tab: switching sessions follows it and a reload restores it.
+
+A conversation stays with the agent it began with. Codex fixes a thread's base instructions when the thread starts, so nothing can change the agent mid-conversation without discarding the thread — and pretending otherwise is how a console ends up displaying one agent while another one runs. After the first turn the header reports the agent in force, and choosing another one starts a new conversation with it.
+
+The runtime is the authority. Chat clients ask with `metadata.profile`, and every turn reports the profile actually resolved — including when a request contradicts an existing binding, and when a blank request resolved through a deployment default. Naming an agent that is no longer configured is an error rather than a silent fallback, because a conversation bound to a deleted restricted agent must not quietly resume with a different one's capabilities.
 
 ## Admin Console
 

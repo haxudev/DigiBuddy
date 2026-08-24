@@ -36,8 +36,8 @@ function newId(): string {
 }
 
 export function createSession(
-  now = Date.now(),
   requestedProfile = "",
+  now = Date.now(),
 ): ChatSession {
   return {
     id: newId(),
