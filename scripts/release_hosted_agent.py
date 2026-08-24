@@ -667,8 +667,11 @@ class ReleaseRunner:
                     headers={"Accept": "application/json, text/plain, */*"},
                     timeout=timeout_seconds,
                 )
-            except ReleaseError as exc:
-                last_error = exc
+            except (ReleaseError, OSError) as exc:
+                # `http_client` is a seam, so a transport error can arrive
+                # unwrapped. Waiting for readiness means tolerating a service
+                # that is not answering yet, however that surfaces.
+                last_error = exc if isinstance(exc, ReleaseError) else ReleaseError(str(exc))
             else:
                 status = int(getattr(response, "status", 0) or 0)
                 if 200 <= status < 300:
@@ -946,6 +949,13 @@ def _http_request(
         )
     except urllib_error.URLError as exc:
         raise ReleaseError(f"HTTP request failed for {url}: {exc.reason}") from exc
+    except OSError as exc:
+        # A service that is starting behind a published port accepts the
+        # connection and then resets it, which surfaces as a bare
+        # ConnectionResetError rather than a URLError. Readiness polling is
+        # meant to tolerate exactly that, so it has to arrive as the same
+        # retryable error as everything else here.
+        raise ReleaseError(f"HTTP request failed for {url}: {exc}") from exc
 
 
 @dataclass(frozen=True, slots=True)

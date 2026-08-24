@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import shutil
+import struct
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
 from scripts.release_hosted_agent import (
+    _http_request,
     _clone_version_payload,
     ReleaseConfig,
     ReleaseError,
@@ -992,3 +994,78 @@ class RetiredEnvironmentTests(unittest.TestCase):
 
         self.assertEqual(environment["DIGIBUDDY_ENABLE_CAPABILITY_PACKS"], "true")
         self.assertEqual(environment["DIGIBUDDY_ENABLE_PROFILE_CREDENTIALS"], "true")
+
+
+def _readiness_runner(client):
+    """A runner with only the pieces `_wait_for_http_ready` touches."""
+    runner = ReleaseRunner.__new__(ReleaseRunner)
+    runner.http_client = lambda method, url, **kwargs: client(method, url, **kwargs)
+    runner.sleep = lambda _seconds: None
+    runner.options = SimpleNamespace(activation_poll_seconds=1)
+    return runner
+
+
+class ReadinessPollTests(unittest.TestCase):
+    """A service starting behind a published port resets, and that is normal."""
+
+    def test_a_connection_reset_is_retried_rather_than_fatal(self) -> None:
+        attempts = {"n": 0}
+
+        def client(method, url, **kwargs):
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                # What Docker does while the container has the port but the
+                # application inside it is not listening yet.
+                raise ConnectionResetError(104, "Connection reset by peer")
+            return SimpleNamespace(status=200, body=b"", headers={})
+
+        runner = _readiness_runner(client)
+        runner._wait_for_http_ready(
+            "http://127.0.0.1:18088/readiness",
+            timeout_seconds=30,
+            failure_message="should not be reached",
+        )
+
+        self.assertEqual(attempts["n"], 3)
+
+    def test_a_service_that_never_comes_up_still_fails(self) -> None:
+        def client(method, url, **kwargs):
+            raise ConnectionResetError(104, "Connection reset by peer")
+
+        runner = _readiness_runner(client)
+
+        with self.assertRaisesRegex(ReleaseError, "never became ready"):
+            runner._wait_for_http_ready(
+                "http://127.0.0.1:18088/readiness",
+                timeout_seconds=5,
+                failure_message="The container never became ready.",
+            )
+
+    def test_a_real_reset_becomes_a_retryable_release_error(self) -> None:
+        """The transport layer, not a stub: this is what Docker actually did."""
+        import socket
+        import threading
+
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        port = listener.getsockname()[1]
+
+        def reset_once() -> None:
+            connection, _ = listener.accept()
+            # Linger zero turns close() into an RST, which is precisely what a
+            # published port does before the container's app is listening.
+            connection.setsockopt(
+                socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
+            )
+            connection.close()
+
+        server = threading.Thread(target=reset_once, daemon=True)
+        server.start()
+        try:
+            with self.assertRaises(ReleaseError):
+                _http_request("GET", f"http://127.0.0.1:{port}/readiness", timeout=5)
+        finally:
+            server.join(timeout=5)
+            listener.close()
