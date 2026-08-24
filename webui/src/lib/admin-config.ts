@@ -83,6 +83,8 @@ export type DeployedSkill = {
   enabled: boolean;
   uploaded_at: string;
   uploaded_by: string;
+  /** Where the archive came from, when it was imported from a URL. */
+  source: string;
 };
 
 export type SkillsDocument = { skills: DeployedSkill[] };
@@ -257,6 +259,7 @@ export function normaliseSkills(input: unknown): SkillsDocument {
       enabled: raw.enabled !== false,
       uploaded_at: text(raw.uploaded_at),
       uploaded_by: text(raw.uploaded_by),
+      source: text(raw.source),
     });
   }
   skills.sort((left, right) => left.name.localeCompare(right.name));

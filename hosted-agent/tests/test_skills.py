@@ -109,6 +109,32 @@ class ExtractionTests(unittest.TestCase):
                 extract_bundle(payload, entry(payload), destination)
             self.assertEqual(list(destination.iterdir()), [])
 
+    def test_an_executable_script_stays_executable(self):
+        # A skill's helper script that loses its execute bit fails when the agent
+        # runs it, long after the install that caused it.
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("demo/SKILL.md", "# demo")
+            script = zipfile.ZipInfo("demo/scripts/run.sh")
+            script.create_system = 3
+            script.external_attr = 0o100755 << 16
+            archive.writestr(script, "#!/bin/sh\n")
+            notes = zipfile.ZipInfo("demo/references/notes.md")
+            notes.create_system = 3
+            # A crafted archive must not be able to publish a world-writable file.
+            notes.external_attr = 0o102666 << 16
+            archive.writestr(notes, "notes")
+        payload = buffer.getvalue()
+
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory)
+            extract_bundle(payload, entry(payload), destination)
+            skill = destination / "demo"
+            self.assertEqual((skill / "scripts" / "run.sh").stat().st_mode & 0o777, 0o755)
+            self.assertEqual(
+                (skill / "references" / "notes.md").stat().st_mode & 0o777, 0o644
+            )
+
 
 class InstallTests(unittest.TestCase):
     def test_packaged_skills_are_not_shadowed_by_uploads(self):

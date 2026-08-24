@@ -463,6 +463,35 @@ def _link_selection(
             (target / entry.name).symlink_to(entry, target_is_directory=entry.is_dir())
 
 
+#: Written by ``scripts/sync-agent-skills.sh`` beside the synced skills. It
+#: names every skill the image is supposed to carry, so a source that silently
+#: stops publishing a skill fails the container rather than quietly shrinking
+#: the agent's capabilities.
+PACKAGED_SKILL_MANIFEST = ".manifest"
+
+
+def _assert_packaged_manifest(source: Path, candidates: list[Path]) -> None:
+    found = {candidate.name for candidate in candidates}
+    if not found:
+        raise RuntimeError(f"no packaged global skills found in {source}")
+
+    manifest = source / PACKAGED_SKILL_MANIFEST
+    if not manifest.is_file():
+        return
+    expected = {
+        line.strip()
+        for line in manifest.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+    if expected and expected != found:
+        missing = ", ".join(sorted(expected - found)) or "none"
+        extra = ", ".join(sorted(found - expected)) or "none"
+        raise RuntimeError(
+            f"packaged global skills in {source} do not match the manifest "
+            f"(missing: {missing}; unexpected: {extra})"
+        )
+
+
 def install_global_skills(
     settings: RuntimeSettings,
     profile: AgentProfile | None = None,
@@ -484,10 +513,7 @@ def install_global_skills(
         for candidate in sorted(source.iterdir())
         if (candidate / "SKILL.md").is_file()
     ]
-    if len(candidates) != 11:
-        raise RuntimeError(
-            f"expected 11 packaged global skills, found {len(candidates)} in {source}"
-        )
+    _assert_packaged_manifest(source, candidates)
 
     if target.is_symlink() or target.is_file():
         target.unlink()

@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from codex_adapter.config import (
+    PACKAGED_SKILL_MANIFEST,
     RuntimeSettings,
     apply_model_overrides,
     build_catalogue,
@@ -157,6 +158,28 @@ class GlobalSkillInstallTests(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(RuntimeError, "missing"):
+                install_global_skills(current)
+
+    def test_a_source_that_stops_publishing_a_skill_is_reported(self):
+        # The image's skills are synced from upstream repositories. A source that
+        # quietly drops a skill would otherwise shrink what the agent can do with
+        # no signal at all, so the generated manifest is cross-checked.
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / "pack"
+            for name in ("alpha", "beta"):
+                skill = source / name
+                skill.mkdir(parents=True)
+                (skill / "SKILL.md").write_text("x", encoding="utf-8")
+            codex_home = Path(root) / "codex"
+            codex_home.mkdir()
+            current = settings(skills_source=source, codex_home=codex_home)
+
+            manifest = source / PACKAGED_SKILL_MANIFEST
+            manifest.write_text("# generated\nalpha\nbeta\n", encoding="utf-8")
+            self.assertEqual(install_global_skills(current), 2)
+
+            manifest.write_text("# generated\nalpha\nbeta\ngamma\n", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "gamma"):
                 install_global_skills(current)
 
     def test_restricted_profile_removes_disallowed_global_skills(self):
