@@ -8,6 +8,10 @@
  */
 
 import { SKILL_NAME, bundlePath } from "./skill-bundle.ts";
+import {
+  MANAGED_ARTIFACT_ID,
+  isManagedArtifactName,
+} from "./artifact-reference.ts";
 
 export const MODELS_DOCUMENT = "models.json";
 export const MCP_DOCUMENT = "mcp.json";
@@ -315,6 +319,8 @@ export interface ConfigStore {
   /** Skill bundles share the container with the documents, under `bundles/`. */
   writeBundle(path: string, payload: Buffer): Promise<void>;
   deleteBundle(path: string): Promise<void>;
+  /** Generated deliverables are immutable blobs below the reserved prefix. */
+  readArtifact(id: string, filename: string): Promise<Buffer | null>;
 }
 
 const BUNDLE_PATH = /^bundles\/[a-z0-9]+(?:-[a-z0-9]+)*\/[0-9a-f]{64}\.zip$/;
@@ -325,6 +331,16 @@ function assertBundlePath(path: string): string {
     throw new ConfigValidationError(`Not a skill bundle path: ${path}`);
   }
   return path;
+}
+
+export function artifactStoragePath(id: string, filename: string): string {
+  if (!MANAGED_ARTIFACT_ID.test(id)) {
+    throw new ConfigValidationError("Invalid artifact id.");
+  }
+  if (!isManagedArtifactName(filename)) {
+    throw new ConfigValidationError("Invalid artifact filename.");
+  }
+  return `artifacts/${id}/${filename}`;
 }
 
 class FileConfigStore implements ConfigStore {
@@ -375,6 +391,17 @@ class FileConfigStore implements ConfigStore {
     const { rm } = await import("node:fs/promises");
     const { join } = await import("node:path");
     await rm(join(this.directory, assertBundlePath(path)), { force: true });
+  }
+
+  async readArtifact(id: string, filename: string): Promise<Buffer | null> {
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const path = join(this.directory, artifactStoragePath(id, filename));
+    try {
+      return await readFile(path);
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -431,6 +458,17 @@ class BlobConfigStore implements ConfigStore {
     await (await this.container())
       .getBlockBlobClient(assertBundlePath(path))
       .deleteIfExists();
+  }
+
+  async readArtifact(id: string, filename: string): Promise<Buffer | null> {
+    const blob = (await this.container()).getBlockBlobClient(
+      artifactStoragePath(id, filename),
+    );
+    try {
+      return await blob.downloadToBuffer();
+    } catch {
+      return null;
+    }
   }
 }
 

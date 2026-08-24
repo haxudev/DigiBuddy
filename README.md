@@ -21,11 +21,11 @@ On top of the runtime, this repository ships an agent payload that turns Codex i
 
 ## Agent Capabilities
 
-- **Azure Blob artifact delivery**: generated files are uploaded to Azure Blob Storage and exposed through user-delegation SAS links signed with the agent's Entra ID identity, so no account key is ever used.
+- **Managed artifact delivery**: generated files are persisted in private shared storage and exposed through same-origin delivery cards with safe previews; external SAS links remain available only for explicit sharing workflows.
 - **Microsoft 365 workflows**: the `m365_cli` tool can send email, read mail, inspect calendars, browse OneDrive, and query SharePoint from the agent runtime.
 - **Blob-backed email attachments**: binary attachments are automatically staged to Blob Storage and rewritten as clean download links; plain-text files stay as direct attachments.
 - **SharePoint and OneDrive ingestion**: shared document links are resolved through Microsoft Graph, using app-only credentials by default and on-behalf-of when a user assertion is supplied.
-- **Document and artifact generation**: the agent produces PPTX, DOCX, XLSX, and PDF deliverables under `/workspace` and delivers them through download links.
+- **Document and artifact generation**: the agent produces PPTX, DOCX, XLSX, PDF, HTML, Markdown, images, and data files under `/workspace`; new or changed deliverables are attached to the response automatically.
 - **Knowledge-backed responses**: skills supply an internal knowledge base consulted ahead of the Microsoft Learn MCP tools, with source citations.
 - **Cloud pricing and cost estimation**: live Azure retail pricing lookups plus monthly and annual projections.
 
@@ -109,7 +109,7 @@ To add a tool, drop a module into `src/tools/` with an `argparse`-based `main()`
 
 ## Admin Console and Agent Profiles
 
-Model access, the remote MCP catalogue, and agent profiles are data rather than image contents. They live in a shared configuration store — an Azure Blob container (`DIGIBUDDY_CONFIG_URI`) or a directory (`DIGIBUDDY_CONFIG_DIR`) — that both the Web UI and the hosted agent read.
+Model access, the remote MCP catalogue, agent profiles, and private response artifacts live in a shared store — an Azure Blob container (`DIGIBUDDY_CONFIG_URI`) or a directory (`DIGIBUDDY_CONFIG_DIR`) — that both the Web UI and the hosted agent can access. Artifacts use a reserved `artifacts/` prefix and unguessable identifiers; the browser receives only same-origin `/api/artifacts/...` references.
 
 The Web UI serves `/admin`, a three-tab console over that store:
 

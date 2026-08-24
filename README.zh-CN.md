@@ -21,11 +21,11 @@ DigiBuddy 将 Codex app-server 封装为 Microsoft Foundry Hosted Agent 内部�
 
 ## Agent 能力
 
-- **Azure Blob 交付物分发**：生成的文件会上传到 Azure Blob Storage，并通过使用 agent 的 Entra ID 身份签名的 user-delegation SAS 链接对外暴露，全程不使用账户密钥。
+- **平台托管交付物**：生成文件保存到私有共享存储，通过同源交付卡片安全预览和下载；仅在明确要求外部分享时使用临时 SAS 链接。
 - **Microsoft 365 工作流**：`m365_cli` 工具可在 agent 运行时中发送邮件、读取邮件、查看日历、浏览 OneDrive 并查询 SharePoint。
 - **基于 Blob 的邮件附件**：二进制附件会自动暂存到 Blob Storage 并改写为简洁的下载链接；纯文本文件仍作为直接附件发送。
 - **SharePoint 与 OneDrive 接入**：共享文档链接通过 Microsoft Graph 解析，默认使用 app-only 凭据，在提供用户断言时使用 on-behalf-of。
-- **文档与交付物生成**：agent 在 `/workspace` 下生成 PPTX、DOCX、XLSX、PDF 交付物，并通过下载链接分发。
+- **文档与交付物生成**：agent 在 `/workspace` 下生成 PPTX、DOCX、XLSX、PDF、HTML、Markdown、图片和数据文件；本轮新增或更新的交付物会自动附加到回复。
 - **知识驱动的回答**：skills 提供内部知识库，优先于 Microsoft Learn MCP 工具进行查询，并附带来源引用。
 - **云定价与成本估算**：实时查询 Azure 零售价，并给出月度与年度预测。
 
@@ -90,7 +90,7 @@ python -m create_eml --out /workspace/message.eml --from a@b.com --to c@d.com \
 
 ## 管理控制台与 Agent Profile
 
-模型接入、远程 MCP 目录与 agent profile 属于数据，而不是镜像内容。它们存放在一个共享配置存储中 —— Azure Blob 容器（`DIGIBUDDY_CONFIG_URI`）或本地目录（`DIGIBUDDY_CONFIG_DIR`）—— Web UI 与 hosted agent 都从中读取。
+模型接入、远程 MCP 目录、agent profile 与私有回复交付物都存放在共享存储中 —— Azure Blob 容器（`DIGIBUDDY_CONFIG_URI`）或本地目录（`DIGIBUDDY_CONFIG_DIR`）—— Web UI 与 hosted agent 均可访问。交付物位于保留的 `artifacts/` 前缀下，浏览器只接收同源的 `/api/artifacts/...` 引用。
 
 Web UI 提供 `/admin`，一个面向该存储的三页签控制台：
 

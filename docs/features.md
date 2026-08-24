@@ -90,7 +90,9 @@ The model API key is write-only: reads return `api_key_set` instead of the value
 
 ## Artifact Delivery
 
-Generated files such as PPTX, DOCX, XLSX, and PDF are uploaded to Azure Blob Storage and exposed through **user-delegation SAS** links, signed with the agent's Entra ID identity rather than an account key.
+New or changed generated files are automatically written to the private shared store below `artifacts/` and represented as delivery cards in the Web UI. The browser downloads them through `/api/artifacts/<id>/<name>` and never receives a storage credential or an internal `/workspace` URL. Markdown, HTML, SVG, images, PDF, JSON, CSV, and text can be previewed in the delivery area; Office documents and archives remain downloadable.
+
+The `azure_blob` tool still provides **user-delegation SAS** links for explicit external-sharing workflows such as links inserted into email.
 
 | Variable | Description |
 | --- | --- |

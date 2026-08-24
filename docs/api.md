@@ -5,7 +5,7 @@
 DigiBuddy exposes two surfaces:
 
 - The **Hosted Agent** speaks the Microsoft Foundry **Responses protocol `2.0.0`**. This is the upstream API, callable directly by any Responses-compatible client.
-- The **Web UI** exposes a single **AG-UI** SSE endpoint at `POST /api/agent`, which proxies to the Hosted Agent server-side so credentials never reach the browser.
+- The **Web UI** exposes an **AG-UI** SSE endpoint at `POST /api/agent` and a managed-deliverable endpoint at `GET /api/artifacts/<id>/<name>`. Both keep storage and Foundry credentials server-side.
 
 ## Hosted Agent (Responses `2.0.0`)
 
@@ -186,6 +186,11 @@ Returns all five documents. `models.json` is redacted: `api_key` is removed and 
 | `ADMIN_ALLOW_ANONYMOUS` | `true` to allow anonymous access outside production |
 
 The hosted agent must be pointed at the same store for admin changes to reach it.
+
+Generated deliverables also use this store under the reserved
+`artifacts/<random-id>/<filename>` prefix. `GET /api/artifacts/<id>/<name>`
+validates both path segments and proxies the private bytes with a strict content
+type and sandbox policy. Append `?download=1` to request download disposition.
 
 ## Web UI (`/api/admin/skills`)
 

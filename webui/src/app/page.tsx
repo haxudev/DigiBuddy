@@ -24,7 +24,11 @@ import {
   type ActivityEntry,
 } from "@/lib/activity";
 import { REASONING_EFFORTS, type TurnAttachment } from "@/lib/agent-proxy";
-import { extractArtifacts, type Artifact } from "@/lib/artifacts";
+import {
+  extractArtifacts,
+  stripArtifactMetadata,
+  type Artifact,
+} from "@/lib/artifacts";
 import { splitMessage } from "@/lib/ask-user";
 import type { ProfileCapabilities } from "@/lib/profile-capabilities";
 import {
@@ -358,7 +362,10 @@ export default function Home() {
               ) : (
                 <article className={styles.agentMessage} key={message.id}>
                   <small>DigiBuddy</small>
-                  {splitMessage(message.content, message.id).map((segment, index) =>
+                  {splitMessage(
+                    stripArtifactMetadata(message.content),
+                    message.id,
+                  ).map((segment, index) =>
                     segment.kind === "ask" ? (
                       <AskUserCard
                         key={segment.request.id}

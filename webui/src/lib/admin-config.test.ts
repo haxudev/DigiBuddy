@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import {
   ConfigValidationError,
+  artifactStoragePath,
   assertWritableDocument,
   buildConfigStore,
   normaliseMcp,
@@ -122,6 +123,34 @@ test("the file store round-trips a document", async () => {
   assert.equal(await store.read("models.json"), null);
   await store.write("models.json", { model: "gpt-5.2" });
   assert.deepEqual(await store.read("models.json"), { model: "gpt-5.2" });
+});
+
+test("artifact storage paths cannot escape their reserved prefix", () => {
+  const id = "a".repeat(32);
+  assert.equal(artifactStoragePath(id, "报告.md"), `artifacts/${id}/报告.md`);
+  assert.throws(() => artifactStoragePath("short", "report.md"), ConfigValidationError);
+  assert.throws(
+    () => artifactStoragePath(id, "../models.json"),
+    ConfigValidationError,
+  );
+});
+
+test("the file store reads managed artifacts", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "digibuddy-artifact-"));
+  try {
+    const id = "b".repeat(32);
+    const artifactDirectory = join(directory, "artifacts", id);
+    mkdirSync(artifactDirectory, { recursive: true });
+    writeFileSync(join(artifactDirectory, "report.md"), "# Report", "utf-8");
+    const store = buildConfigStore({ DIGIBUDDY_CONFIG_DIR: directory });
+
+    assert.equal(
+      (await store.readArtifact(id, "report.md"))?.toString("utf-8"),
+      "# Report",
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("an unconfigured store is refused rather than silently empty", () => {

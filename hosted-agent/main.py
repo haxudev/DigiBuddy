@@ -20,6 +20,7 @@ from codex_adapter import (
     load_settings,
     store_attachments,
 )
+from codex_adapter.artifacts import ARTIFACT_EVENT, artifact_manifest
 from codex_adapter.events import completion_delta, tool_arguments
 
 logging.basicConfig(level=logging.INFO)
@@ -115,6 +116,8 @@ async def handle_response(
     tools: dict[str, tuple[Any, str]] = {}
     text: Any = None
     output = ""
+    artifacts: list[dict[str, object]] = []
+    artifact_failures = 0
 
     def open_reasoning():
         nonlocal reasoning, reasoning_part, reasoning_text
@@ -150,7 +153,15 @@ async def handle_response(
             json.dumps({"type": event.type, **event.data}, ensure_ascii=False),
         )
 
-        if event.type == "assistant.reasoning.delta":
+        if event.type == ARTIFACT_EVENT:
+            values = event.data.get("artifacts")
+            if isinstance(values, list):
+                artifacts.extend(item for item in values if isinstance(item, dict))
+            failed = event.data.get("failed")
+            if isinstance(failed, int):
+                artifact_failures += failed
+
+        elif event.type == "assistant.reasoning.delta":
             if reasoning_part is None:
                 for item in open_reasoning():
                     yield item
@@ -223,6 +234,32 @@ async def handle_response(
         yield call.emit_arguments_delta(arguments)
         yield call.emit_arguments_done(arguments)
         yield call.emit_done()
+
+    if artifacts:
+        if not output.strip():
+            ready = "Your files are ready in the delivery area."
+            if text is None:
+                message = stream.add_output_item_message()
+                yield message.emit_added()
+                text = message.add_text_content()
+                yield text.emit_added()
+            output += ready
+            yield text.emit_delta(ready)
+        metadata = artifact_manifest(artifacts)
+        output += metadata
+        yield text.emit_delta(metadata)
+    if artifact_failures:
+        warning = (
+            "\n\nSome generated files could not be saved to the delivery area. "
+            "Please retry the request."
+        )
+        if text is None:
+            message = stream.add_output_item_message()
+            yield message.emit_added()
+            text = message.add_text_content()
+            yield text.emit_added()
+        output += warning
+        yield text.emit_delta(warning)
 
     if not output:
         raise RuntimeError("Codex turn completed without assistant output")

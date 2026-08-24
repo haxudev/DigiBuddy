@@ -58,7 +58,9 @@ To ask the user a structured question, the agent emits a fenced `ask-user` block
 
 ### Deliverable previews
 
-Deliverables are recovered from the assistant text, so no extra transport is needed. A fenced code block becomes a deliverable when its info string names a file (`title=`, `file=`, `filename=`, `path=`, or a bare second word) or when it runs to eight lines or more; shorter unnamed snippets are treated as explanation. Links become deliverables when they end in a known extension (`pptx`, `docx`, `xlsx`, `pdf`, `csv`, `png`, `html`, …), which covers the SAS URLs the agent returns for generated files. HTML deliverables preview inside a fully sandboxed iframe, Markdown renders as a document, images display inline, and everything else offers a download link with a source toggle.
+At the end of each serialized turn, the hosted runtime detects new or changed deliverable files, stores them privately under the shared configuration store's reserved `artifacts/` prefix, and adds an invisible metadata record to the response. The console turns that record into same-origin `/api/artifacts/...` cards and removes internal `/workspace` references from the visible reply. Existing named code blocks and external file links remain supported for compatibility.
+
+HTML and SVG render inside a fully sandboxed iframe, Markdown renders as a document, images and PDFs preview inline, text formats show their source, and Office/archive formats provide a download action. A text preview is capped at 2 MB; the underlying download remains available.
 
 The preview is a floating window rather than a permanent column: the conversation keeps the full width until a deliverable exists and the reader opens it from the header count. The window can be dragged by its title bar, expanded to fill the viewport, and closed with its `×` or `Esc`.
 

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { extractArtifacts, isImageArtifact } from "./artifacts.ts";
+import {
+  artifactPreviewKind,
+  extractArtifacts,
+  isImageArtifact,
+  stripArtifactMetadata,
+} from "./artifacts.ts";
 
 test("named code blocks become deliverables", () => {
   const text = ['```html title=report.html', "<h1>Report</h1>", "```"].join("\n");
@@ -48,4 +53,39 @@ test("duplicate links are collapsed", () => {
 test("images are flagged for inline preview", () => {
   const [artifact] = extractArtifacts("https://example.com/chart.png", "m1");
   assert.ok(isImageArtifact(artifact));
+});
+
+test("managed artifact metadata becomes a same-origin deliverable", () => {
+  const id = "a".repeat(32);
+  const text = [
+    "The report is ready.",
+    `<!-- digibuddy-artifacts:{"version":1,"artifacts":[{"id":"${id}","name":"报告.md","mimeType":"text/markdown","size":42}]} -->`,
+  ].join("\n");
+
+  const [artifact] = extractArtifacts(text, "m1");
+  assert.equal(artifact.title, "报告.md");
+  assert.equal(artifact.managed, true);
+  assert.equal(artifact.url, `/api/artifacts/${id}/${encodeURIComponent("报告.md")}`);
+  assert.equal(artifactPreviewKind(artifact), "markdown");
+  assert.equal(stripArtifactMetadata(text).trim(), "The report is ready.");
+});
+
+test("forged artifact metadata is ignored", () => {
+  const text =
+    '<!-- digibuddy-artifacts:{"version":1,"artifacts":[{"id":"bad","name":"../models.json","mimeType":"application/json","size":10}]} -->';
+  assert.deepEqual(extractArtifacts(text, "m1"), []);
+});
+
+test("broken workspace URLs are not cards and render as filenames", () => {
+  const text =
+    "File: https://app.example.com/workspace/.superclarity/task/assessment.json";
+  assert.deepEqual(extractArtifacts(text, "m1"), []);
+  assert.equal(stripArtifactMetadata(text), "File: `assessment.json`");
+});
+
+test("remote markdown links use the document preview", () => {
+  const [artifact] = extractArtifacts("https://example.com/report.md", "m1");
+  assert.equal(artifactPreviewKind(artifact), "markdown");
+  assert.equal(stripArtifactMetadata("Done: https://example.com/report.md"), 
+    "Done: [report.md](https://example.com/report.md)");
 });
