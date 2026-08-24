@@ -1,23 +1,91 @@
+/*
+ * A floating window rather than a column: it only exists while the reader is
+ * looking at a deliverable, and it can be dragged out of the way or expanded.
+ */
 .panel {
+  position: fixed;
+  top: 84px;
+  right: 28px;
+  z-index: 40;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
+  width: min(460px, calc(100vw - 32px));
+  height: min(620px, calc(100dvh - 120px));
   min-height: 0;
+  overflow: hidden;
   background: #fff;
-  border-left: 1px solid #dde5e7;
+  border: 1px solid #dde5e7;
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgb(22 38 45 / 20%);
+}
+
+.panel[data-maximised="true"] {
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+  width: auto;
+  height: auto;
 }
 
 .header {
   display: flex;
   gap: 10px;
   align-items: center;
-  padding: 18px 20px;
+  padding: 12px 14px;
+  background: #fbfcfc;
   border-bottom: 1px solid #e6ecee;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.header:active {
+  cursor: grabbing;
+}
+
+.panel[data-maximised="true"] .header {
+  cursor: default;
 }
 
 .header h2 {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 700;
   letter-spacing: -0.01em;
+}
+
+.grip {
+  color: #a9b7bb;
+  font-size: 13px;
+}
+
+.panel[data-maximised="true"] .grip {
+  visibility: hidden;
+}
+
+.headerSpacer {
+  flex: 1 1 auto;
+}
+
+.headerButton {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  padding: 0;
+  color: #66787d;
+  background: none;
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.headerButton:hover {
+  color: #1d292f;
+  background: #eef4f4;
 }
 
 .count {

@@ -10,8 +10,8 @@ import {
   useSyncExternalStore,
 } from "react";
 import { HttpAgent, type Message } from "@ag-ui/client";
-import Link from "next/link";
-import ArtifactPanel from "@/components/ArtifactPanel";
+import AgentCapabilities from "@/components/AgentCapabilities";
+import ArtifactWindow from "@/components/ArtifactWindow";
 import ActivityTrail from "@/components/ActivityTrail";
 import AskUserCard from "@/components/AskUserCard";
 import Markdown from "@/components/Markdown";
@@ -26,6 +26,7 @@ import {
 import { REASONING_EFFORTS, type TurnAttachment } from "@/lib/agent-proxy";
 import { extractArtifacts, type Artifact } from "@/lib/artifacts";
 import { splitMessage } from "@/lib/ask-user";
+import type { ProfileCapabilities } from "@/lib/profile-capabilities";
 import {
   getServerSessions,
   getSession,
@@ -43,12 +44,6 @@ import {
   upsertSession,
 } from "@/lib/sessions";
 import styles from "./page.module.css";
-
-type ProfileOption = {
-  name: string;
-  display_name: string;
-  description: string;
-};
 
 const EFFORT_LABELS: Record<string, string> = {
   minimal: "Minimal",
@@ -108,12 +103,12 @@ export default function Home() {
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
-  const [profiles, setProfiles] = useState<ProfileOption[]>([]);
+  const [profiles, setProfiles] = useState<ProfileCapabilities[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [attachments, setAttachments] = useState<TurnAttachment[]>([]);
   const [reasoningEffort, setReasoningEffort] = useState("");
-  // On phones and tablets the sidebar and the deliverable panel slide over the
-  // conversation instead of squeezing it.
+  // On phones and tablets the sidebar slides over the conversation instead of
+  // squeezing it. The deliverable window is always an overlay.
   const [navOpen, setNavOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const agentRef = useRef<HttpAgent | null>(null);
@@ -271,6 +266,7 @@ export default function Home() {
     setSelectedId(sessionId);
     setError("");
     setNavOpen(false);
+    setPanelOpen(false);
     // Activity describes one run, so it never follows the reader to another
     // session.
     setActivity([]);
@@ -289,55 +285,25 @@ export default function Home() {
   }
 
   return (
-    <main
-      className={styles.shell}
-      data-nav={navOpen ? "open" : "closed"}
-      data-panel={panelOpen ? "open" : "closed"}
-    >
+    <main className={styles.shell} data-nav={navOpen ? "open" : "closed"}>
       <div className={styles.navSlot}>
-      <SessionSidebar
-        sessions={sessions}
-        activeId={activeId}
-        onSelect={selectSession}
-        onCreate={createNewSession}
-        onRename={(sessionId, title) =>
-          replaceSessions(renameSession(sessions, sessionId, title))
-        }
-        onDelete={deleteSession}
-      >
-        <div className={styles.formGrid}>
-          {profiles.length > 0 && (
-            <label>
-              Agent profile
-              <select
-                value={profile}
-                onChange={(event) => setProfile(event.target.value)}
-              >
-                <option value="">Runtime default</option>
-                {profiles.map((option) => (
-                  <option key={option.name} value={option.name}>
-                    {option.display_name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <p className={styles.securityNote}>
-            Endpoints, keys, and models are managed by the runtime.{" "}
-            <Link href="/admin">Administer the runtime</Link>
-          </p>
-        </div>
-      </SessionSidebar>
+        <SessionSidebar
+          sessions={sessions}
+          activeId={activeId}
+          onSelect={selectSession}
+          onCreate={createNewSession}
+          onRename={(sessionId, title) =>
+            replaceSessions(renameSession(sessions, sessionId, title))
+          }
+          onDelete={deleteSession}
+        />
       </div>
 
       <button
         type="button"
         className={styles.backdrop}
-        aria-label="Close panel"
-        onClick={() => {
-          setNavOpen(false);
-          setPanelOpen(false);
-        }}
+        aria-label="Close navigation"
+        onClick={() => setNavOpen(false)}
       />
 
       <section className={styles.chat}>
@@ -351,25 +317,32 @@ export default function Home() {
             >
               ☰
             </button>
-            <span className={styles.statusDot} />
-            {activeSession?.title ?? "Codex Hosted Agent"}
+            {activeSession?.title ?? ""}
           </div>
-          <span className={styles.protocol}>Responses · AG-UI stream</span>
-          <button
-            type="button"
-            className={styles.drawerButton}
-            onClick={() => setPanelOpen(true)}
-            aria-label="Show deliverables"
-          >
-            ▤ {artifacts.length || ""}
-          </button>
+          <div className={styles.headerActions}>
+            {artifacts.length > 0 && (
+              <button
+                type="button"
+                className={styles.deliverablesButton}
+                onClick={() => setPanelOpen(true)}
+                aria-label="Show deliverables"
+              >
+                ▤ {artifacts.length}
+              </button>
+            )}
+            <AgentCapabilities
+              profiles={profiles}
+              selected={profile}
+              onSelect={setProfile}
+            />
+          </div>
         </header>
 
         <div className={styles.messages} aria-live="polite" ref={transcriptRef}>
           {messages.length === 0 ? (
             <div className={styles.emptyState}>
               <span>⌁</span>
-              <h2>Give Codex a software task</h2>
+              <h2>What should DigiBuddy build?</h2>
               <p>
                 Analyze a repository, implement a focused change, or run validation
                 in the isolated Foundry workspace.
@@ -384,7 +357,7 @@ export default function Home() {
                 </article>
               ) : (
                 <article className={styles.agentMessage} key={message.id}>
-                  <small>Codex</small>
+                  <small>DigiBuddy</small>
                   {splitMessage(message.content, message.id).map((segment, index) =>
                     segment.kind === "ask" ? (
                       <AskUserCard
@@ -476,20 +449,20 @@ export default function Home() {
               +
             </button>
             <span className={styles.composerSpacer} />
-            <label className={styles.effort}>
-              Thinking
-              <select
-                value={reasoningEffort}
-                onChange={(event) => setReasoningEffort(event.target.value)}
-              >
-                <option value="">Default</option>
-                {REASONING_EFFORTS.map((effort) => (
-                  <option key={effort} value={effort}>
-                    {EFFORT_LABELS[effort]}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <select
+              className={styles.effort}
+              aria-label="Reasoning effort"
+              title="Reasoning effort"
+              value={reasoningEffort}
+              onChange={(event) => setReasoningEffort(event.target.value)}
+            >
+              <option value="">Auto</option>
+              {REASONING_EFFORTS.map((effort) => (
+                <option key={effort} value={effort}>
+                  {EFFORT_LABELS[effort]}
+                </option>
+              ))}
+            </select>
             <button disabled={!prompt.trim() || isRunning} type="submit">
               {isRunning ? "Sending…" : "Send"}
             </button>
@@ -497,9 +470,9 @@ export default function Home() {
         </form>
       </section>
 
-      <div className={styles.panelSlot}>
-        <ArtifactPanel artifacts={artifacts} />
-      </div>
+      {panelOpen && artifacts.length > 0 && (
+        <ArtifactWindow artifacts={artifacts} onClose={() => setPanelOpen(false)} />
+      )}
     </main>
   );
 }
