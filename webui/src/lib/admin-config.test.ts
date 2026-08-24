@@ -228,3 +228,27 @@ test("a first write only succeeds when no document is expected", async () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("artifact paths are partitioned by owner", () => {
+  const id = "a".repeat(32);
+  const owner = "b".repeat(32);
+
+  assert.equal(
+    artifactStoragePath(id, "report.pdf", owner),
+    `artifacts/${owner}/${id}/report.pdf`,
+  );
+  // Pre-multi-user files stay reachable at the flat path.
+  assert.equal(artifactStoragePath(id, "report.pdf"), `artifacts/${id}/report.pdf`);
+});
+
+test("an owner that is not an owner key is refused", () => {
+  const id = "a".repeat(32);
+
+  for (const bad of ["../../etc", "short", "B".repeat(32), `${"b".repeat(31)}/x`]) {
+    assert.throws(
+      () => artifactStoragePath(id, "report.pdf", bad),
+      ConfigValidationError,
+      `owner ${bad} should be refused`,
+    );
+  }
+});

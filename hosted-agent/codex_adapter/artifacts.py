@@ -133,7 +133,7 @@ def changed_artifacts(
 
 
 def publish_artifacts(
-    paths: list[Path], store: ConfigStore
+    paths: list[Path], store: ConfigStore, owner: str = ""
 ) -> tuple[list[PublishedArtifact], int]:
     """Persist validated files and return only successfully stored metadata."""
     published: list[PublishedArtifact] = []
@@ -147,7 +147,7 @@ def publish_artifacts(
                 mimetypes.guess_type(name)[0] or "application/octet-stream"
             )
             if not store.write_artifact(
-                artifact_id, name, payload, content_type
+                artifact_id, name, payload, content_type, owner
             ):
                 failures += 1
                 continue
@@ -176,9 +176,9 @@ def artifact_manifest(artifacts: list[dict[str, object]]) -> str:
 
 
 def artifact_event_data(
-    paths: list[Path], store: ConfigStore
+    paths: list[Path], store: ConfigStore, owner: str = ""
 ) -> dict[str, object]:
-    published, failures = publish_artifacts(paths, store)
+    published, failures = publish_artifacts(paths, store, owner)
     return {
         "artifacts": [asdict(artifact) for artifact in published],
         "failed": failures,

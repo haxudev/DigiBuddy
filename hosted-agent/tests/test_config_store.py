@@ -157,3 +157,39 @@ class BuildConfigStoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ArtifactOwnerTests(unittest.TestCase):
+    """A signed-in account must not be able to address another's files."""
+
+    def test_files_are_partitioned_by_owner(self):
+        artifact, owner = "a" * 32, "b" * 32
+
+        self.assertEqual(
+            artifact_path(artifact, "report.pdf", owner),
+            f"artifacts/{owner}/{artifact}/report.pdf",
+        )
+
+    def test_the_flat_layout_still_resolves(self):
+        """Files made before anyone could sign in must stay reachable."""
+        artifact = "a" * 32
+
+        self.assertEqual(
+            artifact_path(artifact, "report.pdf"),
+            f"artifacts/{artifact}/report.pdf",
+        )
+
+    def test_an_owner_that_is_not_an_owner_key_is_refused(self):
+        artifact = "a" * 32
+
+        for bad in ("../../etc", "short", "B" * 32, f"{'b' * 31}/x"):
+            with self.assertRaises(ValueError, msg=f"{bad} should be refused"):
+                artifact_path(artifact, "report.pdf", bad)
+
+    def test_two_owners_never_collide_on_the_same_id(self):
+        artifact = "a" * 32
+
+        self.assertNotEqual(
+            artifact_path(artifact, "r.pdf", "b" * 32),
+            artifact_path(artifact, "r.pdf", "c" * 32),
+        )

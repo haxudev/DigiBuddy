@@ -471,7 +471,7 @@ export interface ConfigStore {
   writeBundle(path: string, payload: Buffer): Promise<void>;
   deleteBundle(path: string): Promise<void>;
   /** Generated deliverables are immutable blobs below the reserved prefix. */
-  readArtifact(id: string, filename: string): Promise<Buffer | null>;
+  readArtifact(id: string, filename: string, owner?: string): Promise<Buffer | null>;
 }
 
 
@@ -496,14 +496,34 @@ function assertBundlePath(path: string): string {
   return path;
 }
 
-export function artifactStoragePath(id: string, filename: string): string {
+/**
+ * Where a generated file lives.
+ *
+ * Partitioned by owner so a signed-in account can only address its own files.
+ * The owner key is a hash, not an identity, so a blob path never carries an
+ * email address.
+ *
+ * An empty owner is the pre-multi-user layout and still resolves, because those
+ * files were created before anyone could sign in and would otherwise become
+ * unreachable.
+ */
+export function artifactStoragePath(
+  id: string,
+  filename: string,
+  owner = "",
+): string {
   if (!MANAGED_ARTIFACT_ID.test(id)) {
     throw new ConfigValidationError("Invalid artifact id.");
   }
   if (!isManagedArtifactName(filename)) {
     throw new ConfigValidationError("Invalid artifact filename.");
   }
-  return `artifacts/${id}/${filename}`;
+  if (owner && !MANAGED_ARTIFACT_ID.test(owner)) {
+    throw new ConfigValidationError("Invalid artifact owner.");
+  }
+  return owner
+    ? `artifacts/${owner}/${id}/${filename}`
+    : `artifacts/${id}/${filename}`;
 }
 
 class FileConfigStore implements ConfigStore {
@@ -585,10 +605,14 @@ class FileConfigStore implements ConfigStore {
     await rm(join(this.directory, assertBundlePath(path)), { force: true });
   }
 
-  async readArtifact(id: string, filename: string): Promise<Buffer | null> {
+  async readArtifact(
+    id: string,
+    filename: string,
+    owner = "",
+  ): Promise<Buffer | null> {
     const { readFile } = await import("node:fs/promises");
     const { join } = await import("node:path");
-    const path = join(this.directory, artifactStoragePath(id, filename));
+    const path = join(this.directory, artifactStoragePath(id, filename, owner));
     try {
       return await readFile(path);
     } catch {
@@ -705,9 +729,13 @@ class BlobConfigStore implements ConfigStore {
       .deleteIfExists();
   }
 
-  async readArtifact(id: string, filename: string): Promise<Buffer | null> {
+  async readArtifact(
+    id: string,
+    filename: string,
+    owner = "",
+  ): Promise<Buffer | null> {
     const blob = (await this.container()).getBlockBlobClient(
-      artifactStoragePath(id, filename),
+      artifactStoragePath(id, filename, owner),
     );
     try {
       return await blob.downloadToBuffer();

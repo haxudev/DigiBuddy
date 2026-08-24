@@ -90,7 +90,7 @@ class ProtocolTimeoutTests(unittest.TestCase):
                 self.payloads = []
 
             def write_artifact(
-                self, artifact_id, filename, payload, content_type
+                self, artifact_id, filename, payload, content_type, owner=""
             ):
                 self.payloads.append((artifact_id, filename, payload, content_type))
                 return True
@@ -356,7 +356,7 @@ class WorkspaceContainmentTests(unittest.TestCase):
             def __init__(self):
                 self.names = []
 
-            def write_artifact(self, artifact_id, filename, payload, content_type):
+            def write_artifact(self, artifact_id, filename, payload, content_type, owner=""):
                 self.names.append(filename)
                 return True
 
@@ -413,6 +413,61 @@ class WorkspaceContainmentTests(unittest.TestCase):
                 self.assertNotIn("not-mine.md", store.names)
 
         asyncio.run(exercise())
+
+
+class ArtifactOwnershipTests(unittest.TestCase):
+    def test_a_turn_publishes_into_the_caller_s_namespace(self):
+        class OwnerStore(NullConfigStore):
+            def __init__(self):
+                self.owners = []
+
+            def write_artifact(
+                self, artifact_id, filename, payload, content_type, owner=""
+            ):
+                self.owners.append(owner)
+                return True
+
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                current = settings(directory)
+                current.workspace.mkdir(parents=True, exist_ok=True)
+                store = OwnerStore()
+                runtime = CodexRuntime(current, store)
+                conversation = runtime.conversation_workspace(None, "response-1")
+
+                async def ensure_started(_profile, _reasoning_effort=""):
+                    return None
+
+                async def start_thread(_model, _profile, _workspace=None):
+                    return "thread-1"
+
+                async def request(_method, _params):
+                    conversation.mkdir(parents=True, exist_ok=True)
+                    (conversation / "report.md").write_text("# r", encoding="utf-8")
+                    return {"turn": {"id": "turn-1"}}
+
+                async def next_message(_cancellation):
+                    return {
+                        "method": "turn/completed",
+                        "params": {"turn": {"id": "turn-1", "status": "completed"}},
+                    }
+
+                runtime._ensure_started = ensure_started
+                runtime._start_thread = start_thread
+                runtime._request = request
+                runtime._next_turn_message = next_message
+
+                async for _ in runtime.stream_turn(
+                    "build it",
+                    previous_response_id=None,
+                    response_id="response-1",
+                    cancellation_signal=asyncio.Event(),
+                    owner="f" * 32,
+                ):
+                    pass
+                return store.owners
+
+        self.assertEqual(asyncio.run(exercise()), ["f" * 32])
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  SESSIONS_STORAGE_KEY,
   createSession,
   deriveTitle,
   isBound,
@@ -8,6 +9,7 @@ import {
   removeSession,
   renameSession,
   serializeSessions,
+  sessionsStorageKey,
   upsertSession,
 } from "./sessions.ts";
 
@@ -167,4 +169,16 @@ test("a session never stores something that cannot be cloned", () => {
 
 test("a profile name still survives when it is actually a name", () => {
   assert.equal(createSession("marketing").requestedProfile, "marketing");
+});
+
+test("each account keeps its conversations in its own namespace", () => {
+  const a = sessionsStorageKey("a".repeat(32));
+  const b = sessionsStorageKey("b".repeat(32));
+
+  assert.notEqual(a, b);
+  // A browser is shared and localStorage is not scoped to an account, so
+  // without this, signing in as someone else would show the previous person's
+  // threads and the next turn would resume one of them.
+  assert.notEqual(a, sessionsStorageKey(""));
+  assert.equal(sessionsStorageKey(""), SESSIONS_STORAGE_KEY);
 });

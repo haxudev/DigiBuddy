@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,9 @@ from codex_adapter.artifacts import ARTIFACT_EVENT, artifact_manifest
 from codex_adapter.client import PROFILE_EVENT
 from codex_adapter.events import completion_delta, tool_arguments
 from codex_adapter.profiles import UnknownProfileError
+
+#: The console sends a 32-hex hash of the principal, never the identity itself.
+_OWNER_KEY = re.compile(r"^[0-9a-f]{32}$")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("digibuddy.hosted_agent")
@@ -61,6 +65,23 @@ def _requested_profile(request: CreateResponse) -> str | None:
         return None
     profile = metadata.get("profile")
     return profile.strip() if isinstance(profile, str) and profile.strip() else None
+
+
+def _requested_owner(request: CreateResponse) -> str:
+    """Which storage namespace this turn's files belong in.
+
+    The console derives it from the signed-in principal and sends it as request
+    metadata. It is an opaque hash, so the agent never handles an identity, and
+    an unrecognised shape is treated as absent rather than trusted.
+    """
+    metadata = _request_value(request, "metadata")
+    if not isinstance(metadata, dict):
+        return ""
+    owner = metadata.get("owner")
+    if not isinstance(owner, str):
+        return ""
+    owner = owner.strip().lower()
+    return owner if _OWNER_KEY.fullmatch(owner) else ""
 
 
 def _requested_reasoning_effort(request: CreateResponse) -> str | None:
@@ -121,6 +142,7 @@ async def _turn_events(
     model: str | None,
     profile: str | None,
     reasoning_effort: str | None,
+    owner: str,
 ):
     """Stream the turn, translating a missing profile into something readable."""
     try:
@@ -132,6 +154,7 @@ async def _turn_events(
             model=model,
             profile=profile,
             reasoning_effort=reasoning_effort,
+            owner=owner,
         ):
             yield event
     except UnknownProfileError as error:
@@ -215,6 +238,7 @@ async def handle_response(
         model=requested_model,
         profile=_requested_profile(request),
         reasoning_effort=_requested_reasoning_effort(request),
+        owner=_requested_owner(request),
     ):
         # Event payloads can carry whatever a tool printed, so only the shape
         # is logged. Task 5 tightens this further for credentials.

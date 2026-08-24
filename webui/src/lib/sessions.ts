@@ -23,7 +23,22 @@ export type ChatSession = {
   updatedAt: number;
 };
 
-export const SESSIONS_STORAGE_KEY = "digibuddy.sessions.v1";
+const SESSIONS_STORAGE_PREFIX = "digibuddy.sessions.v1";
+
+/** Kept for callers that predate sign-in; the anonymous namespace. */
+export const SESSIONS_STORAGE_KEY = SESSIONS_STORAGE_PREFIX;
+
+/**
+ * Where this account's conversations are kept.
+ *
+ * Namespaced per signed-in account, because a browser is shared and localStorage
+ * is not. Without this, signing out and signing in as someone else would show
+ * the previous person's conversations, and the next turn would resume one of
+ * their threads.
+ */
+export function sessionsStorageKey(owner = ""): string {
+  return owner ? `${SESSIONS_STORAGE_PREFIX}.${owner}` : SESSIONS_STORAGE_PREFIX;
+}
 
 const DEFAULT_TITLE = "New session";
 const MAX_TITLE_LENGTH = 48;

@@ -51,6 +51,54 @@ export async function resolveAuthHeaders(
   return { Authorization: `Bearer ${accessToken.token}` };
 }
 
+export type AgentRequest = {
+  connection: ConnectionSettings;
+  input: unknown;
+  previousResponseId: string;
+  reasoningEffort: string;
+  /** Opaque hash of the signed-in principal; partitions generated files. */
+  owner?: string;
+};
+
+/**
+ * The Responses body this proxy sends.
+ *
+ * Extracted so the wire shape is testable. It was not, and a field the service
+ * had deprecated shipped unnoticed -- it only surfaces when a caller names an
+ * agent, which this deployment does not.
+ */
+export function agentRequestBody({
+  connection,
+  input,
+  previousResponseId,
+  reasoningEffort,
+  owner = "",
+}: AgentRequest): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model: connection.model,
+    input,
+    stream: true,
+    store: true,
+  };
+  if (reasoningEffort) body.reasoning = { effort: reasoningEffort };
+  if (previousResponseId) body.previous_response_id = previousResponseId;
+  if (connection.agentName) {
+    // `agent` is deprecated; the service asks for `agent_reference`.
+    body.agent_reference = {
+      type: "agent_reference",
+      name: connection.agentName,
+      ...(connection.agentVersion ? { version: connection.agentVersion } : {}),
+    };
+  }
+  // The reference names the deployed agent, so anything about *this* turn
+  // travels as request metadata instead.
+  const metadata: Record<string, string> = {};
+  if (connection.profile) metadata.profile = connection.profile;
+  if (owner) metadata.owner = owner;
+  if (Object.keys(metadata).length > 0) body.metadata = metadata;
+  return body;
+}
+
 export function resolveConnection(
   forwardedProps: unknown,
   environment: Environment = process.env,

@@ -51,6 +51,7 @@ import {
   getSession,
   getSessions,
   replaceSessions,
+  setSessionOwner,
   subscribeSessions,
   updateSession,
 } from "@/lib/session-store";
@@ -209,6 +210,17 @@ export default function Home() {
       if (agentRef.current === agent) agentRef.current = null;
     };
   }, [activeId]);
+
+  // Conversations are namespaced per account, so the store has to know which
+  // account this is before anything reads or writes it.
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/me", { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : { signedIn: false }))
+      .then((me) => setSessionOwner(me.signedIn ? String(me.owner ?? "") : ""))
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();

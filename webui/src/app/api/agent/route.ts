@@ -4,7 +4,13 @@ import {
   type BaseEvent,
 } from "@ag-ui/core";
 import {
+  NotSignedInError,
+  ownerKey,
+  requirePrincipal,
+} from "@/lib/identity";
+import {
   OUTPUT_ITEM_SEPARATOR,
+  agentRequestBody,
   latestUserText,
   resolveAuthHeaders,
   resolveConnection,
@@ -42,6 +48,18 @@ function upstreamError(payload: unknown, status: number): Error {
 }
 
 export async function POST(request: Request) {
+  // Before the stream opens, so an unauthenticated caller gets a status rather
+  // than a run that starts and immediately errors.
+  let owner: string;
+  try {
+    owner = ownerKey(requirePrincipal(request.headers));
+  } catch (error) {
+    if (error instanceof NotSignedInError) {
+      return Response.json({ error: error.message }, { status: 403 });
+    }
+    throw error;
+  }
+
   let rawInput: unknown;
   try {
     rawInput = await request.json();
@@ -129,29 +147,14 @@ export async function POST(request: Request) {
       try {
         const connection = resolveConnection(input.forwardedProps);
         const { attachments, reasoningEffort } = turnOptions(input.forwardedProps);
-        const body: Record<string, unknown> = {
-          model: connection.model,
+        const body = agentRequestBody({
+          connection,
           input: turnInput(latestUserText(input.messages), attachments),
-          stream: true,
-          store: true,
-        };
-        if (reasoningEffort) {
-          body.reasoning = { effort: reasoningEffort };
-        }
-        if (previousResponseId) {
-          body.previous_response_id = previousResponseId;
-        }
-        if (connection.agentName) {
-          body.agent = {
-            name: connection.agentName,
-            version: connection.agentVersion,
-          };
-        }
-        if (connection.profile) {
-          // `agent` names the deployed Foundry agent, so the profile that
-          // agent should assemble travels as request metadata instead.
-          body.metadata = { profile: connection.profile };
-        }
+          previousResponseId,
+          reasoningEffort,
+          // Files this turn generates belong to whoever asked for them.
+          owner,
+        });
 
         const headers: Record<string, string> = {
           Accept: "text/event-stream",

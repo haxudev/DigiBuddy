@@ -156,6 +156,7 @@ class CodexRuntime:
         model: str | None = None,
         profile: str | None = None,
         reasoning_effort: str | None = None,
+        owner: str = "",
     ) -> AsyncIterator[RuntimeEvent]:
         async with self._lock:
             binding = self._thread_map.lookup(previous_response_id)
@@ -238,7 +239,9 @@ class CodexRuntime:
 
             paths = changed_artifacts(workspace, workspace_before)
             if paths:
-                data = await asyncio.to_thread(artifact_event_data, paths, self._store)
+                data = await asyncio.to_thread(
+                    artifact_event_data, paths, self._store, owner
+                )
                 yield RuntimeEvent(ARTIFACT_EVENT, data)
 
     async def _ensure_started(

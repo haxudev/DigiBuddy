@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  agentRequestBody,
   assertAllowedEndpoint,
   latestUserText,
   resolveAuthHeaders,
@@ -227,4 +228,54 @@ test("images and documents use their own Responses part types", () => {
     ["input_text", "input_image", "input_file"],
   );
   assert.equal(input[0].content[2].filename, "b.xlsx");
+});
+
+test("a named agent travels as agent_reference, not the deprecated agent field", () => {
+  // The service rejects `agent` with: "The 'agent' property is deprecated.
+  // Use 'agent_reference' instead." It only surfaces when a caller names an
+  // agent, which is why it sat unnoticed.
+  const body = agentRequestBody({
+    connection: {
+      endpoint: "https://x.services.ai.azure.com/a",
+      apiKey: "",
+      authMode: "bearer",
+      model: "gpt-5.6-luna",
+      agentName: "haeronclaw-codex",
+      agentVersion: "15",
+      profile: "marketing",
+      useManagedIdentity: true,
+    },
+    input: [{ role: "user", content: "hi" }],
+    previousResponseId: "",
+    reasoningEffort: "",
+  });
+
+  assert.equal("agent" in body, false);
+  assert.deepEqual(body.agent_reference, {
+    type: "agent_reference",
+    name: "haeronclaw-codex",
+    version: "15",
+  });
+  assert.deepEqual(body.metadata, { profile: "marketing" });
+});
+
+test("an unnamed agent sends no reference at all", () => {
+  const body = agentRequestBody({
+    connection: {
+      endpoint: "https://x.services.ai.azure.com/a",
+      apiKey: "",
+      authMode: "bearer",
+      model: "gpt-5.6-luna",
+      agentName: "",
+      agentVersion: "",
+      profile: "",
+      useManagedIdentity: true,
+    },
+    input: [{ role: "user", content: "hi" }],
+    previousResponseId: "",
+    reasoningEffort: "",
+  });
+
+  assert.equal("agent_reference" in body, false);
+  assert.equal("agent" in body, false);
 });

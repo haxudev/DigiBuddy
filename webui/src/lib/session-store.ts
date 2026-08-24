@@ -1,9 +1,9 @@
 import {
   ChatSession,
-  SESSIONS_STORAGE_KEY,
   createSession,
   parseSessions,
   serializeSessions,
+  sessionsStorageKey,
 } from "./sessions";
 
 /**
@@ -15,7 +15,22 @@ const EMPTY: ChatSession[] = [];
 
 let sessions: ChatSession[] = EMPTY;
 let loaded = false;
+let owner = "";
 const listeners = new Set<() => void>();
+
+/**
+ * Point the store at one account's conversations.
+ *
+ * Switching identity discards what is in memory rather than merging it: the
+ * previous account's threads are not this account's to resume.
+ */
+export function setSessionOwner(next: string): void {
+  if (next === owner) return;
+  owner = next;
+  loaded = false;
+  sessions = EMPTY;
+  emit();
+}
 
 function emit() {
   for (const listener of listeners) listener();
@@ -23,7 +38,7 @@ function emit() {
 
 function persist() {
   try {
-    window.localStorage.setItem(SESSIONS_STORAGE_KEY, serializeSessions(sessions));
+    window.localStorage.setItem(sessionsStorageKey(owner), serializeSessions(sessions));
   } catch {
     // A full or blocked storage quota must not break the conversation.
   }
@@ -34,7 +49,7 @@ function load() {
   loaded = true;
   let stored: ChatSession[] = [];
   try {
-    stored = parseSessions(window.localStorage.getItem(SESSIONS_STORAGE_KEY));
+    stored = parseSessions(window.localStorage.getItem(sessionsStorageKey(owner)));
   } catch {
     stored = [];
   }

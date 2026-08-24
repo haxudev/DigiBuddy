@@ -92,7 +92,12 @@ class ConfigStore(Protocol):
     def read_bundle(self, path: str) -> bytes | None: ...
 
     def write_artifact(
-        self, artifact_id: str, filename: str, payload: bytes, content_type: str
+        self,
+        artifact_id: str,
+        filename: str,
+        payload: bytes,
+        content_type: str,
+        owner: str = "",
     ) -> bool: ...
 
 
@@ -112,7 +117,12 @@ class NullConfigStore:
         return None
 
     def write_artifact(
-        self, artifact_id: str, filename: str, payload: bytes, content_type: str
+        self,
+        artifact_id: str,
+        filename: str,
+        payload: bytes,
+        content_type: str,
+        owner: str = "",
     ) -> bool:
         return False
 
@@ -169,10 +179,15 @@ class FileConfigStore:
             return None
 
     def write_artifact(
-        self, artifact_id: str, filename: str, payload: bytes, content_type: str
+        self,
+        artifact_id: str,
+        filename: str,
+        payload: bytes,
+        content_type: str,
+        owner: str = "",
     ) -> bool:
         del content_type
-        target = self._root / artifact_path(artifact_id, filename)
+        target = self._root / artifact_path(artifact_id, filename, owner)
         target.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary = tempfile.mkstemp(
             dir=target.parent, prefix=".artifact-"
@@ -244,12 +259,17 @@ class BlobConfigStore:
             return None
 
     def write_artifact(
-        self, artifact_id: str, filename: str, payload: bytes, content_type: str
+        self,
+        artifact_id: str,
+        filename: str,
+        payload: bytes,
+        content_type: str,
+        owner: str = "",
     ) -> bool:
         from azure.storage.blob import ContentSettings
 
         self._container.upload_blob(
-            artifact_path(artifact_id, filename),
+            artifact_path(artifact_id, filename, owner),
             payload,
             overwrite=True,
             content_settings=ContentSettings(content_type=content_type),
@@ -314,10 +334,15 @@ class CachingConfigStore:
         return self._inner.read_bundle(path)
 
     def write_artifact(
-        self, artifact_id: str, filename: str, payload: bytes, content_type: str
+        self,
+        artifact_id: str,
+        filename: str,
+        payload: bytes,
+        content_type: str,
+        owner: str = "",
     ) -> bool:
         return self._inner.write_artifact(
-            artifact_id, filename, payload, content_type
+            artifact_id, filename, payload, content_type, owner
         )
 
 
@@ -346,14 +371,23 @@ def safe_artifact_filename(name: str) -> str:
     return cleaned[:180] or "deliverable"
 
 
-def artifact_path(artifact_id: str, filename: str) -> str:
-    """Pin artifact access to an unguessable id below the reserved prefix."""
+def artifact_path(artifact_id: str, filename: str, owner: str = "") -> str:
+    """Pin artifact access to an unguessable id below the reserved prefix.
+
+    Partitioned by owner when the console tells us who asked, so a signed-in
+    account can only address its own files. The owner is an opaque hash, so a
+    blob path never carries an identity. An empty owner keeps the flat layout
+    that predates sign-in.
+    """
     if not _ARTIFACT_ID.fullmatch(artifact_id):
         raise ValueError("Invalid artifact id")
     safe_name = safe_artifact_filename(filename)
     if safe_name != filename:
         raise ValueError("Invalid artifact filename")
-    return f"{ARTIFACT_PREFIX}{artifact_id}/{safe_name}"
+    if owner and not _ARTIFACT_ID.fullmatch(owner):
+        raise ValueError("Invalid artifact owner")
+    prefix = f"{ARTIFACT_PREFIX}{owner}/" if owner else ARTIFACT_PREFIX
+    return f"{prefix}{artifact_id}/{safe_name}"
 
 
 def new_artifact_id() -> str:

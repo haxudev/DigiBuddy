@@ -3,6 +3,7 @@ import {
   artifactStoragePath,
   buildConfigStore,
 } from "@/lib/admin-config";
+import { NotSignedInError, ownerKey, requirePrincipal } from "@/lib/identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,8 +47,19 @@ export async function GET(
 ) {
   try {
     const { id, name } = await params;
-    artifactStoragePath(id, name);
-    const payload = await buildConfigStore().readArtifact(id, name);
+    // Files are partitioned by owner, so another account cannot address these
+    // bytes even holding the reference. An unguessable id is a capability, not
+    // an authorisation, and it survives in screenshots and browser history.
+    const owner = ownerKey(requirePrincipal(request.headers));
+    artifactStoragePath(id, name, owner);
+
+    const store = buildConfigStore();
+    let payload = await store.readArtifact(id, name, owner);
+    if (!payload) {
+      // Files generated before anyone could sign in live at the flat path and
+      // would otherwise become unreachable to the person who made them.
+      payload = await store.readArtifact(id, name);
+    }
     if (!payload) return new Response("Artifact not found.", { status: 404 });
 
     const extension = extensionOf(name);
@@ -67,6 +79,9 @@ export async function GET(
       },
     });
   } catch (error) {
+    if (error instanceof NotSignedInError) {
+      return new Response("Sign in to open this file.", { status: 403 });
+    }
     if (error instanceof ConfigValidationError) {
       return new Response("Invalid artifact reference.", { status: 400 });
     }
