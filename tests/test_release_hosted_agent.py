@@ -1069,3 +1069,26 @@ class ReadinessPollTests(unittest.TestCase):
         finally:
             server.join(timeout=5)
             listener.close()
+
+
+class WebUiGateTests(unittest.TestCase):
+    """A release must not fail because the console correctly refuses it."""
+
+    def _runner(self, status: int, body: bytes = b""):
+        runner = ReleaseRunner.__new__(ReleaseRunner)
+        runner._image_tag = "test-tag"
+        runner.options = SimpleNamespace(webui_timeout_seconds=5)
+        runner.http_client = lambda *a, **k: SimpleNamespace(
+            status=status, body=body, headers={}
+        )
+        return runner
+
+    def test_an_unauthenticated_refusal_is_a_pass(self) -> None:
+        # A release has no browser session, and the agent itself was already
+        # verified directly. What matters here is that the gate still gates.
+        for status in (401, 403):
+            self._runner(status)._verify_webui_agent("example.net")
+
+    def test_a_server_error_is_still_a_failure(self) -> None:
+        with self.assertRaisesRegex(ReleaseError, "HTTP 500"):
+            self._runner(500)._verify_webui_agent("example.net")

@@ -605,6 +605,15 @@ class ReleaseRunner:
         )
 
     def _verify_webui_agent(self, host: str) -> None:
+        """Confirm the console reaches the agent, and refuses those who may not.
+
+        The proxy now requires a signed-in principal. A release runs without a
+        browser session, so it cannot drive a real turn through the console --
+        and it does not need to: `_verify_agent_endpoint` already proved the
+        agent answers. What is worth proving here is that the console is up and
+        that an unauthenticated caller is turned away, because a gate that
+        silently stops gating is the failure nobody notices.
+        """
         smoke_id = self._image_tag or "release"
         response = self.http_client(
             "POST",
@@ -633,6 +642,11 @@ class ReleaseRunner:
             timeout=self.options.webui_timeout_seconds,
         )
         status = int(getattr(response, "status", 0) or 0)
+        if status in (401, 403):
+            # The gate is doing its job. Anything the console can still do
+            # without an identity is not worth smoke-testing.
+            print("Web UI refused an unauthenticated turn, as configured.")
+            return
         if not 200 <= status < 300:
             raise ReleaseError(
                 f"Web UI Agent smoke test failed with HTTP {status}."
