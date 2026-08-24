@@ -79,7 +79,29 @@ The response map is stored under the hosted session workspace so session resume 
 - The Web UI key remains server-side when supplied through container settings.
 - The Web UI only permits approved HTTPS endpoint suffixes in production.
 - `/admin` is guarded by an Entra allowlist over the Easy Auth principal header; the model key is write-only and every write is audited.
-- Foundry session isolation is the security boundary; the adapter does not implement a separate multi-tenant sandbox. Profile skill and tool filtering curates what an agent is offered, and is not itself a sandbox.
+- Every configuration document declares `schema_version`. A runtime that meets a newer version keeps the last version it could read rather than reinterpreting the document, because the fields it would ignore are the ones a newer console added to restrict something.
+- `profiles.json` and the capability registry are written conditionally and report a conflict rather than overwriting, because both are read-modify-write from two independent surfaces.
+- An explicitly named profile that is not configured is an error. Falling back to the default would let a renamed or deleted restricted agent resume with the capabilities of a different one.
+
+## Isolation and identity: what is measured
+
+The claim this section used to make — that Foundry session isolation is the security boundary — was never verified. `scripts/probe_runtime_isolation.py` is what verifies it. Run it from two concurrent conversations, giving the first `--write-probe a`.
+
+Measured on 2026-08-24 against the built image:
+
+| Question | Method | Result |
+| --- | --- | --- |
+| Can a same-UID child read the adapter's environment through procfs? | `/proc/1/environ` from a Codex turn | Readable while the adapter is dumpable |
+| Does making the adapter undumpable close that? | `prctl(PR_SET_DUMPABLE, 0)`, then re-read | Yes — the entry becomes root-owned and the child is refused |
+| Can the adapter launch Codex under another UID? | `create_subprocess_exec(user=...)` as the unprivileged `agent` user | No — `PermissionError`, so the UID split first drafted is not available |
+| Does one container serve one conversation? | boot id, cgroup and workspace cross-read | **Not yet measured in the deployed environment.** Record the outcome here when it is |
+
+Two probes were deliberately rejected as evidence. `echo $$` reports the shell a command ran in, not the container. Watching whether a second conversation receives the first one's deliverable cannot fail: the second snapshots the workspace at its own turn start, by which time the earlier file is already in its baseline and can never be reported as changed.
+
+Because a negative cross-read describes one scheduling outcome rather than a guarantee, workspace containment is unconditional and does not wait on this answer.
+
+- Each conversation gets its own workspace, so artifacts are attributed correctly and nothing is read across conversations by accident. Two same-UID Codex processes can still read each other's directories, so this is containment, not isolation; isolation would require a process or container boundary per conversation.
+- Profile skill and tool filtering curates what an agent is offered, and is not itself a sandbox.
 
 ## Configuration overlay and profiles
 
