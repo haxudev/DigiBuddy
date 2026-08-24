@@ -30,6 +30,11 @@ import {
   type Artifact,
 } from "@/lib/artifacts";
 import { splitMessage } from "@/lib/ask-user";
+import {
+  deliveryFocus,
+  shouldOpenDeliverables,
+  type DeliveryFocus,
+} from "@/lib/deliverables";
 import type { ProfileCapabilities } from "@/lib/profile-capabilities";
 import {
   getServerSessions,
@@ -209,6 +214,20 @@ export default function Home() {
         .flatMap((message) => extractArtifacts(message.content, message.id)),
     [messages],
   );
+
+  // A generated file is only delivered once the reader can see it, so a new
+  // deliverable opens the window itself instead of waiting to be discovered
+  // behind a header button.
+  const deliveryRef = useRef<DeliveryFocus>({ session: "", latest: "" });
+  useEffect(() => {
+    const next = deliveryFocus(
+      activeSession?.id ?? "",
+      artifacts.map((artifact) => artifact.id),
+    );
+    const previous = deliveryRef.current;
+    deliveryRef.current = next;
+    if (shouldOpenDeliverables(previous, next)) setPanelOpen(true);
+  }, [artifacts, activeSession?.id]);
 
   const send = useCallback(
     async (value: string) => {
