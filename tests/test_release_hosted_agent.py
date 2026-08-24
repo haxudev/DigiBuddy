@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import unittest
 
 from scripts.release_hosted_agent import (
+    _clone_version_payload,
     ReleaseConfig,
     ReleaseError,
     ReleaseRunner,
@@ -932,3 +933,62 @@ class ReleaseRunnerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RetiredEnvironmentTests(unittest.TestCase):
+    """A cloned version must not carry a secret the runtime no longer reads."""
+
+    def test_a_retired_variable_is_dropped_from_a_cloned_version(self) -> None:
+        source = {
+            "definition": {
+                "container_configuration": {"image": "old"},
+                "environment_variables": {
+                    "CODEX_MODEL_NAME": "gpt-5.2-codex",
+                    "DIGIBUDDY_GRAPH_CLIENT_SECRET": "retired-secret",
+                },
+            }
+        }
+
+        body = _clone_version_payload(source, "new-image")
+
+        environment = body["definition"]["environment_variables"]
+        self.assertEqual(environment["CODEX_MODEL_NAME"], "gpt-5.2-codex")
+        self.assertNotIn("DIGIBUDDY_GRAPH_CLIENT_SECRET", environment)
+
+    def test_the_list_form_is_scrubbed_too(self) -> None:
+        source = {
+            "definition": {
+                "container_configuration": {"image": "old"},
+                "environmentVariables": [
+                    {"name": "CODEX_MODEL_NAME", "value": "gpt-5.2-codex"},
+                    {"name": "DIGIBUDDY_GRAPH_CLIENT_SECRET", "value": "retired"},
+                ],
+            }
+        }
+
+        body = _clone_version_payload(source, "new-image")
+
+        names = [
+            entry["name"] for entry in body["definition"]["environmentVariables"]
+        ]
+        self.assertEqual(names, ["CODEX_MODEL_NAME"])
+
+    def test_a_kill_switch_is_carried_forward_deliberately(self) -> None:
+        # Feature flags are deployment state, not secrets: a release must not
+        # silently turn a feature off by forgetting it.
+        source = {
+            "definition": {
+                "container_configuration": {"image": "old"},
+                "environment_variables": {
+                    "DIGIBUDDY_ENABLE_CAPABILITY_PACKS": "true",
+                    "DIGIBUDDY_ENABLE_PROFILE_CREDENTIALS": "true",
+                },
+            }
+        }
+
+        environment = _clone_version_payload(source, "new")["definition"][
+            "environment_variables"
+        ]
+
+        self.assertEqual(environment["DIGIBUDDY_ENABLE_CAPABILITY_PACKS"], "true")
+        self.assertEqual(environment["DIGIBUDDY_ENABLE_PROFILE_CREDENTIALS"], "true")

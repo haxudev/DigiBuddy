@@ -7,7 +7,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, MutableMapping, Sequence
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
@@ -1035,6 +1035,40 @@ def _version_identity(version: Mapping[str, Any]) -> str:
     return ""
 
 
+#: Container variables that a newer build no longer reads, because the value
+#: moved into the per-profile credential document. Cloning a version carries the
+#: whole environment forward, so without this a retired secret would be copied
+#: into every future version and outlive the deployment that needed it.
+RETIRED_ENVIRONMENT_VARIABLES = frozenset(
+    {
+        "DIGIBUDDY_GRAPH_CLIENT_SECRET",
+        "DIGIBUDDY_GRAPH_USER_ASSERTION",
+    }
+)
+
+
+def _scrub_retired_environment(definition: dict[str, Any]) -> list[str]:
+    """Drop retired variables from a cloned definition, naming what was dropped."""
+    removed: list[str] = []
+    for key in ("environment_variables", "environmentVariables"):
+        entries = definition.get(key)
+        if isinstance(entries, MutableMapping):
+            for name in list(entries):
+                if name in RETIRED_ENVIRONMENT_VARIABLES:
+                    entries.pop(name, None)
+                    removed.append(name)
+        elif isinstance(entries, list):
+            kept = []
+            for entry in entries:
+                name = _string_value(entry.get("name")) if isinstance(entry, Mapping) else ""
+                if name in RETIRED_ENVIRONMENT_VARIABLES:
+                    removed.append(name)
+                    continue
+                kept.append(entry)
+            definition[key] = kept
+    return removed
+
+
 def _clone_version_payload(source_version: Mapping[str, Any], hosted_image: str) -> dict[str, Any]:
     body: dict[str, Any] = {}
     for key in ("description", "metadata", "blueprint_reference"):
@@ -1046,6 +1080,9 @@ def _clone_version_payload(source_version: Mapping[str, Any], hosted_image: str)
         raise ReleaseError("Source version is missing definition.container_configuration.")
     definition["container_configuration"] = dict(container)
     definition["container_configuration"]["image"] = hosted_image
+    removed = _scrub_retired_environment(definition)
+    if removed:
+        print(f"Dropped retired environment variables: {', '.join(sorted(set(removed)))}")
     body["definition"] = definition
     return body
 

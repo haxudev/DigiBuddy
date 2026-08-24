@@ -111,3 +111,36 @@ npm test
 npm run lint
 npm run build
 ```
+
+## Rolling out the agent plane
+
+Per-profile credentials and capability packs each span two images — the hosted
+agent and the Web UI — which are released independently. Both therefore ship
+behind a kill switch, default off, so a half-rolled deployment is inert rather
+than inconsistent.
+
+```bash
+# 1. Release the runtime that can read the new documents but does not act on them.
+python scripts/release-hosted-agent.py
+
+# 2. Confirm the agent still answers, then enable one feature at a time.
+az containerapp update --name <agent> --set-env-vars DIGIBUDDY_ENABLE_PROFILE_CREDENTIALS=true
+az containerapp update --name <agent> --set-env-vars DIGIBUDDY_ENABLE_CAPABILITY_PACKS=true
+```
+
+Order matters in one direction only: the runtime must be able to *read* a
+document before the console starts writing it. Enabling a flag before the
+matching console change is harmless, because nothing writes the document yet.
+
+**Rolling back** is turning the flags off. The previous registry revision and
+every superseded artifact are retained rather than deleted, so the prior state
+is still there to return to. A release also drops environment variables the
+runtime no longer reads — the Graph client secret moved into the per-profile
+credential document — so a retired secret does not travel into new versions.
+
+Verify after each step:
+
+```bash
+curl -fsS "$AGENT_ENDPOINT/readiness"
+python3 scripts/probe_runtime_isolation.py   # run as an agent turn, not locally
+```

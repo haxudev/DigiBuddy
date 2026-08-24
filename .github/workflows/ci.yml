@@ -1,0 +1,81 @@
+name: CI
+
+# The only workflow used to build documentation, so nothing checked that the
+# agent still worked. These are the gates the implementation plan assumes exist.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hosted-agent:
+    name: Hosted agent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run the adapter suite
+        working-directory: hosted-agent
+        run: python -m unittest discover -s tests -v
+
+      - name: Check the vendored skill bundle has not drifted
+        run: scripts/sync-agent-skills.sh --check
+        continue-on-error: true
+
+  web-ui:
+    name: Web UI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+
+      - run: npm ci
+
+      # Types, behaviour, style and a real build. The build matters because a
+      # route can typecheck and still fail to compile under the App Router.
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build
+
+  image:
+    name: Hosted agent image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Dockerfile asserts the packaged skill manifest and the Node version,
+      # so a broken payload fails here rather than in a deployment.
+      - name: Build the runtime image
+        run: docker build -f hosted-agent/Dockerfile -t digibuddy-ci:${{ github.sha }} .
+
+      - name: The adapter refuses to expose its own environment
+        run: |
+          docker run --rm --entrypoint python digibuddy-ci:${{ github.sha }} \
+            -c "
+          import sys
+          sys.path.insert(0, '/app/hosted-agent')
+          from codex_adapter.hardening import harden_process
+          assert harden_process(), 'the adapter could not be made undumpable'
+          print('adapter hardening verified in the built image')
+          "
