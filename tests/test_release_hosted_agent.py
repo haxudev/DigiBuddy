@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import struct
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -323,14 +324,26 @@ class ReleaseRunnerTests(unittest.TestCase):
         self.commands.add(["git", "rev-parse", "HEAD"], stdout="abc1234deadbeef\n")
         self.commands.add(["scripts/sync-agent-skills.sh", "--check"], stdout="ok\n")
         self.commands.add(
-            ["python", "-m", "unittest", "tests/test_release_hosted_agent.py"],
+            [sys.executable, "-m", "unittest", "tests/test_release_hosted_agent.py"],
             stdout="release tests ok\n",
         )
         self.commands.add(
-            ["python", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"],
+            [
+                sys.executable,
+                "-m",
+                "unittest",
+                "discover",
+                "-s",
+                "tests",
+                "-p",
+                "test_*.py",
+            ],
             stdout="hosted ok\n",
         )
-        self.commands.add(["python", "hosted-agent/tests/probe_maturity_mcp.py"], stdout="probe ok\n")
+        self.commands.add(
+            [sys.executable, "hosted-agent/tests/probe_maturity_mcp.py"],
+            stdout="probe ok\n",
+        )
         self.commands.add(["npm", "test"], stdout="web tests ok\n")
         self.commands.add(["npm", "run", "lint"], stdout="web lint ok\n")
         self.commands.add(["npm", "run", "build"], stdout="web build ok\n")

@@ -4,6 +4,7 @@ import argparse
 import copy
 import json
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -254,13 +255,22 @@ class ReleaseRunner:
     def _run_release_gates(self) -> None:
         self._run_checked(["scripts/sync-agent-skills.sh", "--check"])
         self._run_checked(
-            ["python", "-m", "unittest", "tests/test_release_hosted_agent.py"]
+            [sys.executable, "-m", "unittest", "tests/test_release_hosted_agent.py"]
         )
         self._run_checked(
-            ["python", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"],
+            [
+                sys.executable,
+                "-m",
+                "unittest",
+                "discover",
+                "-s",
+                "tests",
+                "-p",
+                "test_*.py",
+            ],
             cwd=self.root / "hosted-agent",
         )
-        self._run_checked(["python", "hosted-agent/tests/probe_maturity_mcp.py"])
+        self._run_checked([sys.executable, "hosted-agent/tests/probe_maturity_mcp.py"])
         self._run_checked(["npm", "test"], cwd=self.root / "webui")
         self._run_checked(["npm", "run", "lint"], cwd=self.root / "webui")
         self._run_checked(["npm", "run", "build"], cwd=self.root / "webui")
