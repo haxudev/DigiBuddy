@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
+import { randomBytes, scryptSync } from "node:crypto";
 import test from "node:test";
 
-import { AdminAuthError, requireAdmin } from "./admin-auth.ts";
+import {
+  ADMIN_SESSION_COOKIE,
+  AdminAuthError,
+  createAdminSession,
+  requireAdmin,
+  verifyAdminCredentials,
+} from "./admin-auth.ts";
 
 function principalHeader(payload: unknown): Headers {
   return new Headers({
@@ -87,6 +94,77 @@ test("a malformed principal header is not trusted", () => {
       requireAdmin(new Headers({ "x-ms-client-principal": "not-base64-json" }), {
         ADMIN_PRINCIPAL_IDS: "abc",
       }),
+    AdminAuthError,
+  );
+});
+
+function passwordEnvironment() {
+  const salt = randomBytes(16);
+  const password = "correct horse battery staple";
+  const hash = scryptSync(password, salt, 32, {
+    N: 16384,
+    r: 8,
+    p: 1,
+    maxmem: 64 * 1024 * 1024,
+  });
+  return {
+    password,
+    environment: {
+      ADMIN_USERNAME: "admin",
+      ADMIN_PASSWORD_HASH: `scrypt$16384$8$1$${salt.toString("base64url")}$${hash.toString("base64url")}`,
+      ADMIN_SESSION_SECRET: randomBytes(48).toString("base64url"),
+      ADMIN_PRINCIPAL_IDS: "entra-admin",
+    },
+  };
+}
+
+test("configured password login takes precedence over Easy Auth", () => {
+  const { environment } = passwordEnvironment();
+  assert.throws(
+    () =>
+      requireAdmin(
+        principalHeader({ userId: "entra-admin", userDetails: "admin@example.com" }),
+        environment,
+      ),
+    AdminAuthError,
+  );
+});
+
+test("password credentials create a signed administrator session", () => {
+  const { password, environment } = passwordEnvironment();
+  assert.equal(verifyAdminCredentials("admin", password, environment), true);
+  assert.equal(verifyAdminCredentials("admin", "wrong", environment), false);
+  assert.equal(verifyAdminCredentials("other", password, environment), false);
+
+  const token = createAdminSession("admin", environment);
+  const principal = requireAdmin(
+    new Headers({ cookie: `${ADMIN_SESSION_COOKIE}=${token}` }),
+    environment,
+  );
+  assert.equal(principal.id, "password:admin");
+});
+
+test("expired or modified password sessions are rejected", () => {
+  const { environment } = passwordEnvironment();
+  const expired = createAdminSession(
+    "admin",
+    environment,
+    Date.now() - 9 * 60 * 60 * 1000,
+  );
+  assert.throws(
+    () =>
+      requireAdmin(
+        new Headers({ cookie: `${ADMIN_SESSION_COOKIE}=${expired}` }),
+        environment,
+      ),
+    AdminAuthError,
+  );
+  assert.throws(
+    () =>
+      requireAdmin(
+        new Headers({ cookie: `${ADMIN_SESSION_COOKIE}=${expired}x` }),
+        environment,
+      ),
     AdminAuthError,
   );
 });

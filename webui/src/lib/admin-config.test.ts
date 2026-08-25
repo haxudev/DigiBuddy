@@ -12,9 +12,11 @@ import {
   assertReadableSchema,
   assertWritableDocument,
   buildConfigStore,
+  normaliseCatalogue,
   normaliseMcp,
   normaliseModels,
   normaliseProfiles,
+  normaliseSkillPolicy,
   normaliseSkills,
   preserveSecret,
   redactDocument,
@@ -37,6 +39,26 @@ test("model overlay trims trailing slashes and unknown efforts", () => {
   assert.equal(document.model, "gpt-5.2");
   assert.equal(document.endpoint, "https://example.openai.azure.com/openai/v1");
   assert.equal(document.reasoning_effort, "");
+});
+
+test("model and profile overlays accept the runtime reasoning efforts", () => {
+  assert.equal(normaliseModels({ reasoning_effort: "XHIGH" }).reasoning_effort, "xhigh");
+  assert.equal(normaliseModels({ reasoning_effort: "max" }).reasoning_effort, "max");
+
+  const { profiles } = normaliseProfiles({
+    profiles: [
+      { name: "deep", reasoning_effort: "xhigh" },
+      { name: "maximum", reasoning_effort: "MAX" },
+    ],
+  });
+  assert.deepEqual(
+    profiles.map((profile) => profile.reasoning_effort),
+    ["xhigh", "max"],
+  );
+});
+
+test("the retired minimal reasoning effort is no longer accepted", () => {
+  assert.equal(normaliseModels({ reasoning_effort: "minimal" }).reasoning_effort, "");
 });
 
 test("the api key is never read back out", () => {
@@ -99,6 +121,18 @@ test("an empty profile selection restricts to nothing", () => {
   assert.deepEqual(profiles[0].skills, []);
 });
 
+test("malformed profile selections fail instead of granting everything", () => {
+  for (const field of ["skills", "tools", "mcp_servers"] as const) {
+    assert.throws(
+      () =>
+        normaliseProfiles({
+          profiles: [{ name: "broken", [field]: "pptx" }],
+        }),
+      ConfigValidationError,
+    );
+  }
+});
+
 test("profile names are validated and must be unique", () => {
   assert.throws(
     () => normaliseProfiles({ profiles: [{ name: "Not Valid" }] }),
@@ -118,6 +152,7 @@ test("the catalogue is published by the runtime, not the console", () => {
   );
   assert.throws(() => assertWritableDocument("../secrets"), ConfigValidationError);
   assert.equal(assertWritableDocument("mcp.json"), "mcp.json");
+  assert.equal(assertWritableDocument("skill-policy.json"), "skill-policy.json");
 });
 
 test("the file store round-trips a document", async () => {
@@ -276,4 +311,103 @@ test("a capability name is still one safe path segment", () => {
       `${bad} should be refused`,
     );
   }
+});
+
+// --- Catalogue skill entries -----------------------------------------------
+
+test("skill entries carry the description the runtime published", () => {
+  const catalogue = normaliseCatalogue({
+    skills: ["pptx"],
+    skill_entries: [{ name: "pptx", description: "Make decks.", source: "packaged" }],
+  });
+  assert.deepEqual(catalogue.skill_entries, [
+    { name: "pptx", description: "Make decks.", source: "packaged", enabled: true },
+  ]);
+});
+
+test("a runtime too old to publish entries states no origin at all", () => {
+  // The console uses `source` to decide whether an upload is being shadowed by
+  // a skill in the image. Defaulting the answer to "packaged" would accuse
+  // every deployed skill of colliding during the window where the runtime and
+  // the console are on different rollouts.
+  const catalogue = normaliseCatalogue({ skills: ["uploaded", "other"] });
+  assert.deepEqual(
+    catalogue.skill_entries.map((entry) => [entry.source, entry.enabled]),
+    [["", true], ["", true]],
+  );
+});
+
+test("published entries are the inventory rather than decorations", () => {
+  const catalogue = normaliseCatalogue({
+    skills: ["described", "bare"],
+    skill_entries: [{ name: "described", description: "Known.", source: "deployed" }],
+  });
+  assert.deepEqual(catalogue.skill_entries, [
+    { name: "described", description: "Known.", source: "deployed", enabled: true },
+  ]);
+});
+
+test("an unrecognised source is not taken at its word", () => {
+  const catalogue = normaliseCatalogue({
+    skills: ["odd"],
+    skill_entries: [{ name: "odd", description: "", source: "smuggled" }],
+  });
+  assert.equal(catalogue.skill_entries[0].source, "");
+});
+
+test("disabled skills remain in the inventory", () => {
+  const catalogue = normaliseCatalogue({
+    skills: ["real"],
+    skill_entries: [
+      { name: "real", description: "", source: "packaged", enabled: true },
+      { name: "paused", description: "Not active.", source: "packaged", enabled: false },
+      { name: "older-disabled", description: "Not active.", source: "packaged" },
+    ],
+  });
+  assert.deepEqual(
+    catalogue.skill_entries.map((entry) => [entry.name, entry.enabled]),
+    [["real", true], ["paused", false], ["older-disabled", false]],
+  );
+});
+
+test("malformed catalogue entries cannot invent skills", () => {
+  // `skill_entries` is now the inventory, so absence from `skills` means a
+  // skill may be disabled rather than fake. The boundary that still matters is
+  // the runtime name convention: path-shaped or empty entries are not skills.
+  const catalogue = normaliseCatalogue({
+    skills: ["real"],
+    skill_entries: [
+      { name: "real", description: "", source: "packaged", enabled: true },
+      { name: "../escape", description: "Not published.", source: "packaged" },
+      { name: "", description: "Nameless.", source: "packaged" },
+    ],
+  });
+  assert.deepEqual(
+    catalogue.skill_entries.map((entry) => entry.name),
+    ["real"],
+  );
+});
+
+// --- Packaged skill policy -------------------------------------------------
+
+test("skill policy keeps only usable skill names", () => {
+  const policy = normaliseSkillPolicy({
+    disabled: [" Research ", "../escape", "research", "pptx", 42],
+  });
+
+  assert.deepEqual(policy, {
+    disabled: ["research", "pptx"],
+    schema_version: SCHEMA_VERSION,
+  });
+});
+
+test("skill policy tolerates a missing or malformed document", () => {
+  assert.deepEqual(normaliseSkillPolicy(null), {
+    disabled: [],
+    schema_version: SCHEMA_VERSION,
+  });
+  assert.deepEqual(normaliseSkillPolicy({ disabled: "nope" }), {
+    disabled: [],
+    schema_version: SCHEMA_VERSION,
+  });
 });

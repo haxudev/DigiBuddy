@@ -39,6 +39,24 @@
   font-weight: 600;
 }
 
+.headerActions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  color: #68767c;
+  font-size: 13px;
+}
+
+.headerActions button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #2f7d72;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
 .tabs {
   display: flex;
   gap: 8px;
@@ -80,6 +98,13 @@
   color: #5b6a72;
   font-size: 13px;
   line-height: 1.55;
+}
+
+.clamp {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .grid {
@@ -222,4 +247,150 @@
   color: #5b6a72;
   font-size: 12px;
   font-weight: 500;
+}
+
+.loginShell {
+  position: relative;
+  display: grid;
+  min-height: 100vh;
+  min-height: 100dvh;
+  place-items: center;
+  overflow: hidden;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 20% 10%, rgb(75 166 153 / 22%), transparent 34%),
+    #e8edef;
+  color: #182028;
+}
+
+.loginBackdrop {
+  position: absolute;
+  inset: 7%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 28px;
+  border: 1px solid rgb(255 255 255 / 65%);
+  border-radius: 24px;
+  background: rgb(255 255 255 / 45%);
+  box-shadow: 0 30px 90px rgb(29 55 63 / 15%);
+  color: #53646b;
+  filter: blur(2px);
+}
+
+.loginBackdrop strong {
+  font-size: clamp(24px, 4vw, 48px);
+  letter-spacing: -0.05em;
+}
+
+.loginMask {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 420px);
+  padding: 34px;
+  border: 1px solid rgb(255 255 255 / 78%);
+  border-radius: 20px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 30px 80px rgb(23 45 52 / 24%);
+  backdrop-filter: blur(18px);
+}
+
+.loginMark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  margin-bottom: 24px;
+  border-radius: 14px;
+  background: #dff3ef;
+  color: #176f65;
+  font-size: 25px;
+}
+
+.loginMask h1 {
+  margin-top: 7px;
+  font-size: 28px;
+  letter-spacing: -0.04em;
+}
+
+.loginHint,
+.loginStatus {
+  margin-top: 12px;
+  color: #64737a;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.loginMask form {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.loginMask label {
+  display: grid;
+  gap: 7px;
+  color: #46545c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.loginMask input {
+  width: 100%;
+  padding: 12px 13px;
+  border: 1px solid #cdd6da;
+  border-radius: 10px;
+  outline: none;
+  background: #fbfcfc;
+  color: #182028;
+  font: inherit;
+  font-size: 15px;
+}
+
+.loginMask input:focus {
+  border-color: #2f8d80;
+  box-shadow: 0 0 0 3px rgb(47 141 128 / 14%);
+}
+
+.loginMask form > button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: #176f65;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.loginMask form > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.loginMask > a {
+  display: inline-block;
+  margin-top: 22px;
+  color: #2f7d72;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .shell {
+    padding: 28px 18px 52px;
+  }
+
+  .header {
+    align-items: flex-start;
+  }
+
+  .headerActions {
+    align-items: flex-end;
+    flex-direction: column;
+  }
+
+  .loginMask {
+    padding: 28px 22px;
+  }
 }

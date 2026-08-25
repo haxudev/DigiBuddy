@@ -1,10 +1,10 @@
 import {
-  ChatSession,
   createSession,
   parseSessions,
   serializeSessions,
   sessionsStorageKey,
-} from "./sessions";
+  type ChatSession,
+} from "./sessions.ts";
 
 /**
  * Sessions are browser state, not React state: `useSyncExternalStore` reads
@@ -65,6 +65,10 @@ export function subscribeSessions(listener: () => void): () => void {
 }
 
 export function getSessions(): ChatSession[] {
+  // `setSessionOwner` invalidates the in-memory namespace after the component
+  // has already subscribed. React asks for a fresh snapshot after that emit,
+  // so the snapshot getter must reload the new owner's sessions.
+  load();
   return sessions;
 }
 
@@ -99,5 +103,6 @@ export function updateSession(
 export function resetSessionStore(): void {
   sessions = EMPTY;
   loaded = false;
+  owner = "";
   listeners.clear();
 }

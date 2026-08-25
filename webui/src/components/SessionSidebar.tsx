@@ -33,7 +33,7 @@ export default function SessionSidebar({
   return (
     <aside className={styles.sidebar}>
       <div className={styles.brand}>
-        <h1>DigiBuddy</h1>
+        <h1>GTMBuddy</h1>
       </div>
 
       <button

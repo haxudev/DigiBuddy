@@ -189,6 +189,8 @@ test("extracts the nested error from a failed Responses event", () => {
 test("an unknown thinking strength is dropped", () => {
   assert.equal(turnOptions({ reasoningEffort: "turbo" }).reasoningEffort, "");
   assert.equal(turnOptions({ reasoningEffort: "HIGH" }).reasoningEffort, "high");
+  assert.equal(turnOptions({ reasoningEffort: "MAX" }).reasoningEffort, "max");
+  assert.equal(turnOptions({ reasoningEffort: "minimal" }).reasoningEffort, "");
   assert.equal(turnOptions(undefined).reasoningEffort, "");
 });
 
@@ -278,4 +280,134 @@ test("an unnamed agent sends no reference at all", () => {
 
   assert.equal("agent_reference" in body, false);
   assert.equal("agent" in body, false);
+});
+
+test("a hosted agent receives reasoning effort through metadata", () => {
+  const body = agentRequestBody({
+    connection: {
+      endpoint: "https://x.services.ai.azure.com/a",
+      apiKey: "",
+      authMode: "bearer",
+      model: "gpt-5.6-luna",
+      agentName: "digibuddy-codex",
+      agentVersion: "3",
+      profile: "digibuddy",
+      useManagedIdentity: true,
+    },
+    input: [{ role: "user", content: "hi" }],
+    previousResponseId: "",
+    reasoningEffort: "low",
+  });
+
+  assert.equal("reasoning" in body, false);
+  assert.deepEqual(body.metadata, {
+    profile: "digibuddy",
+    reasoning_effort: "low",
+  });
+});
+
+test("a direct model request keeps the standard reasoning field", () => {
+  const body = agentRequestBody({
+    connection: {
+      endpoint: "https://x.openai.azure.com/openai/v1/responses",
+      apiKey: "key",
+      authMode: "api-key",
+      model: "gpt-5.6-luna",
+      agentName: "",
+      agentVersion: "",
+      profile: "",
+      useManagedIdentity: false,
+    },
+    input: [{ role: "user", content: "hi" }],
+    previousResponseId: "",
+    reasoningEffort: "high",
+  });
+
+  assert.deepEqual(body.reasoning, { effort: "high" });
+});
+
+// --- Loading a skill for one turn ------------------------------------------
+
+test("turnOptions reads the skills a slash command named", () => {
+  const { skills, command } = turnOptions({
+    skills: ["agent-maturity-assess", "agent-maturity-report"],
+    command: "agent-adoption-assessment",
+  });
+  assert.deepEqual(skills, ["agent-maturity-assess", "agent-maturity-report"]);
+  assert.equal(command, "agent-adoption-assessment");
+});
+
+test("turnOptions drops skill names that are not skill names", () => {
+  // The runtime checks these again, but a name that could reach outside a
+  // skill directory has no business being forwarded in the first place.
+  const { skills } = turnOptions({
+    skills: ["fine", "../../etc/passwd", "/absolute", "has space", 7, null],
+  });
+  assert.deepEqual(skills, ["fine"]);
+});
+
+test("turnOptions drops duplicates and folds case", () => {
+  const { skills } = turnOptions({ skills: ["Pptx", "pptx"] });
+  assert.deepEqual(skills, ["pptx"]);
+});
+
+test("turnOptions caps how many skills one turn may load", () => {
+  const requested = Array.from({ length: 20 }, (_, index) => `skill-${index}`);
+  assert.equal(turnOptions({ skills: requested }).skills.length, 8);
+});
+
+test("turnOptions asks for no skills when the composer sent none", () => {
+  assert.deepEqual(turnOptions(undefined).skills, []);
+  assert.deepEqual(turnOptions({ skills: "not-an-array" }).skills, []);
+  assert.equal(turnOptions({}).command, "");
+});
+
+test("skills travel as request metadata beside the profile", () => {
+  // Metadata values are strings, so the list is comma-separated; the runtime
+  // accepts either shape.
+  const body = agentRequestBody({
+    connection: {
+      endpoint: "https://x.services.ai.azure.com/a",
+      apiKey: "",
+      authMode: "bearer",
+      model: "gpt-5.6-luna",
+      agentName: "haeronclaw-codex",
+      agentVersion: "",
+      profile: "marketing",
+      useManagedIdentity: true,
+    },
+    input: "run an assessment",
+    previousResponseId: "",
+    reasoningEffort: "",
+    skills: ["agent-maturity-assess", "agent-maturity-report"],
+    command: "agent-adoption-assessment",
+  });
+
+  assert.deepEqual(body.metadata, {
+    profile: "marketing",
+    skills: "agent-maturity-assess,agent-maturity-report",
+    command: "agent-adoption-assessment",
+  });
+});
+
+test("a turn with no command carries no skill metadata", () => {
+  // The overwhelming majority of turns are ordinary messages, and they should
+  // look on the wire exactly as they did before commands existed.
+  const body = agentRequestBody({
+    connection: {
+      endpoint: "https://x.services.ai.azure.com/a",
+      apiKey: "",
+      authMode: "bearer",
+      model: "gpt-5.6-luna",
+      agentName: "haeronclaw-codex",
+      agentVersion: "",
+      profile: "marketing",
+      useManagedIdentity: true,
+    },
+    input: "hello",
+    previousResponseId: "",
+    reasoningEffort: "",
+  });
+
+  assert.deepEqual(body.metadata, { profile: "marketing" });
 });

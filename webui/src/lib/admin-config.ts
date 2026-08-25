@@ -8,6 +8,7 @@
  */
 
 import { CAPABILITY_NAME, bundlePath } from "./skill-bundle.ts";
+import { COMMAND_NAME } from "./skill-commands.ts";
 import {
   MANAGED_ARTIFACT_ID,
   isManagedArtifactName,
@@ -19,6 +20,8 @@ export const PROFILES_DOCUMENT = "profiles.json";
 export const CATALOGUE_DOCUMENT = "catalogue.json";
 export const SKILLS_DOCUMENT = "skills.json";
 export const CREDENTIALS_DOCUMENT = "credentials.json";
+export const COMMANDS_DOCUMENT = "commands.json";
+export const SKILL_POLICY_DOCUMENT = "skill-policy.json";
 
 export const DOCUMENTS = [
   MODELS_DOCUMENT,
@@ -27,6 +30,8 @@ export const DOCUMENTS = [
   CATALOGUE_DOCUMENT,
   SKILLS_DOCUMENT,
   CREDENTIALS_DOCUMENT,
+  COMMANDS_DOCUMENT,
+  SKILL_POLICY_DOCUMENT,
 ] as const;
 
 export type DocumentName = (typeof DOCUMENTS)[number];
@@ -52,11 +57,12 @@ export const WRITABLE_DOCUMENTS: DocumentName[] = [
   MODELS_DOCUMENT,
   MCP_DOCUMENT,
   PROFILES_DOCUMENT,
+  SKILL_POLICY_DOCUMENT,
   // skills.json is written atomically by /api/admin/skills.
   // credentials.json is write-only through /api/admin/credentials.
 ];
 
-export const REASONING_EFFORTS = ["minimal", "low", "medium", "high"] as const;
+export const REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 export type JsonDocument = Record<string, unknown>;
 
@@ -157,10 +163,40 @@ export function isActive(entry: DeployedSkill): boolean {
 
 export type SkillsDocument = { skills: DeployedSkill[]; schema_version?: number };
 
+export type SkillPolicy = { disabled: string[]; schema_version?: number };
+
+/**
+ * A skill as the runtime describes it, not merely names it.
+ *
+ * The console cannot open a `SKILL.md`: the Web UI and the hosted agent are
+ * separate containers sharing only this store. So whatever the slash menu shows
+ * has to be published here by the runtime that can read the files.
+ */
+export type CatalogueSkill = {
+  name: string;
+  description: string;
+  /**
+   * `packaged` ships in the image; `deployed` was uploaded by an administrator.
+   *
+   * Empty means the runtime did not say. That is a real state, not a default:
+   * a runtime too old to publish `skill_entries` knows the names but nothing
+   * else, and treating its silence as `packaged` would make every deployed
+   * skill look like it collides with one in the image.
+   */
+  source: "packaged" | "deployed" | "";
+  enabled: boolean;
+};
+
 export type Catalogue = {
   skills: string[];
   tools: string[];
   mcp_servers: string[];
+  /**
+   * The full inventory as the runtime describes it. `skills` is only the
+   * executable subset now, so disabled packaged skills live here without
+   * appearing in the active-name list.
+   */
+  skill_entries: CatalogueSkill[];
 };
 
 export class ConfigValidationError extends Error {}
@@ -211,6 +247,26 @@ function names(value: unknown): string[] | null {
   return value
     .map((item) => text(item))
     .filter((item, index, all) => item && all.indexOf(item) === index);
+}
+
+function profileSelection(
+  raw: Record<string, unknown>,
+  field: "skills" | "tools" | "mcp_servers",
+  profile: string,
+): string[] | null {
+  const value = raw[field];
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value)) {
+    throw new ConfigValidationError(
+      `${profile}.${field} must be an array or null.`,
+    );
+  }
+  return names(value) ?? [];
+}
+
+function skillName(value: unknown): string {
+  const name = text(value).toLowerCase();
+  return COMMAND_NAME.test(name) ? name : "";
 }
 
 function reasoningEffort(value: unknown): string {
@@ -338,14 +394,32 @@ export function normaliseProfiles(input: unknown): ProfilesDocument {
       display_name: text(raw.display_name) || name,
       description: text(raw.description),
       persona: text(raw.persona),
-      skills: names(raw.skills),
-      tools: names(raw.tools),
-      mcp_servers: names(raw.mcp_servers),
+      skills: profileSelection(raw, "skills", name),
+      tools: profileSelection(raw, "tools", name),
+      mcp_servers: profileSelection(raw, "mcp_servers", name),
       model: text(raw.model),
       reasoning_effort: reasoningEffort(raw.reasoning_effort),
     });
   }
   return versioned({ profiles });
+}
+
+export function normaliseSkillPolicy(input: unknown): SkillPolicy {
+  const raw = record(input).disabled;
+  if (!Array.isArray(raw)) return versioned({ disabled: [] });
+
+  const disabled: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const name = skillName(item);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    disabled.push(name);
+  }
+  // Uploaded skills already have an `enabled` bit in skills.json. This policy
+  // is only for packaged skills, which cannot overlap because the runtime
+  // refuses an upload that would shadow one baked into the image.
+  return versioned({ disabled });
 }
 
 export function normaliseSkills(input: unknown): SkillsDocument {
@@ -412,6 +486,7 @@ export function normaliseDocument(
   if (name === MODELS_DOCUMENT) return normaliseModels(input);
   if (name === MCP_DOCUMENT) return normaliseMcp(input);
   if (name === PROFILES_DOCUMENT) return normaliseProfiles(input);
+  if (name === SKILL_POLICY_DOCUMENT) return normaliseSkillPolicy(input);
   if (name === SKILLS_DOCUMENT) return normaliseSkills(input);
   throw new ConfigValidationError(`${name} is published by the runtime.`);
 }
@@ -441,10 +516,55 @@ export function preserveSecret(
 
 export function normaliseCatalogue(input: unknown): Catalogue {
   const raw = record(input);
+  const skills: string[] = [];
+  const seenSkills = new Set<string>();
+  for (const item of names(raw.skills) ?? []) {
+    const name = skillName(item);
+    if (!name || seenSkills.has(name)) continue;
+    seenSkills.add(name);
+    skills.push(name);
+  }
+  const active = new Set(skills);
+  const rawSkillEntries = raw.skill_entries;
+  const skillEntriesPublished = Array.isArray(rawSkillEntries);
+  const skill_entries: CatalogueSkill[] = [];
+  const seen = new Set<string>();
+  if (skillEntriesPublished) {
+    for (const item of rawSkillEntries) {
+      const entry = record(item);
+      const name = skillName(entry.name);
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      const source = text(entry.source);
+      skill_entries.push({
+        name,
+        description: text(entry.description),
+        source:
+          source === "deployed" || source === "packaged"
+            ? (source as CatalogueSkill["source"])
+            : "",
+        // A new runtime writes this explicitly. During a mixed rollout, derive
+        // the missing bit from the active set instead of pretending every
+        // inventory row is enabled.
+        enabled: typeof entry.enabled === "boolean" ? entry.enabled : active.has(name),
+      });
+    }
+  }
   return {
-    skills: names(raw.skills) ?? [],
+    skills,
     tools: names(raw.tools) ?? [],
     mcp_servers: names(raw.mcp_servers) ?? [],
+    // Older runtimes publish only the active names. Those names still deserve
+    // a row, but their origin remains unknown; callers use that silence to
+    // avoid falsely reporting an upload/image collision.
+    skill_entries: skillEntriesPublished
+      ? skill_entries
+      : skills.map((name) => ({
+          name,
+          description: "",
+          source: "" as const,
+          enabled: true,
+        })),
   };
 }
 

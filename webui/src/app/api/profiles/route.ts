@@ -7,7 +7,10 @@ import {
   normaliseMcp,
   normaliseProfiles,
 } from "@/lib/admin-config";
-import { describeProfiles } from "@/lib/profile-capabilities";
+import {
+  defaultProfileCapabilities,
+  describeProfiles,
+} from "@/lib/profile-capabilities";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,18 +28,42 @@ export async function GET() {
       store.read(CATALOGUE_DOCUMENT),
       store.read(MCP_DOCUMENT),
     ]);
+    const catalogue = normaliseCatalogue(catalogueDocument);
+    const mcp = normaliseMcp(mcpDocument);
+    const profiles = describeProfiles(
+      normaliseProfiles(profilesDocument).profiles,
+      catalogue,
+      mcp,
+    );
     return Response.json(
       {
-        profiles: describeProfiles(
-          normaliseProfiles(profilesDocument).profiles,
-          normaliseCatalogue(catalogueDocument),
-          normaliseMcp(mcpDocument),
-        ),
+        profiles:
+          profiles.length > 0
+            ? profiles
+            : [
+                defaultProfileCapabilities(
+                  catalogue,
+                  mcp,
+                  process.env.DIGIBUDDY_PROFILE?.trim() || undefined,
+                ),
+              ],
       },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch {
-    // An unconfigured or unreachable store simply means "no profile choice".
-    return Response.json({ profiles: [] }, { headers: { "Cache-Control": "no-store" } });
+    // The hosted runtime has this same unrestricted fallback, so the picker
+    // remains truthful even before the shared configuration store is seeded.
+    return Response.json(
+      {
+        profiles: [
+          defaultProfileCapabilities(
+            { skills: [], tools: [], mcp_servers: [], skill_entries: [] },
+            { servers: {} },
+            process.env.DIGIBUDDY_PROFILE?.trim() || undefined,
+          ),
+        ],
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   }
 }

@@ -150,7 +150,9 @@ The admin console API over the shared configuration store. Both methods require 
 
 ### Authentication
 
-The route reads the Easy Auth `x-ms-client-principal` header and matches the caller's Entra object ID or sign-in name against `ADMIN_PRINCIPAL_IDS`. An empty allowlist denies everyone. Outside production, `ADMIN_ALLOW_ANONYMOUS=true` admits an anonymous local caller.
+When `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, and `ADMIN_SESSION_SECRET` are configured, the route requires the signed HttpOnly cookie issued by `/api/admin/session`. The password hash uses `scrypt$N$r$p$<base64url-salt>$<base64url-derived-key>`, and the session expires after eight hours. This mode takes precedence over Easy Auth.
+
+Without dedicated password settings, the route reads the Easy Auth `x-ms-client-principal` header and matches the caller's Entra object ID or sign-in name against `ADMIN_PRINCIPAL_IDS`. An empty allowlist denies everyone. Outside production, `ADMIN_ALLOW_ANONYMOUS=true` admits an anonymous local caller.
 
 | Status | Meaning |
 | --- | --- |
@@ -182,7 +184,15 @@ Returns all five documents. `models.json` is redacted: `api_key` is removed and 
 | --- | --- |
 | `DIGIBUDDY_CONFIG_URI` | Azure Blob container URI, accessed with a managed identity |
 | `DIGIBUDDY_CONFIG_DIR` | Filesystem directory, for local development |
+| `AUTH_REQUIRE_CORPORATE_ACCOUNT` | `true` to enforce the company-account policy |
+| `AUTH_TENANT_ID` | Trusted Entra tenant ID, or a comma-separated set of them |
+| `AUTH_ALLOWED_UPN_DOMAINS` | Comma-separated company UPN domains |
+| `AUTH_ALLOWED_HOME_TENANT_IDS` | Comma-separated trusted corporate B2B home tenants |
+| `AUTH_ALLOWED_EMAIL_DOMAINS` | Work-email domains allowed for trusted B2B accounts |
 | `ADMIN_PRINCIPAL_IDS` | Comma-separated Entra object IDs or sign-in names |
+| `ADMIN_USERNAME` | Dedicated `/admin` username |
+| `ADMIN_PASSWORD_HASH` | Scrypt password hash; enables password login with the other dedicated settings |
+| `ADMIN_SESSION_SECRET` | Random secret of at least 32 characters used to sign administrator sessions |
 | `ADMIN_ALLOW_ANONYMOUS` | `true` to allow anonymous access outside production |
 
 The hosted agent must be pointed at the same store for admin changes to reach it.

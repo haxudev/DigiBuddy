@@ -6,6 +6,17 @@ FOUNDRY_AGENT_VERSION=2
 CODEX_MODEL_NAME=gpt-5.6-luna
 AGENT_ENDPOINT_ALLOWLIST=services.ai.azure.com,openai.azure.com
 
+# Optional: accept native members of one Entra tenant plus explicitly trusted
+# corporate B2B accounts. The app registration must emit `acct` and `upn`.
+AUTH_PROVIDERS=aad
+AUTH_REQUIRE_CORPORATE_ACCOUNT=false
+# One tenant, or a comma-separated set when several are trusted.
+AUTH_TENANT_ID=
+AUTH_ALLOWED_UPN_DOMAINS=
+# Trusted B2B home tenants and their verified work-email domains.
+AUTH_ALLOWED_HOME_TENANT_IDS=
+AUTH_ALLOWED_EMAIL_DOMAINS=
+
 # Shared runtime configuration store. Set exactly one, and point the hosted
 # agent at the same location so admin changes reach it.
 DIGIBUDDY_CONFIG_URI=https://yourstorage.blob.core.windows.net/digibuddy-config
@@ -18,5 +29,12 @@ DIGIBUDDY_CONFIG_URI=https://yourstorage.blob.core.windows.net/digibuddy-config
 # The console expects Easy Auth in front of it, supplying x-ms-client-principal.
 # An empty list denies everyone.
 ADMIN_PRINCIPAL_IDS=
+
+# Optional dedicated /admin login. When all three values are set, this takes
+# precedence over ADMIN_PRINCIPAL_IDS. Hash format:
+# scrypt$16384$8$1$<base64url-salt>$<base64url-derived-key>
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD_HASH=
+ADMIN_SESSION_SECRET=
 # Local development only; ignored when NODE_ENV=production.
 # ADMIN_ALLOW_ANONYMOUS=true

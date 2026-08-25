@@ -30,6 +30,11 @@ from .events import RuntimeEvent, translate_notification
 from .hardening import harden_process
 from .profiles import AgentProfile, resolve_profile
 from .session_map import ResponseThreadMap
+from .turn_skills import (
+    apply_skill_directive,
+    resolve_turn_skills,
+    skill_directive,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +162,8 @@ class CodexRuntime:
         profile: str | None = None,
         reasoning_effort: str | None = None,
         owner: str = "",
+        skills: tuple[str, ...] = (),
+        command: str = "",
     ) -> AsyncIterator[RuntimeEvent]:
         async with self._lock:
             binding = self._thread_map.lookup(previous_response_id)
@@ -186,6 +193,24 @@ class CodexRuntime:
             )
 
             await self._ensure_started(active, reasoning_effort or "")
+
+            # After start-up, because that is what installs the skills: the
+            # profile's own set is published into Codex's global root as the
+            # engine is prepared, so asking earlier would be asking about a
+            # directory that is about to be rebuilt.
+            loaded = resolve_turn_skills(
+                skills,
+                codex_home_skills=self._base_settings.codex_home / "skills",
+                payload_skills=self._base_settings.payload_root / "skills",
+                allows=active.allows_skill,
+            )
+            if skills and not loaded:
+                logger.warning(
+                    "Turn requested skills %s but none are available to profile %r",
+                    ", ".join(skills),
+                    active.name,
+                )
+            prompt = apply_skill_directive(prompt, skill_directive(loaded, command))
 
             workspace = self.conversation_workspace(previous_response_id, response_id)
             workspace.mkdir(parents=True, exist_ok=True)
@@ -314,7 +339,7 @@ class CodexRuntime:
             "cwd": str(workspace),
             "approvalPolicy": self._settings.approval_policy,
             "sandbox": self._settings.sandbox,
-            "baseInstructions": load_instructions(self._settings, profile),
+            "baseInstructions": load_instructions(self._settings, profile, self._store),
         }
         if self._settings.model_endpoint:
             params["modelProvider"] = self._settings.model_provider

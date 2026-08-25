@@ -1,4 +1,8 @@
-import { optionalPrincipal, ownerKey } from "@/lib/identity";
+import {
+  NotSignedInError,
+  ownerKey,
+  requirePrincipal,
+} from "@/lib/identity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,11 +35,25 @@ function providers(): string[] {
   return declared.length > 0 ? [...new Set(declared)] : ["aad"];
 }
 
+function corporateOnly(): boolean {
+  return process.env.AUTH_REQUIRE_CORPORATE_ACCOUNT === "true";
+}
+
 export async function GET(request: Request) {
-  const principal = optionalPrincipal(request.headers);
-  if (!principal) {
+  let principal;
+  try {
+    principal = requirePrincipal(request.headers);
+  } catch (error) {
+    if (!(error instanceof NotSignedInError)) throw error;
+    const rejected = request.headers.has("x-ms-client-principal");
     return Response.json(
-      { signedIn: false, providers: providers() },
+      {
+        signedIn: false,
+        providers: providers(),
+        corporateOnly: corporateOnly(),
+        rejected,
+        ...(rejected ? { reason: error.message } : {}),
+      },
       { headers: { "Cache-Control": "no-store" } },
     );
   }
@@ -46,6 +64,7 @@ export async function GET(request: Request) {
       provider: principal.provider,
       owner: ownerKey(principal),
       providers: providers(),
+      corporateOnly: corporateOnly(),
     },
     { headers: { "Cache-Control": "no-store" } },
   );

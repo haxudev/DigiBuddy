@@ -18,6 +18,8 @@ export type ProfileCapabilities = {
   mcp_servers: string[];
 };
 
+export const DEFAULT_PROFILE_NAME = "digibuddy";
+
 /** `null` keeps the whole catalogue; an array keeps only catalogued entries. */
 function resolve(selection: string[] | null, catalogue: string[]): string[] {
   if (selection === null) return [...catalogue];
@@ -42,4 +44,29 @@ export function describeProfiles(
     tools: resolve(profile.tools, catalogue.tools),
     mcp_servers: resolve(profile.mcp_servers, enabled),
   }));
+}
+
+/** Mirror the runtime's built-in profile when no admin document exists yet. */
+export function defaultProfileCapabilities(
+  catalogue: Catalogue,
+  mcp: McpDocument,
+  name = DEFAULT_PROFILE_NAME,
+): ProfileCapabilities {
+  return describeProfiles(
+    [
+      {
+        name,
+        display_name: "GTMBuddy",
+        description: "Full Microsoft domain expert with every packaged capability.",
+        persona: "",
+        skills: null,
+        tools: null,
+        mcp_servers: null,
+        model: "",
+        reasoning_effort: "",
+      },
+    ],
+    catalogue,
+    mcp,
+  )[0];
 }

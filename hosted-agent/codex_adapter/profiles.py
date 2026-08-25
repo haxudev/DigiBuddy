@@ -31,7 +31,7 @@ from typing import Any
 DEFAULT_PROFILE_NAME = "digibuddy"
 _PROFILE_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
-REASONING_EFFORTS = frozenset({"minimal", "low", "medium", "high"})
+REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 
 #: Sentinel for "the key was not present at all", which is the only thing that
 #: may widen a profile to the whole catalogue.
@@ -52,6 +52,20 @@ class UnknownProfileError(LookupError):
 
 class MalformedProfileError(ValueError):
     """A profile entry could not be read the way it was written."""
+
+
+class ProfileMap(dict[str, "AgentProfile"]):
+    """Parsed profiles plus whether a profiles document actually existed.
+
+    An empty mapping is ambiguous otherwise. It may mean "nothing has ever been
+    configured", where the built-in unrestricted default is intentional, or
+    "an administrator supplied an empty/all-invalid document", where falling
+    back to that default would turn a bad edit into a capability escalation.
+    """
+
+    def __init__(self, *, configured: bool = False):
+        super().__init__()
+        self.configured = configured
 
 
 @dataclass(frozen=True)
@@ -80,7 +94,7 @@ class AgentProfile:
 #: Unrestricted profile used when nothing else is configured or requested.
 DEFAULT_PROFILE = AgentProfile(
     name=DEFAULT_PROFILE_NAME,
-    display_name="DigiBuddy",
+    display_name="GTMBuddy",
     description="Full Microsoft domain expert with every packaged capability.",
 )
 
@@ -109,13 +123,13 @@ def _text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-def parse_profiles(document: Any) -> dict[str, AgentProfile]:
+def parse_profiles(document: Any) -> ProfileMap:
     """Parse a ``profiles.json`` document into a name -> profile mapping.
 
     Malformed entries are skipped rather than failing the whole runtime, so one
     bad edit in the admin console cannot take the agent offline.
     """
-    profiles: dict[str, AgentProfile] = {}
+    profiles = ProfileMap(configured=isinstance(document, dict))
     entries = document.get("profiles") if isinstance(document, dict) else None
     if not isinstance(entries, list):
         return profiles
@@ -159,13 +173,25 @@ def resolve_profile(
     resume as the unrestricted default.
     """
     name = (requested or "").strip()
+    configured = (
+        profiles.configured if isinstance(profiles, ProfileMap) else bool(profiles)
+    )
     if name:
         if name in profiles:
             return profiles[name]
+        # The built-in default exists only before an administrator has curated
+        # any profiles. Once a profiles document names even one agent, omission
+        # is policy: treating the familiar default name as a secret escape hatch
+        # would turn a typo, deletion or malformed restricted profile into the
+        # unrestricted capability set.
+        if name == DEFAULT_PROFILE_NAME and not configured:
+            return DEFAULT_PROFILE
         raise UnknownProfileError(name)
     if DEFAULT_PROFILE_NAME in profiles:
         return profiles[DEFAULT_PROFILE_NAME]
-    return DEFAULT_PROFILE
+    if not configured:
+        return DEFAULT_PROFILE
+    raise UnknownProfileError(DEFAULT_PROFILE_NAME)
 
 
 def profile_fingerprint(profile: AgentProfile) -> str:
@@ -187,16 +213,50 @@ def profile_fingerprint(profile: AgentProfile) -> str:
 
 
 @dataclass(frozen=True)
+class SkillEntry:
+    """A skill as the console needs to present it, not merely name it.
+
+    The Web UI and the hosted agent are separate containers sharing only the
+    config store, so the console cannot open a ``SKILL.md`` to find out what a
+    skill is for. Whatever the slash menu shows has to travel in the catalogue.
+    """
+
+    name: str
+    description: str = ""
+    #: ``packaged`` for skills baked into the image, ``deployed`` for ones an
+    #: administrator uploaded. The console says which is which, because a
+    #: packaged skill cannot be withdrawn from the admin surface.
+    source: str = "packaged"
+    enabled: bool = True
+
+    def as_document(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "source": self.source,
+            "enabled": self.enabled,
+        }
+
+
+@dataclass(frozen=True)
 class Catalogue:
     """What the running image actually ships, published for the admin console."""
 
     skills: tuple[str, ...] = field(default=())
     tools: tuple[str, ...] = field(default=())
     mcp_servers: tuple[str, ...] = field(default=())
+    #: The full skill inventory, with the description and switch state each one
+    #: carries.
+    #: A separate key rather than a richer ``skills``: the console and the
+    #: profile documents already read ``skills`` as a list of names, and the two
+    #: containers roll out independently, so the addition has to be one an older
+    #: reader can ignore.
+    skill_entries: tuple[SkillEntry, ...] = field(default=())
 
     def as_document(self) -> dict[str, Any]:
         return {
             "skills": list(self.skills),
             "tools": list(self.tools),
             "mcp_servers": list(self.mcp_servers),
+            "skill_entries": [entry.as_document() for entry in self.skill_entries],
         }

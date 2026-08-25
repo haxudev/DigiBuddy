@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ProfileDocument } from "./admin-config.ts";
-import { describeProfiles } from "./profile-capabilities.ts";
+import {
+  defaultProfileCapabilities,
+  describeProfiles,
+} from "./profile-capabilities.ts";
 
 function profile(overrides: Partial<ProfileDocument>): ProfileDocument {
   return {
@@ -23,6 +26,7 @@ const catalogue = {
   skills: ["research", "writing"],
   tools: ["shell"],
   mcp_servers: ["github", "stale"],
+  skill_entries: [],
 };
 
 test("a null selection inherits the whole catalogue", () => {
@@ -64,4 +68,25 @@ test("disabled MCP servers are not advertised as capabilities", () => {
     },
   });
   assert.deepEqual(described.mcp_servers, ["github"]);
+});
+
+test("the public fallback mirrors the runtime default profile", () => {
+  const described = defaultProfileCapabilities(catalogue, {
+    servers: {
+      github: {
+        url: "https://a",
+        command: "",
+        args: [],
+        env: {},
+        enabled: true,
+        bearer_token_env_var: "",
+        description: "",
+      },
+    },
+  });
+
+  assert.equal(described.name, "digibuddy");
+  assert.equal(described.display_name, "GTMBuddy");
+  assert.deepEqual(described.skills, catalogue.skills);
+  assert.deepEqual(described.mcp_servers, ["github", "stale"]);
 });

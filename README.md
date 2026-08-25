@@ -91,6 +91,80 @@ The first command materializes the commits in
 `hosted-agent/skill-sources.lock`; the second detects drift between those
 commits and the tracked Docker build context.
 
+### Skills
+
+A skill is a directory holding `SKILL.md` and whatever it needs to do its job —
+references, scripts, a vendored library, a CLI. Skills reach the agent through
+three planes.
+
+**Users** load one with a slash command. Typing `/` in the composer filters the
+skills the current agent profile can reach; picking one attaches it to the next
+message. Selection is per message, not per conversation: a skill is markdown the
+model reads on demand, so unlike the `@agent` mention — which Codex fixes when a
+thread starts — it can be chosen at any point. The runtime resolves the request
+against the bound profile and prefixes the turn with a directive naming the
+skill's `SKILL.md`.
+
+Every skill a profile can reach is offered automatically. A `commands.json`
+document layers curation on top, so an administrator can rename a command, give
+it a better description, hide one that has no business in a chat menu, or bundle
+several skills under a single name. `/agent-adoption-assessment` ships as a
+built-in example: it loads `agent-maturity-assess` and `agent-maturity-report`.
+
+**Administrators** upload skills from the console, as a zip or an HTTPS URL.
+Bundles are content-addressed and stored under `bundles/<name>/<sha256>.zip`; the
+runtime verifies the digest before extracting and refuses symlinks, path
+traversal and oversized archives. Uploaded *code* — tools and MCP servers — stays
+inert until an administrator approves the exact bytes, so replacing an approved
+artifact revokes consent rather than inheriting it.
+
+The console's Skills tab shows the whole inventory, separating the skills the
+image loads by default from custom uploads, and each one has a switch. Turning a
+skill off means the runtime stops installing it: no agent profile can reach it
+and it leaves the `/` menu. The two halves are stored apart — an upload's switch
+lives in its registry entry, a packaged skill's in `skill-policy.json` — because
+they are different kinds of statement, and the runtime refuses an upload that
+collides with a packaged name, so the two sets never overlap. Either way the
+change applies from the next turn, when the runtime re-reads its configuration.
+
+**Packages, not just prose.** A repository holding several skills, a shared
+Python package and scaffolding is *exploded* into one self-contained bundle per
+skill: shared libraries are copied into each skill and entrypoint shims are
+generated, so a skill works with nothing on `PYTHONPATH`. Declare the layout in a
+`digibuddy-skills.json` manifest at the archive root:
+
+```json
+{
+  "schema_version": 1,
+  "skills": [{ "name": "my-skill", "path": "skills/my-skill" }],
+  "shared": [{ "path": "src/my_package", "as": "_lib/my_package" }],
+  "entrypoints": [{ "path": "scripts/run.py", "module": "my_package.cli", "call": "main" }]
+}
+```
+
+Without a manifest the importer still discovers any directory holding a
+`SKILL.md`, but it cannot know that `src/my_package/` is the code those skills
+import — each bundle is extracted alone, so anything outside it is simply
+absent. The upload preview warns when a package would be left behind.
+
+### Skills and MCP servers
+
+A skill may be **accelerated** by an MCP server, but must never **require** one.
+
+MCP servers are process-level. They are written into the generated Codex
+`config.toml` and started with the engine, and the rendered config is part of the
+runtime fingerprint — so changing the set restarts Codex for the whole container,
+which serves every conversation through one process. That is fine at deploy or
+admin time and unacceptable per turn, which is why a slash command never touches
+it.
+
+So a skill carries its own runtime: a vendored `_lib/` and a `scripts/` shim it
+can invoke from the shell. That path costs nothing, works in any profile, and
+works for uploaded skills with no MCP wiring at all. Where a server *is*
+registered it is scoped to the profiles that need it — the `agent-adoption`
+profile carries `agent-maturity`, and the assessment still runs everywhere else
+through the skill's own CLI.
+
 ### Tools
 
 Every payload tool is a Python module invoked from the shell:
@@ -123,7 +197,9 @@ The runtime re-reads the store at each turn boundary and restarts the Codex engi
 
 Chat users choose an agent from the control in the chat header. The choice travels to the runtime as `metadata.profile`, and the runtime answers with the profile it actually resolved. Because Codex fixes a thread's base instructions when the thread starts, a conversation stays with the agent it began with: after the first turn the control reports that agent, and choosing another one starts a new conversation. Choosing nothing uses the runtime default; naming an agent that is no longer configured is an error rather than a silent fallback.
 
-Access is guarded by an Entra allowlist over the Easy Auth principal header (`ADMIN_PRINCIPAL_IDS`); an empty list denies everyone. The model API key is write-only — it is never returned to the browser, and leaving the field blank preserves the stored value. See [Features](docs/features.md) and the [API Reference](docs/api.md).
+Chat sign-in can be restricted to company accounts with `AUTH_REQUIRE_CORPORATE_ACCOUNT`, `AUTH_TENANT_ID`, and `AUTH_ALLOWED_UPN_DOMAINS`. Trusted corporate B2B accounts are added through `AUTH_ALLOWED_HOME_TENANT_IDS` and `AUTH_ALLOWED_EMAIL_DOMAINS`, while Hotmail and untrusted guests remain blocked. The check reads the issuing tenant, the `idp` claim, and the verified sign-in address rather than the platform's Easy Auth provider label, which differs between hosts.
+
+`/admin` can require a dedicated username/password login using `ADMIN_USERNAME`, a scrypt `ADMIN_PASSWORD_HASH`, and `ADMIN_SESSION_SECRET`; this mode takes precedence over the Easy Auth allowlist. Without those values, access falls back to the Entra allowlist in `ADMIN_PRINCIPAL_IDS`, where an empty list denies everyone. The model API key is write-only — it is never returned to the browser, and leaving the field blank preserves the stored value. See [Features](docs/features.md) and the [API Reference](docs/api.md).
 
 ## Deploying the Foundry Hosted Agent
 

@@ -26,6 +26,7 @@ from codex_adapter.artifacts import ARTIFACT_EVENT, artifact_manifest
 from codex_adapter.client import PROFILE_EVENT
 from codex_adapter.events import completion_delta, tool_arguments
 from codex_adapter.profiles import UnknownProfileError
+from codex_adapter.turn_skills import SKILL_NAME, requested_skills
 
 #: The console sends a 32-hex hash of the principal, never the identity itself.
 _OWNER_KEY = re.compile(r"^[0-9a-f]{32}$")
@@ -92,7 +93,35 @@ def _requested_reasoning_effort(request: CreateResponse) -> str | None:
         effort = reasoning.get("effort")
     elif reasoning is not None:
         effort = getattr(reasoning, "effort", None)
+    if not isinstance(effort, str) or not effort.strip():
+        metadata = _request_value(request, "metadata")
+        if isinstance(metadata, dict):
+            effort = metadata.get("reasoning_effort")
     return effort.strip() if isinstance(effort, str) and effort.strip() else None
+
+
+def _requested_skills(request: CreateResponse) -> tuple[str, ...]:
+    """Skills this turn asked to load, from ``metadata.skills``.
+
+    A slash command in the console sends the skills it names. Selection is a
+    property of the message, not of the conversation, so it travels with the
+    turn rather than binding anything. The names are only filtered for shape
+    here; the runtime enforces the profile, because that is where the bound
+    profile is known.
+    """
+    return requested_skills(_request_value(request, "metadata"))
+
+
+def _requested_command(request: CreateResponse) -> str:
+    """The slash command that loaded those skills, for the directive to name."""
+    metadata = _request_value(request, "metadata")
+    if not isinstance(metadata, dict):
+        return ""
+    command = metadata.get("command")
+    if not isinstance(command, str):
+        return ""
+    command = command.strip().lower()
+    return command if SKILL_NAME.fullmatch(command) else ""
 
 
 async def _prepare_prompt(context: ResponseContext, workspace: Path) -> str:
@@ -143,6 +172,8 @@ async def _turn_events(
     profile: str | None,
     reasoning_effort: str | None,
     owner: str,
+    skills: tuple[str, ...] = (),
+    command: str = "",
 ):
     """Stream the turn, translating a missing profile into something readable."""
     try:
@@ -155,6 +186,8 @@ async def _turn_events(
             profile=profile,
             reasoning_effort=reasoning_effort,
             owner=owner,
+            skills=skills,
+            command=command,
         ):
             yield event
     except UnknownProfileError as error:
@@ -239,6 +272,8 @@ async def handle_response(
         profile=_requested_profile(request),
         reasoning_effort=_requested_reasoning_effort(request),
         owner=_requested_owner(request),
+        skills=_requested_skills(request),
+        command=_requested_command(request),
     ):
         # Event payloads can carry whatever a tool printed, so only the shape
         # is logged. Task 5 tightens this further for credentials.

@@ -93,7 +93,9 @@ The runtime is the authority. Chat clients ask with `metadata.profile`, and ever
 
 The Web UI serves `/admin`, a three-tab console over the configuration store covering model access, remote MCP servers, and agent profiles.
 
-Access requires Easy Auth in front of the container; `requireAdmin` reads the `x-ms-client-principal` header and checks the caller against `ADMIN_PRINCIPAL_IDS`. An empty allowlist denies everyone rather than admitting everyone. Anonymous local access needs an explicit `ADMIN_ALLOW_ANONYMOUS=true` opt-in that is ignored when `NODE_ENV=production`.
+Chat authentication can be limited to company accounts. With `AUTH_REQUIRE_CORPORATE_ACCOUNT=true`, the server admits a caller whose issuing tenant is trusted, whose identity provider is not a personal or social one, and whose verified sign-in address is in an allowed domain. Hotmail, other personal accounts, and untrusted guest tenants fail closed — including one presenting a company-looking address. The Easy Auth provider label is deliberately not part of the decision: it is `bearer` on Container Apps and `aad` on App Service, so requiring a particular value rejects valid employees.
+
+Production deployments can configure `ADMIN_USERNAME`, a scrypt `ADMIN_PASSWORD_HASH`, and `ADMIN_SESSION_SECRET` to show a dedicated login mask and issue an eight-hour HttpOnly, SameSite cookie. This mode takes precedence over Easy Auth. When it is not configured, `requireAdmin` reads the Easy Auth `x-ms-client-principal` header and checks the caller against `ADMIN_PRINCIPAL_IDS`; an empty allowlist denies everyone. Anonymous local access needs an explicit `ADMIN_ALLOW_ANONYMOUS=true` opt-in that is ignored when `NODE_ENV=production`.
 
 The model API key is write-only: reads return `api_key_set` instead of the value, and saving with the field blank preserves the stored secret. Every write is audited to the log with the document name and the caller, without values. `catalogue.json` is read-only from the console.
 

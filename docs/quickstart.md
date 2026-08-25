@@ -80,7 +80,7 @@ The image listens on port `3000` and uses Next.js standalone output. Deploy it t
 
 ## Enable the admin console
 
-Point the Web UI and the Hosted Agent at the same configuration store, then allowlist the administrators:
+Point the Web UI and the Hosted Agent at the same configuration store, then configure either dedicated administrator credentials or an Entra allowlist:
 
 ```bash
 azd env set DIGIBUDDY_CONFIG_URI "https://yourstorage.blob.core.windows.net/digibuddy-config"
@@ -90,14 +90,16 @@ azd env set DIGIBUDDY_CONFIG_URI "https://yourstorage.blob.core.windows.net/digi
 docker run --rm -p 3000:3000 \
   -e FOUNDRY_AGENT_ENDPOINT="https://your-foundry-endpoint/responses" \
   -e DIGIBUDDY_CONFIG_URI="https://yourstorage.blob.core.windows.net/digibuddy-config" \
-  -e ADMIN_PRINCIPAL_IDS="<entra-object-id>,<entra-object-id>" \
+  -e ADMIN_USERNAME="admin" \
+  -e 'ADMIN_PASSWORD_HASH=scrypt$16384$8$1$<base64url-salt>$<base64url-derived-key>' \
+  -e ADMIN_SESSION_SECRET="<at-least-32-random-characters>" \
   digibuddy-webui
 ```
 
 Both containers use the store with their managed identity, so grant each the **Storage Blob Data Contributor** role on the container. The hosted agent writes generated files below `artifacts/`, and the Web UI reads them back through its same-origin API. Configure a storage lifecycle rule for that prefix when deliverables need a retention limit. For local development set `DIGIBUDDY_CONFIG_DIR` to a shared directory and `ADMIN_ALLOW_ANONYMOUS=true` instead; the anonymous opt-in is ignored when `NODE_ENV=production`.
 
 ::: warning
-Put Easy Auth in front of the Web UI container. `ADMIN_PRINCIPAL_IDS` is matched against the `x-ms-client-principal` header, so without an authentication front end no caller is ever admitted.
+Store only the scrypt hash in `ADMIN_PASSWORD_HASH`, never the plaintext password. If dedicated credentials are omitted, put Easy Auth in front of the Web UI and set `ADMIN_PRINCIPAL_IDS`; without either mode no production caller is admitted.
 :::
 
 Open `http://localhost:3000/admin` to manage models, remote MCP servers, and agent profiles. Changes apply at the next turn.

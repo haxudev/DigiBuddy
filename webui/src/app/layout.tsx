@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "DigiBuddy",
+  title: "GTMBuddy",
   description: "Powered by Codex on Microsoft Foundry Hosted Agent",
 };
 

@@ -31,6 +31,26 @@ test("a Microsoft principal is read from the Easy Auth header", () => {
   assert.equal(principal?.name, "admin@example.com");
 });
 
+test("Entra tenant membership claims are decoded separately", () => {
+  const principal = decodePrincipal(
+    Buffer.from(
+      JSON.stringify({
+        identityProvider: "aad",
+        userId: "member",
+        claims: [
+          { typ: "tid", val: "tenant-a" },
+          { typ: "acct", val: "0" },
+          { typ: "upn", val: "member@corp.example" },
+        ],
+      }),
+    ).toString("base64"),
+  );
+
+  assert.equal(principal?.tenantId, "tenant-a");
+  assert.equal(principal?.accountType, "0");
+  assert.equal(principal?.upn, "member@corp.example");
+});
+
 test("Google and GitHub principals are read from their claims", () => {
   const google = decodePrincipal(
     Buffer.from(
@@ -118,5 +138,233 @@ test("the header, not the request, decides who the caller is", () => {
       NODE_ENV: "production",
     }).id,
     "real",
+  );
+});
+
+const RESOURCE_TENANT = "16b3c013-d300-468d-ac64-7eda0820b6d3";
+const CORPORATE_TENANT = "72f988bf-86f1-41af-91ab-2d7cd011db47";
+const OTHER_TENANT = "99999999-9999-9999-9999-999999999999";
+
+const corporateEnvironment = {
+  NODE_ENV: "production",
+  AUTH_REQUIRE_CORPORATE_ACCOUNT: "true",
+  AUTH_TENANT_ID: RESOURCE_TENANT,
+  AUTH_ALLOWED_UPN_DOMAINS: "corp.example,corp.example.net",
+  AUTH_ALLOWED_EMAIL_DOMAINS: "microsoft.com",
+  AUTH_ALLOWED_HOME_TENANT_IDS: CORPORATE_TENANT,
+};
+
+function corporateHeader({
+  tenant = RESOURCE_TENANT,
+  accountType = "0",
+  upn = "member@corp.example",
+  provider = "aad",
+  identityProvider = "",
+  email = "",
+} = {}): Headers {
+  return header({
+    identityProvider: provider,
+    userId: "member",
+    claims: [
+      { typ: "tid", val: tenant },
+      { typ: "acct", val: accountType },
+      { typ: "upn", val: upn },
+      { typ: "idp", val: identityProvider },
+      { typ: "preferred_username", val: email },
+    ],
+  });
+}
+
+test("a company tenant member is admitted", () => {
+  assert.equal(
+    requirePrincipal(corporateHeader(), corporateEnvironment).id,
+    "member",
+  );
+});
+
+test("the platform's provider label does not decide the outcome", () => {
+  // Container Apps reports `bearer` where App Service reports `aad`. Treating
+  // that label as proof of Entra locked out every employee of the tenant.
+  assert.equal(
+    requirePrincipal(
+      corporateHeader({
+        provider: "bearer",
+        upn: "employee_microsoft.com#EXT#@corp.example",
+        identityProvider: `https://sts.windows.net/${CORPORATE_TENANT}/`,
+        email: "employee@microsoft.com",
+      }),
+      corporateEnvironment,
+    ).id,
+    "member",
+  );
+});
+
+test("a trusted Microsoft corporate B2B account is admitted", () => {
+  assert.equal(
+    requirePrincipal(
+      corporateHeader({
+        accountType: "1",
+        upn: "employee_microsoft.com#EXT#@corp.example",
+        identityProvider: `https://sts.windows.net/${CORPORATE_TENANT}/`,
+        email: "employee@microsoft.com",
+      }),
+      corporateEnvironment,
+    ).id,
+    "member",
+  );
+});
+
+test("Easy Auth's generic ExternalAzureAD marker can use the trusted email", () => {
+  assert.equal(
+    requirePrincipal(
+      corporateHeader({
+        tenant: "",
+        accountType: "0",
+        upn: "",
+        provider: "azureactivedirectory",
+        identityProvider: "ExternalAzureAD",
+        email: "employee@microsoft.com",
+      }),
+      corporateEnvironment,
+    ).id,
+    "member",
+  );
+});
+
+test("untrusted external, personal, and wrong-tenant identities are rejected", () => {
+  assert.throws(
+    () =>
+      requirePrincipal(
+        corporateHeader({
+          accountType: "1",
+          upn: "person_hotmail.com#EXT#@corp.example",
+          identityProvider: "live.com",
+          email: "person@hotmail.com",
+        }),
+        corporateEnvironment,
+      ),
+    NotSignedInError,
+  );
+  // A personal account cannot buy its way in by presenting a company address.
+  assert.throws(
+    () =>
+      requirePrincipal(
+        corporateHeader({
+          accountType: "1",
+          upn: "",
+          identityProvider: "live.com",
+          email: "person@microsoft.com",
+        }),
+        corporateEnvironment,
+      ),
+    NotSignedInError,
+  );
+  assert.throws(
+    () =>
+      requirePrincipal(
+        corporateHeader({
+          accountType: "1",
+          upn: "person_other.com#EXT#@corp.example",
+          identityProvider: `https://sts.windows.net/${OTHER_TENANT}/`,
+          email: "person@microsoft.com",
+        }),
+        corporateEnvironment,
+      ),
+    NotSignedInError,
+  );
+  assert.throws(
+    () =>
+      requirePrincipal(
+        corporateHeader({ provider: "google" }),
+        corporateEnvironment,
+      ),
+    NotSignedInError,
+  );
+  assert.throws(
+    () =>
+      requirePrincipal(
+        corporateHeader({ tenant: OTHER_TENANT }),
+        corporateEnvironment,
+      ),
+    NotSignedInError,
+  );
+});
+
+test("an account outside every allowed domain is rejected", () => {
+  assert.throws(
+    () =>
+      requirePrincipal(
+        corporateHeader({
+          upn: "contractor@partner.example",
+          email: "contractor@partner.example",
+        }),
+        corporateEnvironment,
+      ),
+    NotSignedInError,
+  );
+});
+
+const multiTenantEnvironment = {
+  ...corporateEnvironment,
+  // A non-production and a production tenant sharing one deployment.
+  AUTH_TENANT_ID: `${RESOURCE_TENANT},${CORPORATE_TENANT}`,
+};
+
+test("a second trusted tenant signs in natively, without a B2B invitation", () => {
+  // The production account is a member of its own tenant, so no `#EXT#` UPN and
+  // no guest record exists in the tenant that owns the app registration.
+  assert.equal(
+    requirePrincipal(
+      corporateHeader({
+        tenant: CORPORATE_TENANT,
+        provider: "bearer",
+        upn: "employee@microsoft.com",
+        identityProvider: "",
+        email: "employee@microsoft.com",
+      }),
+      multiTenantEnvironment,
+    ).id,
+    "member",
+  );
+});
+
+test("multi-tenant mode still refuses tenants that were not named", () => {
+  assert.throws(
+    () =>
+      requirePrincipal(
+        corporateHeader({
+          tenant: OTHER_TENANT,
+          provider: "bearer",
+          upn: "employee@microsoft.com",
+          email: "employee@microsoft.com",
+        }),
+        multiTenantEnvironment,
+      ),
+    NotSignedInError,
+  );
+  // A trusted tenant is not a licence for every domain it can mint.
+  assert.throws(
+    () =>
+      requirePrincipal(
+        corporateHeader({
+          tenant: CORPORATE_TENANT,
+          provider: "bearer",
+          upn: "vendor@contoso.example",
+          email: "vendor@contoso.example",
+        }),
+        multiTenantEnvironment,
+      ),
+    NotSignedInError,
+  );
+});
+
+test("corporate mode fails closed when required claims are absent", () => {
+  assert.throws(
+    () =>
+      requirePrincipal(
+        header({ identityProvider: "aad", userId: "member" }),
+        corporateEnvironment,
+      ),
+    NotSignedInError,
   );
 });

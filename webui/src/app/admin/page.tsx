@@ -1,14 +1,43 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
 import Link from "next/link";
+import {
+  commandDraftKey,
+  createLocalCommandDraft,
+  mergeCommandDraftsAfterRefresh,
+  parseCommandOrder,
+  type CommandDraft,
+} from "@/lib/admin-command-drafts";
 import {
   CREDENTIAL_SLOTS,
   type CredentialStatus,
 } from "@/lib/credentials";
+import {
+  buildAdminSkillGroups,
+  buildAssignableCapabilities,
+} from "@/lib/admin-skill-groups";
+import type { CommandOverride, SkillCommand } from "@/lib/skill-commands";
 import styles from "./admin.module.css";
 
-type Catalogue = { skills: string[]; tools: string[]; mcp_servers: string[] };
+type CatalogueSkill = {
+  name: string;
+  description: string;
+  source: "packaged" | "deployed" | "";
+  enabled: boolean;
+};
+
+type Catalogue = {
+  skills: string[];
+  tools: string[];
+  mcp_servers: string[];
+  skill_entries: CatalogueSkill[];
+};
 
 type Models = {
   model: string;
@@ -94,7 +123,7 @@ const LAYOUTS: Record<BundlePreview["layout"], string> = {
 
 type NamedServer = McpServer & { name: string };
 
-const EFFORTS = ["minimal", "low", "medium", "high"];
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 
 const emptyModels: Models = {
   model: "",
@@ -125,6 +154,118 @@ type ConfigPayload = {
   revisions?: Record<string, string>;
 };
 
+type CommandPayload = {
+  commands: CommandOverride[];
+  revision?: string;
+};
+
+type SkillPolicyPayload = {
+  disabled: string[];
+  revision?: string;
+};
+
+type ResolvedCommandPayload = {
+  commands: SkillCommand[];
+};
+
+type AdminState =
+  | { status: "checking"; name: "" }
+  | { status: "locked"; name: "" }
+  | { status: "authenticated"; name: string };
+
+function AdminLoginMask({
+  checking,
+  onAuthenticated,
+}: {
+  checking: boolean;
+  onAuthenticated: (name: string) => void;
+}) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function signIn(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/admin/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || "Administrator sign-in failed.");
+      }
+      setPassword("");
+      onAuthenticated(String(payload.name ?? username));
+    } catch (signInError) {
+      setError(
+        signInError instanceof Error
+          ? signInError.message
+          : "Administrator sign-in failed.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className={styles.loginShell}>
+      <div className={styles.loginBackdrop} aria-hidden="true">
+        <span>GTMBuddy</span>
+        <strong>Runtime administration</strong>
+      </div>
+      <section className={styles.loginMask} aria-busy={checking}>
+        <div className={styles.loginMark}>⌁</div>
+        <p className={styles.eyebrow}>Restricted console</p>
+        <h1>Administrator sign in</h1>
+        <p className={styles.loginHint}>
+          Use the dedicated administrator credentials for this runtime.
+        </p>
+        {checking ? (
+          <p className={styles.loginStatus}>Checking administrator session…</p>
+        ) : (
+          <form onSubmit={signIn}>
+            <label>
+              Username
+              <input
+                autoComplete="username"
+                autoFocus
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+              />
+            </label>
+            <label>
+              Password
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </label>
+            {error && (
+              <div className={styles.error} role="alert">
+                {error}
+              </div>
+            )}
+            <button
+              type="submit"
+              disabled={busy || !username.trim() || !password}
+            >
+              {busy ? "Signing in…" : "Unlock administration"}
+            </button>
+          </form>
+        )}
+        <Link href="/">Back to chat</Link>
+      </section>
+    </main>
+  );
+}
+
 async function fetchConfig(): Promise<ConfigPayload> {
   const response = await fetch("/api/admin/config", { cache: "no-store" });
   const payload = await response.json();
@@ -132,6 +273,43 @@ async function fetchConfig(): Promise<ConfigPayload> {
     throw new Error(payload.error || "Unable to load configuration.");
   }
   return payload as ConfigPayload;
+}
+
+async function fetchCommands(): Promise<{
+  overrides: CommandOverride[];
+  resolved: SkillCommand[];
+  revision?: string;
+}> {
+  const [adminResponse, resolvedResponse] = await Promise.all([
+    fetch("/api/admin/commands", { cache: "no-store" }),
+    fetch("/api/commands", { cache: "no-store" }),
+  ]);
+  const adminPayload = (await adminResponse.json()) as CommandPayload & {
+    error?: string;
+  };
+  const resolvedPayload = (await resolvedResponse.json()) as ResolvedCommandPayload & {
+    error?: string;
+  };
+  if (!adminResponse.ok) {
+    throw new Error(adminPayload.error || "Unable to load command overrides.");
+  }
+  if (!resolvedResponse.ok) {
+    throw new Error(resolvedPayload.error || "Unable to load commands.");
+  }
+  return {
+    overrides: adminPayload.commands ?? [],
+    resolved: resolvedPayload.commands ?? [],
+    revision: adminPayload.revision,
+  };
+}
+
+async function fetchSkillPolicy(): Promise<SkillPolicyPayload> {
+  const response = await fetch("/api/admin/skill-policy", { cache: "no-store" });
+  const payload = (await response.json()) as SkillPolicyPayload & { error?: string };
+  if (!response.ok) {
+    throw new Error(payload.error || "Unable to load packaged skill policy.");
+  }
+  return { disabled: payload.disabled ?? [], revision: payload.revision };
 }
 
 /** `null` means "every packaged capability"; toggling one entry starts a restriction. */
@@ -263,16 +441,32 @@ function Credentials({
 }
 
 export default function Admin() {
-  const [tab, setTab] = useState<"models" | "mcp" | "skills" | "profiles">("models");
+  const [admin, setAdmin] = useState<AdminState>({
+    status: "checking",
+    name: "",
+  });
+  const [tab, setTab] = useState<
+    "models" | "mcp" | "skills" | "commands" | "profiles"
+  >("models");
   const [catalogue, setCatalogue] = useState<Catalogue>({
     skills: [],
     tools: [],
     mcp_servers: [],
+    skill_entries: [],
   });
   const [models, setModels] = useState<Models>(emptyModels);
   const [servers, setServers] = useState<NamedServer[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [skills, setSkills] = useState<DeployedSkill[]>([]);
+  const [disabledPackagedSkills, setDisabledPackagedSkills] = useState<string[]>([]);
+  const [skillPolicyRevision, setSkillPolicyRevision] = useState<string | undefined>();
+  const [commandDrafts, setCommandDrafts] = useState<CommandDraft[]>([]);
+  const [commandOverrides, setCommandOverrides] = useState<CommandOverride[]>([]);
+  const [commandDirtyNames, setCommandDirtyNames] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [commandRevision, setCommandRevision] = useState<string | undefined>();
+  const [resolvedCommands, setResolvedCommands] = useState<SkillCommand[]>([]);
   const [allowedHosts, setAllowedHosts] = useState<string[]>([]);
   const [source, setSource] = useState("");
   const [revisions, setRevisions] = useState<Record<string, string>>({});
@@ -283,8 +477,8 @@ export default function Admin() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    return fetchConfig().then(
-      (payload) => {
+    return Promise.all([fetchConfig(), fetchCommands(), fetchSkillPolicy()]).then(
+      ([payload, commandPayload, skillPolicy]) => {
         setError("");
         setModels({ ...emptyModels, ...(payload["models.json"] ?? {}) });
         setServers(
@@ -299,8 +493,16 @@ export default function Admin() {
           skills: [],
           tools: [],
           mcp_servers: [],
+          skill_entries: [],
           ...(payload["catalogue.json"] ?? {}),
         });
+        setCommandDrafts(commandPayload.overrides);
+        setCommandOverrides(commandPayload.overrides);
+        setCommandDirtyNames(new Set());
+        setCommandRevision(commandPayload.revision);
+        setResolvedCommands(commandPayload.resolved);
+        setDisabledPackagedSkills(skillPolicy.disabled);
+        setSkillPolicyRevision(skillPolicy.revision);
       },
       (loadError: unknown) => {
         setError(loadError instanceof Error ? loadError.message : "Unable to load.");
@@ -309,24 +511,72 @@ export default function Admin() {
   }, []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    const controller = new AbortController();
+    fetch("/api/admin/session", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const payload = await response.json();
+        setAdmin(
+          response.ok && payload.authenticated
+            ? {
+                status: "authenticated",
+                name: String(payload.name ?? "administrator"),
+              }
+            : { status: "locked", name: "" },
+        );
+      })
+      .catch((sessionError) => {
+        if (
+          sessionError instanceof DOMException &&
+          sessionError.name === "AbortError"
+        ) {
+          return;
+        }
+        setAdmin({ status: "locked", name: "" });
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (admin.status === "authenticated") void load();
+  }, [admin.status, load]);
 
   // Whether importing from a URL is offered at all is a deployment decision, so
   // ask the server rather than guessing.
   useEffect(() => {
+    if (admin.status !== "authenticated") return;
     fetch("/api/admin/credentials", { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : { credentials: [] }))
       .then((payload) => setCredentials(payload.credentials ?? []))
       .catch(() => setCredentials([]));
-  }, []);
+  }, [admin.status]);
 
   useEffect(() => {
+    if (admin.status !== "authenticated") return;
     fetch("/api/admin/skills/preview", { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : { allowed_hosts: [] }))
       .then((payload) => setAllowedHosts(payload.allowed_hosts ?? []))
       .catch(() => setAllowedHosts([]));
-  }, []);
+  }, [admin.status]);
+
+  async function signOut() {
+    await fetch("/api/admin/session", { method: "DELETE" });
+    setAdmin({ status: "locked", name: "" });
+    setModels(emptyModels);
+    setServers([]);
+    setProfiles([]);
+    setSkills([]);
+    setDisabledPackagedSkills([]);
+    setSkillPolicyRevision(undefined);
+    setCommandDrafts([]);
+    setCommandOverrides([]);
+    setCommandDirtyNames(new Set());
+    setCommandRevision(undefined);
+    setResolvedCommands([]);
+    setCredentials([]);
+  }
 
   async function save(document: string, value: unknown) {
     setBusy(true);
@@ -374,6 +624,168 @@ export default function Admin() {
       await load();
     } catch (callError) {
       setError(callError instanceof Error ? callError.message : failureMessage);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function togglePackagedSkill(name: string, enabled: boolean) {
+    setBusy(true);
+    setError("");
+    setStatus("");
+    try {
+      const response = await fetch("/api/admin/skill-policy", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, enabled, revision: skillPolicyRevision }),
+      });
+      const payload = (await response.json()) as SkillPolicyPayload & { error?: string };
+      if (!response.ok) {
+        throw new Error(
+          response.status === 409
+            ? "Someone else changed packaged skill policy while you were editing. Reload to see their version."
+            : payload.error || "Unable to update the packaged skill.",
+        );
+      }
+      setDisabledPackagedSkills(payload.disabled ?? []);
+      setSkillPolicyRevision(payload.revision);
+      setStatus("Skills updated. They apply from the next turn.");
+      await load();
+    } catch (callError) {
+      setError(
+        callError instanceof Error
+          ? callError.message
+          : "Unable to update the packaged skill.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshCommands(options?: {
+    dirtyNames?: Set<string>;
+    dropNames?: Set<string>;
+  }) {
+    const payload = await fetchCommands();
+    const dirtyNames = options?.dirtyNames ?? commandDirtyNames;
+    const dropNames = options?.dropNames ?? new Set<string>();
+    // A refresh is authoritative for clean rows, but not for edits that only
+    // exist in this browser yet; otherwise saving one row would silently erase
+    // another row the administrator has not had a chance to submit.
+    setCommandDrafts((current) =>
+      mergeCommandDraftsAfterRefresh(
+        current,
+        payload.overrides,
+        dirtyNames,
+        dropNames,
+      ),
+    );
+    setCommandOverrides(payload.overrides);
+    setCommandRevision(payload.revision);
+    setResolvedCommands(payload.resolved);
+  }
+
+  function updateCommandDraft(
+    index: number | null,
+    name: string,
+    patch: Partial<CommandDraft>,
+  ) {
+    setCommandDirtyNames((current) => {
+      const next = new Set(current);
+      next.add(patch.name ?? name);
+      return next;
+    });
+    setCommandDrafts((current) => {
+      if (index !== null) {
+        return current.map((command, position) =>
+          position === index ? { ...command, ...patch } : command,
+        );
+      }
+      return [...current, { name, ...patch }];
+    });
+  }
+
+  function discardCommandDraft(index: number, name: string) {
+    setCommandDirtyNames((current) => {
+      const next = new Set(current);
+      next.delete(name);
+      return next;
+    });
+    setCommandDrafts(commandDrafts.filter((_, position) => position !== index));
+  }
+
+  async function saveCommand(command: CommandOverride) {
+    setBusy(true);
+    setError("");
+    setStatus("");
+    try {
+      const body = Object.fromEntries(
+        Object.entries(command).filter(
+          ([key]) => !["local", "localId", "orderInput"].includes(key),
+        ),
+      );
+      const response = await fetch("/api/admin/commands", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, revision: commandRevision }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || "Unable to save the command.");
+      }
+      setStatus(`Saved /${command.name}. It applies from the next turn.`);
+      const savedName =
+        typeof payload.command?.name === "string"
+          ? payload.command.name
+          : command.name.trim().toLowerCase();
+      const nextDirty = new Set(commandDirtyNames);
+      nextDirty.delete(savedName);
+      nextDirty.delete(command.name);
+      setCommandDirtyNames(nextDirty);
+      await refreshCommands({
+        dirtyNames: nextDirty,
+        dropNames: new Set([savedName, command.name]),
+      });
+    } catch (commandError) {
+      setError(
+        commandError instanceof Error
+          ? commandError.message
+          : "Unable to save the command.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteCommand(name: string) {
+    setBusy(true);
+    setError("");
+    setStatus("");
+    try {
+      const query = new URLSearchParams({ name });
+      if (commandRevision !== undefined) query.set("revision", commandRevision);
+      const response = await fetch(
+        `/api/admin/commands?${query}`,
+        { method: "DELETE" },
+      );
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || "Unable to delete the command override.");
+      }
+      setStatus(payload.message || `Deleted the /${name} override.`);
+      const nextDirty = new Set(commandDirtyNames);
+      nextDirty.delete(name);
+      setCommandDirtyNames(nextDirty);
+      await refreshCommands({
+        dirtyNames: nextDirty,
+        dropNames: new Set([name]),
+      });
+    } catch (commandError) {
+      setError(
+        commandError instanceof Error
+          ? commandError.message
+          : "Unable to delete the command override.",
+      );
     } finally {
       setBusy(false);
     }
@@ -495,28 +907,84 @@ export default function Admin() {
     );
   }
 
-  // A skill deployed a moment ago is assignable before the runtime has had a
-  // chance to republish its catalogue.
-  const assignableSkills = [
-    ...new Set([
-      ...catalogue.skills,
-      ...skills.filter((skill) => skill.enabled).map((skill) => skill.name),
-    ]),
-  ].sort();
+  const assignable = buildAssignableCapabilities(catalogue, skills);
+  const assignableSkills = assignable.skills;
+  const assignableTools = assignable.tools;
+  const assignableMcpServers = assignable.mcp_servers;
+  const skillSources = new Map(
+    catalogue.skill_entries.map((entry) => [entry.name, entry.source]),
+  );
+  // An empty source means the runtime did not say, which a reader should not
+  // see as a claim about where the skill came from.
+  const describeSource = (skill: string) => skillSources.get(skill) || "unknown origin";
+  const packagedSkills = new Set(
+    catalogue.skill_entries
+      .filter((entry) => entry.source === "packaged")
+      .map((entry) => entry.name),
+  );
+  const shadowedSkills = skills
+    .filter((skill) => skill.kind === "skill" && packagedSkills.has(skill.name))
+    .map((skill) => skill.name);
+  const skillGroups = buildAdminSkillGroups(
+    catalogue.skill_entries,
+    skills,
+    disabledPackagedSkills,
+  );
+  const resolvedByName = new Map(
+    resolvedCommands.map((command) => [command.name, command]),
+  );
+  const commandOverrideNames = new Set(
+    commandOverrides.map((command) => command.name),
+  );
+  const draftedNames = new Set(commandDrafts.map((command) => command.name));
+  const commandRows = [
+    ...commandDrafts.map((draft, index) => ({
+      draft,
+      index: index as number | null,
+      resolved: resolvedByName.get(draft.name),
+    })),
+    ...resolvedCommands
+      .filter((command) => !draftedNames.has(command.name))
+      .map((command) => ({
+        // A row for a command that has no override yet: the same shape, so the
+        // editor does not have to care whether it is editing an existing entry
+        // or writing the first one.
+        draft: { name: command.name } as CommandDraft,
+        index: null,
+        resolved: command,
+      })),
+  ];
+
+  if (admin.status !== "authenticated") {
+    return (
+      <AdminLoginMask
+        checking={admin.status === "checking"}
+        onAuthenticated={(name) =>
+          setAdmin({ status: "authenticated", name })
+        }
+      />
+    );
+  }
 
   return (
     <main className={styles.shell}>
       <div className={styles.inner}>
         <header className={styles.header}>
           <div>
-            <p className={styles.eyebrow}>DigiBuddy</p>
+            <p className={styles.eyebrow}>GTMBuddy</p>
             <h1>Runtime administration</h1>
           </div>
-          <Link href="/">Back to chat</Link>
+          <div className={styles.headerActions}>
+            <span>{admin.name}</span>
+            <button type="button" onClick={() => void signOut()}>
+              Sign out
+            </button>
+            <Link href="/">Back to chat</Link>
+          </div>
         </header>
 
         <div className={styles.tabs} role="tablist">
-          {(["models", "mcp", "skills", "profiles"] as const).map((name) => (
+          {(["models", "mcp", "skills", "commands", "profiles"] as const).map((name) => (
             <button
               key={name}
               role="tab"
@@ -530,7 +998,9 @@ export default function Admin() {
                   ? "Remote MCP"
                   : name === "skills"
                     ? "Skills"
-                    : "Agent profiles"}
+                    : name === "commands"
+                      ? "Commands"
+                      : "Agent profiles"}
             </button>
           ))}
         </div>
@@ -792,17 +1262,93 @@ export default function Admin() {
 
         {tab === "skills" && (
           <section className={styles.panel}>
-            <h2>Deployed skills</h2>
+            <h2>Skills</h2>
             <p className={styles.hint}>
-              Deploy a skill archive — a zip holding <code>SKILL.md</code> and its
-              references, scripts and tools — and every profile that assembles it
-              loads it on the next turn, without rebuilding the image. A repository
-              archive carrying several skills is unpacked into one self-contained
-              skill each; add a <code>digibuddy-skills.json</code> manifest to say
-              which directories are skills and which libraries they share.
-              Deploying a skill again replaces it. Skills baked into the image
-              cannot be shadowed.
+              This is the full skill inventory. Switching a skill off stops it
+              being installed into the runtime at the next turn, so no agent
+              profile can use it and it disappears from the / menu. Runtime
+              configuration is re-read at turn boundaries, so changes apply from
+              the next turn.
             </p>
+            {shadowedSkills.length > 0 && (
+              <div className={styles.error}>
+                These uploaded skills share names with packaged skills and are not live:
+                {" "}
+                {shadowedSkills.join(", ")}. The runtime keeps the packaged copy.
+              </div>
+            )}
+
+            <div className={styles.row}>
+              <div className={styles.rowHeader}>
+                <strong>Skills loaded by default</strong>
+                <span className={styles.version}>
+                  {skillGroups.counts.packaged} total · {skillGroups.counts.packagedOff} off
+                </span>
+              </div>
+              <p className={styles.hint}>
+                These are baked into the image. They have no version, approval or
+                withdrawal action here; the switch only controls whether the
+                runtime installs them.
+              </p>
+              {skillGroups.packaged.length === 0 ? (
+                <p className={styles.hint}>
+                  No packaged skills are published yet. A runtime older than this
+                  console does not say where a skill came from, so nothing can be
+                  listed here until it is upgraded — the skills themselves are
+                  unaffected and still load.
+                </p>
+              ) : (
+                skillGroups.packaged.map((skill) => (
+                  <div className={styles.row} key={skill.name}>
+                    <div className={styles.rowHeader}>
+                      <strong>
+                        {skill.name}
+                        {!skill.enabled && (
+                          <span className={styles.version}> · off</span>
+                        )}
+                      </strong>
+                    </div>
+                    {skill.description && (
+                      <p className={`${styles.hint} ${styles.clamp}`}>
+                        {skill.description}
+                      </p>
+                    )}
+                    <div className={styles.checks}>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={skill.enabled}
+                          disabled={busy}
+                          onChange={(event) =>
+                            void togglePackagedSkill(skill.name, event.target.checked)
+                          }
+                        />
+                        Enabled
+                      </label>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className={styles.row}>
+              <div className={styles.rowHeader}>
+                <strong>Custom skills</strong>
+                <span className={styles.version}>
+                  {skillGroups.counts.custom} total · {skillGroups.counts.customOff} off
+                </span>
+              </div>
+              <p className={styles.hint}>
+                Deploy a skill archive — a zip holding <code>SKILL.md</code> and
+                its references, scripts and tools — and every profile that
+                assembles it loads it on the next turn, without rebuilding the
+                image. A repository archive carrying several skills is unpacked
+                into one self-contained skill each; add a{" "}
+                <code>digibuddy-skills.json</code> manifest to say which
+                directories are skills and which libraries they share. Deploying
+                a skill again replaces it. Skills baked into the image cannot be
+                shadowed.
+              </p>
             <label className={styles.upload}>
               Skill archive (.zip)
               <input
@@ -876,7 +1422,9 @@ export default function Admin() {
                     {skills.some((existing) => existing.name === skill.name) && (
                       <span className={styles.version}> · replaces the deployed version</span>
                     )}
-                    {skill.description && <p>{skill.description}</p>}
+                    {skill.description && (
+                      <p className={styles.clamp}>{skill.description}</p>
+                    )}
                     {skill.declaration && (
                       <p className={styles.hint}>
                         runs {JSON.stringify(skill.declaration)}
@@ -895,14 +1443,18 @@ export default function Admin() {
                 </div>
               </div>
             )}
-            {skills.length === 0 && (
+            {skillGroups.custom.length === 0 && (
               <p className={styles.hint}>No skills have been deployed yet.</p>
             )}
-            {skills.map((skill) => (
+            {skillGroups.custom.map((skill) => (
               <div className={styles.row} key={skill.name}>
                 <div className={styles.rowHeader}>
                   <strong>
-                    {skill.name} <span className={styles.version}>v{skill.version}</span>
+                    {skill.name}{" "}
+                    <span className={styles.version}>
+                      v{skill.version}
+                      {!skill.enabled && " · off"}
+                    </span>
                   </strong>
                   <button
                     className={styles.remove}
@@ -920,6 +1472,12 @@ export default function Admin() {
                   </button>
                 </div>
                 {skill.description && <p>{skill.description}</p>}
+                {packagedSkills.has(skill.name) && (
+                  <p className={styles.hint}>
+                    A packaged skill with this name is live; this deployed upload is
+                    shadowed and will not replace it.
+                  </p>
+                )}
                 <p className={styles.hint}>
                   {Math.max(1, Math.round(skill.size / 1024))} KB · {skill.sha256.slice(0, 12)} ·
                   uploaded {skill.uploaded_at.slice(0, 10)} by {skill.uploaded_by}
@@ -991,7 +1549,224 @@ export default function Admin() {
                   )}
               </div>
             ))}
+            </div>
             {status && <span className={styles.status}>{status}</span>}
+          </section>
+        )}
+
+        {tab === "commands" && (
+          <section className={styles.panel}>
+            <h2>Slash commands</h2>
+            <p className={styles.hint}>
+              Users see the resolved list: every reachable skill is auto-discovered,
+              then these overrides rename, describe, hide, order or bundle commands.
+              Deleting an override reverts the command; it does not remove any skill.
+            </p>
+            {shadowedSkills.length > 0 && (
+              <div className={styles.error}>
+                Shadowed uploads are not live commands because packaged skills win:
+                {" "}
+                {shadowedSkills.join(", ")}.
+              </div>
+            )}
+            <div className={styles.row}>
+              <div className={styles.rowHeader}>
+                <strong>Resolved for users</strong>
+              </div>
+              {resolvedCommands.length === 0 ? (
+                <p className={styles.hint}>No commands are currently available.</p>
+              ) : (
+                <div className={styles.checks}>
+                  {resolvedCommands.map((command) => (
+                    <span key={command.name}>
+                      /{command.name} · {command.title} ·{" "}
+                      {command.skills
+                        .map((skill) => `${skill} (${describeSource(skill)})`)
+                        .join(", ")}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {commandRows.map(({ draft, index, resolved }) => {
+              const effective = {
+                name: draft.name,
+                title: draft.title ?? resolved?.title ?? "",
+                description: draft.description ?? resolved?.description ?? "",
+                hint: draft.hint ?? resolved?.hint ?? "",
+                enabled: draft.enabled ?? resolved?.enabled ?? true,
+                order: draft.order ?? resolved?.order ?? 0,
+                skills: draft.skills ?? resolved?.skills ?? [],
+              };
+              const rowKey = commandDraftKey(draft, resolved);
+              const hasStoredOverride = commandOverrideNames.has(draft.name);
+              const canDiscardDraft = index !== null && !hasStoredOverride;
+              return (
+                <div className={styles.row} key={rowKey}>
+                  <div className={styles.rowHeader}>
+                    <strong>{effective.name ? `/${effective.name}` : "New command"}</strong>
+                    {(draft.local || hasStoredOverride || canDiscardDraft) && (
+                      <button
+                        className={styles.remove}
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          draft.local || canDiscardDraft
+                            ? index !== null && discardCommandDraft(index, draft.name)
+                            : void deleteCommand(draft.name)
+                        }
+                      >
+                        {draft.local
+                          ? "Remove"
+                          : canDiscardDraft
+                            ? "Discard"
+                            : "Delete override"}
+                      </button>
+                    )}
+                  </div>
+                  {resolved && (
+                    <p className={styles.hint}>
+                      Resolved now as “{resolved.title}” loading{" "}
+                      {resolved.skills.join(", ")}.
+                    </p>
+                  )}
+                  <div className={styles.grid}>
+                    <label>
+                      Command name
+                      <input
+                        value={effective.name}
+                        disabled={!draft.local && Boolean(effective.name)}
+                        onChange={(event) =>
+                          updateCommandDraft(index, draft.name, {
+                            name: event.target.value,
+                          })
+                        }
+                        placeholder="customer-brief"
+                      />
+                    </label>
+                    <label>
+                      Title
+                      <input
+                        value={effective.title}
+                        onChange={(event) =>
+                          updateCommandDraft(index, draft.name, {
+                            title: event.target.value,
+                          })
+                        }
+                        placeholder={resolved?.title || "Customer Brief"}
+                      />
+                    </label>
+                    <label>
+                      Order
+                      <input
+                        type="number"
+                        value={draft.orderInput ?? String(effective.order)}
+                        onChange={(event) =>
+                          updateCommandDraft(index, draft.name, {
+                            ...parseCommandOrder(
+                              event.target.value,
+                              effective.order,
+                            ),
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Hint
+                      <input
+                        value={effective.hint}
+                        onChange={(event) =>
+                          updateCommandDraft(index, draft.name, {
+                            hint: event.target.value,
+                          })
+                        }
+                        placeholder="Shown after the command is chosen"
+                      />
+                    </label>
+                  </div>
+                  <label>
+                    Description
+                    <textarea
+                      value={effective.description}
+                      onChange={(event) =>
+                        updateCommandDraft(index, draft.name, {
+                          description: event.target.value,
+                        })
+                      }
+                      placeholder="What this command should do"
+                    />
+                  </label>
+                  <div>
+                    <div className={styles.rowHeader}>
+                      <strong>Skills loaded by this command</strong>
+                    </div>
+                    <div className={styles.checks}>
+                      {assignableSkills.map((skill) => {
+                        const selected = effective.skills.includes(skill);
+                        return (
+                          <label key={skill}>
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={() =>
+                                updateCommandDraft(index, draft.name, {
+                                  skills: selected
+                                    ? effective.skills.filter((entry) => entry !== skill)
+                                    : [...effective.skills, skill],
+                                })
+                              }
+                            />
+                            {skill} · {describeSource(skill)}
+                            {packagedSkills.has(skill) &&
+                              skills.some((entry) => entry.name === skill) &&
+                              " · deployed upload shadowed"}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className={styles.checks}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={effective.enabled}
+                        onChange={(event) =>
+                          updateCommandDraft(index, draft.name, {
+                            enabled: event.target.checked,
+                          })
+                        }
+                      />
+                      Enabled in the slash menu
+                    </label>
+                  </div>
+                  <div className={styles.actions}>
+                    <button
+                      type="button"
+                      disabled={busy || !effective.name.trim()}
+                      onClick={() => void saveCommand(draft)}
+                    >
+                      Save override
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            <div className={styles.actions}>
+              <button
+                className={styles.secondary}
+                type="button"
+                onClick={() =>
+                  setCommandDrafts([
+                    ...commandDrafts,
+                    createLocalCommandDraft(),
+                  ])
+                }
+              >
+                Add curated command
+              </button>
+              {status && <span className={styles.status}>{status}</span>}
+            </div>
           </section>
         )}
 
@@ -1092,13 +1867,13 @@ export default function Admin() {
                 />
                 <Selector
                   label="Tools"
-                  available={catalogue.tools}
+                  available={assignableTools}
                   selection={profile.tools}
                   onChange={(tools) => updateProfile(index, { tools })}
                 />
                 <Selector
                   label="MCP servers"
-                  available={catalogue.mcp_servers}
+                  available={assignableMcpServers}
                   selection={profile.mcp_servers}
                   onChange={(mcp_servers) => updateProfile(index, { mcp_servers })}
                 />

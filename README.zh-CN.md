@@ -72,6 +72,39 @@ Codex 沙箱只暴露一个 shell —— 没有工具注册表。因此能力以
 
 启动时，适配器会将 `hosted-agent/AGENTS.md` 与 `src/AGENTS.md` 拼接为 Codex 的 base instructions，并把 `src/mcp.json` 渲染为生成的 Codex `config.toml` 中的 `[mcp_servers.*]` 配置块。
 
+### Skills
+
+一个 skill 是一个目录，包含 `SKILL.md` 以及它工作所需的一切 —— 参考资料、脚本、随包携带的库、CLI。skills 通过三个平面到达 agent。
+
+**用户**用斜杠命令加载。在输入框中键入 `/` 会筛选当前 agent profile 可触达的 skills，选中后即附加到下一条消息。选择是按消息生效，而非按会话：skill 是模型按需读取的 markdown，因此不同于 `@agent` 提及（Codex 在线程启动时就已固定），它可以在会话的任意时刻选择。运行时会依据已绑定的 profile 校验该请求，并在这一轮的提示词前加上指向该 skill `SKILL.md` 的指令。
+
+profile 可触达的每个 skill 都会自动出现在菜单中。`commands.json` 文档在其上叠加一层策展能力，管理员可以重命名命令、撰写更好的描述、隐藏不适合出现在聊天菜单中的条目，或将多个 skills 归并到一个命令下。`/agent-adoption-assessment` 作为内置示例随附：它会加载 `agent-maturity-assess` 与 `agent-maturity-report`。
+
+**管理员**从控制台上传 skills，可以是 zip 或 HTTPS URL。bundle 以内容寻址方式存储在 `bundles/<name>/<sha256>.zip`；运行时先校验摘要再解包，并拒绝符号链接、路径穿越和超限压缩包。上传的**代码**（tools 与 MCP server）在管理员批准那一份确切字节之前保持惰性，因此替换一个已批准的产物会撤销授权，而不是继承它。
+
+控制台的 Skills 标签页会列出**全部**清单，把镜像默认加载的 skills 与自定义上传区分开，每一项都带一个开关。关掉一个 skill 意味着运行时不再安装它：任何 agent profile 都触达不到，它也会从 `/` 菜单中消失。两者的开关分开存放 —— 上传件的开关在其注册表条目里，默认加载 skill 的开关在 `skill-policy.json` —— 因为它们是两类不同的声明；而运行时会拒绝与默认 skill 同名的上传，所以两个集合永不重叠。无论哪一种，改动都在下一轮运行时重新读取配置时生效。
+
+**是软件包，而不只是文档。**一个包含多个 skills、共享 Python 包与脚手架的仓库，会被**炸开**为每个 skill 一个自包含 bundle：共享库被复制进各个 skill，入口 shim 自动生成，因此 skill 在 `PYTHONPATH` 为空时也能工作。请在压缩包根部用 `digibuddy-skills.json` 声明布局：
+
+```json
+{
+  "schema_version": 1,
+  "skills": [{ "name": "my-skill", "path": "skills/my-skill" }],
+  "shared": [{ "path": "src/my_package", "as": "_lib/my_package" }],
+  "entrypoints": [{ "path": "scripts/run.py", "module": "my_package.cli", "call": "main" }]
+}
+```
+
+没有 manifest 时，导入器仍会发现任何包含 `SKILL.md` 的目录，但它无从得知 `src/my_package/` 正是这些 skills 所导入的代码 —— 每个 bundle 都是被单独解包的，因此其目录之外的内容根本不存在。上传预览会在有软件包将被遗落时发出警告。
+
+### Skills 与 MCP server
+
+一个 skill 可以被 MCP server **加速**，但绝不能**依赖**它。
+
+MCP server 是进程级的。它们被写入生成的 Codex `config.toml` 并随引擎一同启动，而渲染后的配置属于运行时指纹的一部分 —— 因此改动这一集合会重启整个容器的 Codex，而该容器是用同一个进程服务所有会话的。这在部署或管理时刻可以接受，按轮切换则不可接受，这正是斜杠命令绝不触碰它的原因。
+
+所以 skill 自带运行时：随包携带的 `_lib/` 以及可从 shell 调用的 `scripts/` shim。这条路径零成本、在任何 profile 下都可用，对上传的 skill 也无需任何 MCP 接线。确实注册了 server 的场景，会按需要限定到相应 profile —— `agent-adoption` profile 携带 `agent-maturity`，而在其他任何地方，评估依然通过该 skill 自己的 CLI 运行。
+
 ### 工具
 
 每个 payload 工具都是一个可从 shell 调用的 Python 模块：
@@ -104,7 +137,9 @@ Web UI 提供 `/admin`，一个面向该存储的三页签控制台：
 
 聊天用户在对话顶部的控件中选择 agent，该选择以 `metadata.profile` 传给运行时，运行时会回传它实际解析出的 profile。由于 Codex 在 thread 启动时就固定了基础指令，一次对话会一直使用它开始时的 agent：首轮之后该控件转为陈述当前 agent，选择其他 agent 会新建一次对话。不选则使用运行时默认值；指名一个已不存在的 agent 会报错，而不是静默回退。
 
-访问权限由 Easy Auth 主体头之上的 Entra 白名单（`ADMIN_PRINCIPAL_IDS`）守卫，空白名单拒绝所有人。模型 API key 只写不读 —— 永远不会返回给浏览器，留空保存则保留已存的值。详见 [功能](docs/features.md) 与 [API 参考](docs/api.md)。
+聊天登录可通过 `AUTH_REQUIRE_CORPORATE_ACCOUNT`、`AUTH_TENANT_ID` 与 `AUTH_ALLOWED_UPN_DOMAINS` 限制为 Microsoft Entra 公司账户。通过 `AUTH_ALLOWED_HOME_TENANT_IDS` 与 `AUTH_ALLOWED_EMAIL_DOMAINS` 可允许受信任的企业 B2B 账户，同时继续拒绝 Hotmail 与未受信任 Guest。校验依据是签发租户、`idp` claim 与已验证的登录地址，而不是随宿主变化的 Easy Auth provider 标签。
+
+`/admin` 可通过 `ADMIN_USERNAME`、scrypt 格式的 `ADMIN_PASSWORD_HASH` 与 `ADMIN_SESSION_SECRET` 启用独立的管理员用户名密码登录；该模式优先于 Easy Auth 白名单。未配置这些值时，访问权限回退到 `ADMIN_PRINCIPAL_IDS` Entra 白名单，空白名单拒绝所有人。模型 API key 只写不读 —— 永远不会返回给浏览器，留空保存则保留已存的值。详见 [功能](docs/features.md) 与 [API 参考](docs/api.md)。
 
 ## 部署 Foundry Hosted Agent
 

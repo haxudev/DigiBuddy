@@ -100,7 +100,7 @@ export default function AgentCapabilities({
         aria-expanded={open}
       >
         <span className={styles.dot} aria-hidden="true" />
-        {active?.display_name ?? "DigiBuddy"}
+        {active?.display_name ?? "GTMBuddy"}
         <span className={styles.chevron} aria-hidden="true">
           ▾
         </span>
@@ -124,7 +124,7 @@ export default function AgentCapabilities({
                   className={selected ? styles.profile : `${styles.profile} ${styles.profileActive}`}
                   onClick={() => choose("")}
                 >
-                  <span className={styles.profileName}>DigiBuddy</span>
+                  <span className={styles.profileName}>GTMBuddy</span>
                   <span className={styles.profileNote}>Runtime default</span>
                 </button>
               </li>

@@ -31,14 +31,18 @@ from .skills import (
     DeployedSkill,
     install_deployed_skills,
     install_pack_capabilities,
+    load_skill_policy,
     load_registry,
     registry_fingerprint,
+    skill_policy_fingerprint,
 )
+from .frontmatter import read_skill_frontmatter
 from .profiles import (
     DEFAULT_PROFILE,
     REASONING_EFFORTS,
     AgentProfile,
     Catalogue,
+    SkillEntry,
     parse_profiles,
     profile_fingerprint,
 )
@@ -539,15 +543,25 @@ def build_catalogue(
     settings: RuntimeSettings, store: ConfigStore | None = None
 ) -> Catalogue:
     """Everything this image ships, so the admin console cannot drift from it."""
+    # Descriptions come from the skill's own frontmatter. The console cannot
+    # read the image, so a skill the catalogue does not describe is a skill the
+    # slash menu can only show by name.
+    described: dict[str, str] = {}
     skills = set()
+    policy = load_skill_policy(store)
     for skills_root in (settings.payload_root / "skills", settings.skills_source):
         if not skills_root.is_dir():
             continue
-        skills.update(
-            entry.name
-            for entry in skills_root.iterdir()
-            if entry.is_dir() and (entry / "SKILL.md").is_file()
-        )
+        for entry in skills_root.iterdir():
+            skill_md = entry / "SKILL.md"
+            if not entry.is_dir() or not skill_md.is_file():
+                continue
+            skills.add(entry.name)
+            # First root wins: `payload_root` is the assembled payload and
+            # `skills_source` the image's global skills, and re-reading would
+            # let the second overwrite a description with an empty one.
+            if entry.name not in described:
+                described[entry.name] = read_skill_frontmatter(skill_md).description
     tools_root = settings.payload_root / "tools"
     tools = (
         sorted(
@@ -561,8 +575,17 @@ def build_catalogue(
     # Only what the runtime would actually act on. Advertising an artifact that
     # is deployed but unapproved would let the console assign a capability the
     # runtime then refuses to install.
+    registry = load_registry(store)
+    deployed_entries = {
+        skill.name: skill
+        for skill in registry
+        if skill.kind == "skill" and skill.name not in described
+    }
+    skills.difference_update(policy.disabled)
     skills.update(
-        skill.name for skill in load_registry(store) if skill.kind == "skill" and skill.active
+        skill.name
+        for skill in deployed_entries.values()
+        if skill.active
     )
     tool_names = set(tools)
     tool_names.update(
@@ -574,6 +597,25 @@ def build_catalogue(
         skills=tuple(sorted(skills)),
         tools=tuple(sorted(tool_names)),
         mcp_servers=tuple(sorted(mcp_servers)),
+        skill_entries=tuple(
+            SkillEntry(
+                name=name,
+                # A packaged skill of the same name is the one that installs,
+                # so its description is the honest one to publish.
+                description=(
+                    described[name]
+                    if name in described
+                    else deployed_entries[name].description
+                ),
+                source="packaged" if name in described else "deployed",
+                enabled=(
+                    name not in policy.disabled
+                    if name in described
+                    else deployed_entries[name].active
+                ),
+            )
+            for name in sorted(set(described) | set(deployed_entries))
+        ),
     )
 
 
@@ -664,16 +706,20 @@ def render_codex_config(
     return "\n".join(lines) + "\n"
 
 
-def _skill_catalogue(settings: RuntimeSettings, profile: AgentProfile) -> str:
+def _skill_catalogue(
+    settings: RuntimeSettings, profile: AgentProfile, store: ConfigStore | None = None
+) -> str:
     root = settings.payload_root / "skills"
     if not root.is_dir():
         return ""
+    disabled = load_skill_policy(store).disabled
     names = sorted(
         entry.name
         for entry in root.iterdir()
         if entry.is_dir()
         and (entry / "SKILL.md").is_file()
         and profile.allows_skill(entry.name)
+        and entry.name not in disabled
     )
     if not names:
         return ""
@@ -686,7 +732,9 @@ def _skill_catalogue(settings: RuntimeSettings, profile: AgentProfile) -> str:
 
 
 def load_instructions(
-    settings: RuntimeSettings, profile: AgentProfile | None = None
+    settings: RuntimeSettings,
+    profile: AgentProfile | None = None,
+    store: ConfigStore | None = None,
 ) -> str:
     """Runtime guardrails, payload persona, profile persona and skill catalogue."""
     active = profile or DEFAULT_PROFILE
@@ -696,7 +744,7 @@ def load_instructions(
         sections.append(payload_instructions.read_text(encoding="utf-8"))
     if active.persona:
         sections.append(active.persona)
-    catalogue = _skill_catalogue(settings, active)
+    catalogue = _skill_catalogue(settings, active, store)
     if catalogue:
         sections.append(catalogue)
     return "\n\n".join(section.strip() for section in sections if section.strip()) + "\n"
@@ -720,7 +768,8 @@ def runtime_fingerprint(
     parts = [
         render_codex_config(settings, store, profile, reasoning_effort),
         registry_fingerprint(load_registry(store)),
-        load_instructions(settings, profile),
+        skill_policy_fingerprint(load_skill_policy(store)),
+        load_instructions(settings, profile, store),
         profile_fingerprint(profile),
         # The resolved values, not the bindings that name them: a rotation that
         # keeps the same slot must still replace the process, or it would keep
@@ -737,14 +786,18 @@ def runtime_fingerprint(
 
 
 def _link_selection(
-    source: Path, target: Path, allowed: tuple[str, ...] | None, pattern: str
+    source: Path,
+    target: Path,
+    allowed: tuple[str, ...] | None,
+    pattern: str,
+    denied: frozenset[str] = frozenset(),
 ) -> None:
     """Mirror the allowed entries of ``source`` into ``target`` as symlinks."""
     if target.is_symlink() or target.is_file():
         target.unlink()
     elif target.is_dir():
         shutil.rmtree(target)
-    if allowed is None:
+    if allowed is None and not denied:
         target.symlink_to(source, target_is_directory=True)
         return
     target.mkdir(parents=True, exist_ok=True)
@@ -752,7 +805,7 @@ def _link_selection(
         return
     for entry in source.glob(pattern):
         name = entry.name if entry.is_dir() else entry.stem
-        if name in allowed:
+        if name not in denied and (allowed is None or name in allowed):
             (target / entry.name).symlink_to(entry, target_is_directory=entry.is_dir())
 
 
@@ -815,9 +868,10 @@ def install_global_skills(
     target.mkdir(parents=True, exist_ok=True)
 
     active = profile or DEFAULT_PROFILE
+    disabled = load_skill_policy(store).disabled
     installed = 0
     for candidate in candidates:
-        if not active.allows_skill(candidate.name):
+        if candidate.name in disabled or not active.allows_skill(candidate.name):
             continue
         destination = target / candidate.name
         shutil.copytree(candidate, destination)
@@ -891,10 +945,11 @@ def prepare_codex_environment(
 
     skills_root = settings.payload_root / "skills"
     tools_root = settings.payload_root / "tools"
-    if active.skills is not None or active.tools is not None:
+    disabled_skills = load_skill_policy(store).disabled
+    if active.skills is not None or active.tools is not None or disabled_skills:
         view = settings.codex_home / "profiles" / active.name
         view.mkdir(parents=True, exist_ok=True)
-        _link_selection(skills_root, view / "skills", active.skills, "*")
+        _link_selection(skills_root, view / "skills", active.skills, "*", disabled_skills)
         _link_selection(tools_root, view / "tools", active.tools, "*.py")
         skills_root = view / "skills"
         tools_root = view / "tools"

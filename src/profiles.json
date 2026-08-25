@@ -2,7 +2,7 @@
   "profiles": [
     {
       "name": "digibuddy",
-      "display_name": "DigiBuddy",
+      "display_name": "GTMBuddy",
       "description": "Full Microsoft domain expert with every packaged capability.",
       "persona": ""
     },
@@ -20,8 +20,16 @@
         "xlsx",
         "doc-coauthoring"
       ],
-      "tools": ["cost_estimator", "fetch_url", "azure_blob", "sharepoint"],
-      "mcp_servers": ["microsoft-learn", "cloud-pricing"]
+      "tools": [
+        "cost_estimator",
+        "fetch_url",
+        "azure_blob",
+        "sharepoint"
+      ],
+      "mcp_servers": [
+        "microsoft-learn",
+        "cloud-pricing"
+      ]
     },
     {
       "name": "marketing",
@@ -42,17 +50,59 @@
         "pptx",
         "docx"
       ],
-      "tools": ["fetch_url", "azure_blob", "create_eml", "m365_cli"],
-      "mcp_servers": ["microsoft-learn"]
+      "tools": [
+        "fetch_url",
+        "azure_blob",
+        "create_eml",
+        "m365_cli"
+      ],
+      "mcp_servers": [
+        "microsoft-learn"
+      ]
     },
     {
       "name": "support-desk",
       "display_name": "Support Desk",
       "description": "Answers from the internal knowledge base, with M365 follow-up.",
       "persona": "## Profile\n\nYou are working as an internal support desk agent. Answer from the internal knowledge base first and always cite the source. If the knowledge base does not cover the question, say so explicitly instead of guessing.",
-      "skills": ["faq-knowledge-base-agent", "m365-send-mail", "docx", "pdf"],
-      "tools": ["m365_cli", "sharepoint", "create_eml", "azure_blob"],
-      "mcp_servers": ["microsoft-learn"]
+      "skills": [
+        "faq-knowledge-base-agent",
+        "m365-send-mail",
+        "docx",
+        "pdf"
+      ],
+      "tools": [
+        "m365_cli",
+        "sharepoint",
+        "create_eml",
+        "azure_blob"
+      ],
+      "mcp_servers": [
+        "microsoft-learn"
+      ]
+    },
+    {
+      "name": "agent-adoption",
+      "display_name": "Agent Adoption Advisor",
+      "description": "Runs Microsoft agentic AI adoption maturity assessments and writes up the results.",
+      "persona": "## Profile\n\nYou run agent adoption maturity engagements. Interview the customer rather than accepting self-assigned scores, ask one question at a time as a selection card, and capture verbatim evidence for every claim. Score honestly: a capped score you can defend is worth more than a flattering one you cannot.",
+      "skills": [
+        "agent-maturity-assess",
+        "agent-maturity-report",
+        "agent-maturity-author",
+        "docx",
+        "pptx",
+        "pdf"
+      ],
+      "tools": [
+        "azure_blob",
+        "create_eml",
+        "m365_cli"
+      ],
+      "mcp_servers": [
+        "microsoft-learn",
+        "agent-maturity"
+      ]
     }
   ]
 }

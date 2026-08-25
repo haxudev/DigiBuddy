@@ -78,7 +78,8 @@ The response map is stored under the hosted session workspace so session resume 
 - Codex defaults to `workspace-write` with approval policy `never`.
 - The Web UI key remains server-side when supplied through container settings.
 - The Web UI only permits approved HTTPS endpoint suffixes in production.
-- `/admin` is guarded by an Entra allowlist over the Easy Auth principal header; the model key is write-only and every write is audited.
+- Chat authentication can require a trusted issuing tenant, a non-personal identity provider, and a verified sign-in address in an approved domain. The platform's Easy Auth provider label is not treated as proof of Entra, because it varies by host.
+- `/admin` is guarded by either a dedicated scrypt-backed password session or, when that is not configured, an Entra allowlist over the Easy Auth principal header. The model key is write-only and every write is audited.
 - Every configuration document declares `schema_version`. A runtime that meets a newer version keeps the last version it could read rather than reinterpreting the document, because the fields it would ignore are the ones a newer console added to restrict something.
 - `profiles.json` and the capability registry are written conditionally and report a conflict rather than overwriting, because both are read-modify-write from two independent surfaces.
 - An explicitly named profile that is not configured is an error. Falling back to the default would let a renamed or deleted restricted agent resume with the capabilities of a different one.

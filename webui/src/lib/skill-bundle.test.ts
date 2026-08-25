@@ -4,12 +4,15 @@ import test from "node:test";
 
 import { normaliseSkills, ConfigValidationError } from "./admin-config.ts";
 import {
+  MAX_ENTRIES,
   SkillBundleError,
   explodeBundle,
   inspectBundle,
   nameFromFile,
+  type ExplodedBundle,
   type ExplodedCapability,
 } from "./skill-bundle.ts";
+import { readDirectory, readEntry } from "./zip.ts";
 import { zip } from "./zip-fixture.test-helper.ts";
 
 test("a bundle rooted at one directory names itself", () => {
@@ -301,5 +304,173 @@ test("a manifest written to a newer schema is refused, not guessed at", () => {
         "p.zip",
       ),
     SkillBundleError,
+  );
+});
+
+// --- Self-contained skills -------------------------------------------------
+
+/**
+ * The shape of a real capability repository: several skills, one shared Python
+ * package they all need, reference data, and a script meant to be run.
+ *
+ * Modelled on `haxudev/agent-maturity-assessment`, which the image vendors the
+ * same way `scripts/sync-agent-skills.sh` does at build time. The point of
+ * these tests is that an administrator uploading such a repository gets the
+ * same self-contained result the build produces, because a skill whose Python
+ * package stayed behind in `src/` fails at the moment the agent runs it.
+ */
+const REPOSITORY = {
+  "amx-main/digibuddy-skills.json": JSON.stringify({
+    schema_version: 1,
+    skills: [
+      { name: "agent-maturity-assess", path: "skills/agent-maturity-assess" },
+      { name: "agent-maturity-report", path: "skills/agent-maturity-report" },
+    ],
+    shared: [{ path: "src/agent_maturity", as: "_lib/agent_maturity" }],
+    entrypoints: [{ path: "scripts/amx.py", module: "agent_maturity.cli", call: "main" }],
+  }),
+  "amx-main/README.md": "# Agent maturity\n",
+  "amx-main/pyproject.toml": "[project]\nname = 'agent-maturity-assessment'\n",
+  "amx-main/skills/agent-maturity-assess/SKILL.md":
+    "---\nname: agent-maturity-assess\ndescription: Run a maturity assessment.\n---\n",
+  "amx-main/skills/agent-maturity-assess/references/question-bank.json": '{"schema":"bank/2"}',
+  "amx-main/skills/agent-maturity-report/SKILL.md":
+    "---\nname: agent-maturity-report\ndescription: Re-render a scored assessment.\n---\n",
+  "amx-main/src/agent_maturity/__init__.py": '__version__ = "0.2.0"\n',
+  "amx-main/src/agent_maturity/cli.py": "def main():\n    return 0\n",
+  "amx-main/src/agent_maturity/mcp/__init__.py": "",
+};
+
+function entriesOf(exploded: ExplodedBundle, name: string): string[] {
+  const skill = exploded.capabilities.find((entry) => entry.name === name);
+  assert.ok(skill, `expected the bundle to yield ${name}`);
+  return skill.entries;
+}
+
+test("a repository archive explodes into one bundle per skill", () => {
+  const exploded = explodeBundle(zip(REPOSITORY), "amx-main.zip");
+  assert.equal(exploded.layout, "manifest");
+  assert.deepEqual(
+    exploded.skills.map((skill) => skill.name),
+    ["agent-maturity-assess", "agent-maturity-report"],
+  );
+});
+
+test("the shared package travels into every skill that needs it", () => {
+  // Not a reference to `src/`: each bundle is extracted on its own, so a
+  // package left outside it would simply not be there.
+  const exploded = explodeBundle(zip(REPOSITORY), "amx-main.zip");
+  for (const name of ["agent-maturity-assess", "agent-maturity-report"]) {
+    const entries = entriesOf(exploded, name);
+    assert.ok(entries.includes("_lib/agent_maturity/cli.py"), name);
+    assert.ok(entries.includes("_lib/agent_maturity/__init__.py"), name);
+    assert.ok(entries.includes("_lib/agent_maturity/mcp/__init__.py"), name);
+  }
+});
+
+test("a generated shim makes the script runnable with nothing on PYTHONPATH", () => {
+  // This is the Tier 1 contract: the skill carries its own runtime, so it
+  // works whether or not an MCP server was ever registered for it.
+  const exploded = explodeBundle(zip(REPOSITORY), "amx-main.zip");
+  const skill = exploded.capabilities.find(
+    (entry) => entry.name === "agent-maturity-assess",
+  );
+  assert.ok(skill, "expected the assess skill in the bundle");
+  assert.ok(skill.entries.includes("scripts/amx.py"));
+
+  const written = readDirectory(skill.payload, MAX_ENTRIES);
+  const entry = written.find(
+    (item) => item.name === "agent-maturity-assess/scripts/amx.py",
+  );
+  assert.ok(entry, "expected the generated shim in the bundle");
+  const shim = readEntry(skill.payload, entry).toString("utf-8");
+  assert.match(shim, /sys\.path\.insert\(0, str\(Path\(__file__\)\.resolve\(\)\.parents\[1\] \/ "_lib"\)\)/);
+  assert.match(shim, /from agent_maturity\.cli import main/);
+});
+
+test("a skill keeps its own reference data", () => {
+  const entries = entriesOf(
+    explodeBundle(zip(REPOSITORY), "amx-main.zip"),
+    "agent-maturity-assess",
+  );
+  assert.ok(entries.includes("references/question-bank.json"));
+});
+
+test("repository scaffolding is left behind", () => {
+  // A skill bundle is the skill, not the repository it came from.
+  const entries = entriesOf(
+    explodeBundle(zip(REPOSITORY), "amx-main.zip"),
+    "agent-maturity-assess",
+  );
+  assert.equal(entries.includes("README.md"), false);
+  assert.equal(entries.includes("pyproject.toml"), false);
+  assert.equal(entries.includes("digibuddy-skills.json"), false);
+});
+
+test("a shipped script keeps its executable bit", () => {
+  // A script that loses it fails when the agent runs it rather than when the
+  // bundle is deployed, which is far harder to diagnose.
+  const source = {
+    "p/digibuddy-skills.json": JSON.stringify({
+      schema_version: 1,
+      skills: [{ name: "runner", path: "skills/runner" }],
+    }),
+    "p/skills/runner/SKILL.md": "---\nname: runner\n---\n",
+    "p/skills/runner/scripts/run.sh": "#!/bin/sh\necho hi\n",
+  };
+  const exploded = explodeBundle(
+    zip(source, { executable: ["p/skills/runner/scripts/run.sh"] }),
+    "p.zip",
+  );
+  const skill = exploded.capabilities.find((entry) => entry.name === "runner");
+  assert.ok(skill);
+  const script = readDirectory(skill.payload, MAX_ENTRIES).find(
+    (item) => item.name === "runner/scripts/run.sh",
+  );
+  assert.ok(script, "expected the script to survive explosion");
+  assert.ok(script.mode & 0o111, "expected the owner execute bit to survive");
+});
+
+test("discovery warns when a shared package would be left behind", () => {
+  // The failure this prevents is silent: the skills install looking complete
+  // and then fail with ModuleNotFoundError inside a sandbox. This is the shape
+  // of `haxudev/agent-maturity-assessment`, whose four skills all import a
+  // package that lives in `src/`.
+  const exploded = explodeBundle(
+    zip({
+      "repo-main/skills/one/SKILL.md": "---\nname: one\n---\n",
+      "repo-main/skills/two/SKILL.md": "---\nname: two\n---\n",
+      "repo-main/src/shared_pkg/__init__.py": "",
+      "repo-main/src/shared_pkg/cli.py": "def main():\n    return 0\n",
+    }),
+    "repo-main.zip",
+  );
+
+  assert.equal(exploded.layout, "discovered");
+  const warning = exploded.notes.find((note) => note.includes("left behind"));
+  assert.ok(warning, "expected a note about the stranded package");
+  assert.match(warning, /src\/shared_pkg/);
+});
+
+test("a package that lives inside a skill is not reported as stranded", () => {
+  // It already travels with the skill, so warning about it would be noise.
+  const exploded = explodeBundle(
+    zip({
+      "repo-main/skills/one/SKILL.md": "---\nname: one\n---\n",
+      "repo-main/skills/one/_lib/pkg/__init__.py": "",
+    }),
+    "repo-main.zip",
+  );
+  assert.equal(
+    exploded.notes.some((note) => note.includes("left behind")),
+    false,
+  );
+});
+
+test("a manifest that vendors the package raises no such warning", () => {
+  const exploded = explodeBundle(zip(REPOSITORY), "amx-main.zip");
+  assert.equal(
+    exploded.notes.some((note) => note.includes("left behind")),
+    false,
   );
 });

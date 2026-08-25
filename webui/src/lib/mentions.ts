@@ -17,6 +17,12 @@ export type MentionQuery = {
 };
 
 const LEADING_MENTION = /^@([\w-]*)$/;
+const LEADING_MENTION_MESSAGE = /^\s*@([\w-]+)(?:\s+([\s\S]*))?$/;
+
+export type LeadingMention = {
+  query: string;
+  message: string;
+};
 
 /** The mention being typed, or `null` when this is ordinary prose. */
 export function mentionQuery(composer: string): MentionQuery | null {
@@ -25,6 +31,16 @@ export function mentionQuery(composer: string): MentionQuery | null {
   // A trailing space ends the mention: the user moved on to the message.
   if (composer.trimStart() !== composer.trim()) return null;
   return { query: match[1].toLowerCase() };
+}
+
+/** Parse `@agent message` without treating mentions in prose as routing. */
+export function leadingMention(composer: string): LeadingMention | null {
+  const match = LEADING_MENTION_MESSAGE.exec(composer);
+  if (!match) return null;
+  return {
+    query: match[1].toLowerCase(),
+    message: (match[2] ?? "").trim(),
+  };
 }
 
 /**

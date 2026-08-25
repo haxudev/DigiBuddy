@@ -58,6 +58,10 @@ export type AgentRequest = {
   reasoningEffort: string;
   /** Opaque hash of the signed-in principal; partitions generated files. */
   owner?: string;
+  /** Skills this turn asked to load, from a slash command in the composer. */
+  skills?: string[];
+  /** The command that named them, so the runtime's directive can cite it. */
+  command?: string;
 };
 
 /**
@@ -73,6 +77,8 @@ export function agentRequestBody({
   previousResponseId,
   reasoningEffort,
   owner = "",
+  skills = [],
+  command = "",
 }: AgentRequest): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: connection.model,
@@ -80,7 +86,6 @@ export function agentRequestBody({
     stream: true,
     store: true,
   };
-  if (reasoningEffort) body.reasoning = { effort: reasoningEffort };
   if (previousResponseId) body.previous_response_id = previousResponseId;
   if (connection.agentName) {
     // `agent` is deprecated; the service asks for `agent_reference`.
@@ -95,6 +100,20 @@ export function agentRequestBody({
   const metadata: Record<string, string> = {};
   if (connection.profile) metadata.profile = connection.profile;
   if (owner) metadata.owner = owner;
+  // Metadata values are strings, so the list travels comma-separated. The
+  // runtime accepts either shape and re-checks every name against the bound
+  // profile, so this is a request rather than an instruction.
+  if (skills.length > 0) metadata.skills = skills.join(",");
+  if (command) metadata.command = command;
+  if (reasoningEffort) {
+    if (connection.agentName) {
+      // Foundry Hosted Agent endpoints reject the model-level `reasoning`
+      // property before the custom agent can read it.
+      metadata.reasoning_effort = reasoningEffort;
+    } else {
+      body.reasoning = { effort: reasoningEffort };
+    }
+  }
   if (Object.keys(metadata).length > 0) body.metadata = metadata;
   return body;
 }
@@ -287,12 +306,29 @@ export function responseErrorMessage(payload: unknown): string {
   return "";
 }
 
-export const REASONING_EFFORTS = ["minimal", "low", "medium", "high"] as const;
+export const REASONING_EFFORTS = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
 
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
 /** Matches the cap the hosted agent enforces when it writes uploads to disk. */
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+/**
+ * The shape of a skill name, and how many one turn may load.
+ *
+ * Both mirror `hosted-agent/codex_adapter/turn_skills.py`, which enforces them
+ * again on arrival. Declared here rather than imported from `skill-commands.ts`
+ * so the proxy path does not pull in the admin configuration module and the
+ * storage client behind it.
+ */
+const SKILL_REQUEST_NAME = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
+const MAX_TURN_SKILLS = 8;
 
 export type TurnAttachment = {
   filename: string;
@@ -309,6 +345,8 @@ export type TurnAttachment = {
 export function turnOptions(forwardedProps: unknown): {
   attachments: TurnAttachment[];
   reasoningEffort: ReasoningEffort | "";
+  skills: string[];
+  command: string;
 } {
   const props =
     forwardedProps && typeof forwardedProps === "object"
@@ -321,6 +359,19 @@ export function turnOptions(forwardedProps: unknown): {
   )
     ? (requested as ReasoningEffort)
     : "";
+
+  // Shape only. Whether these skills exist, and whether this conversation's
+  // agent may reach them, is the runtime's to decide -- it is the side that
+  // knows which profile the conversation is bound to.
+  const skills = (Array.isArray(props.skills) ? props.skills : [])
+    .map((skill) => stringValue(skill).toLowerCase())
+    .filter(
+      (skill, index, all) =>
+        SKILL_REQUEST_NAME.test(skill) && all.indexOf(skill) === index,
+    )
+    .slice(0, MAX_TURN_SKILLS);
+  const requestedCommand = stringValue(props.command).toLowerCase();
+  const command = SKILL_REQUEST_NAME.test(requestedCommand) ? requestedCommand : "";
 
   const attachments: TurnAttachment[] = [];
   let budget = MAX_ATTACHMENT_BYTES;
@@ -339,7 +390,7 @@ export function turnOptions(forwardedProps: unknown): {
       data,
     });
   }
-  return { attachments, reasoningEffort };
+  return { attachments, reasoningEffort, skills, command };
 }
 
 /**

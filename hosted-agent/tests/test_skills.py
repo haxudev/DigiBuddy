@@ -9,8 +9,10 @@ from codex_adapter.skills import (
     DeployedSkill,
     extract_bundle,
     install_deployed_skills,
+    parse_skill_policy,
     parse_registry,
     registry_fingerprint,
+    skill_policy_fingerprint,
 )
 
 
@@ -70,6 +72,34 @@ class RegistryTests(unittest.TestCase):
         self.assertNotEqual(
             registry_fingerprint((skill,)),
             registry_fingerprint((DeployedSkill(**{**skill.__dict__, "enabled": False}),)),
+        )
+
+
+class SkillPolicyTests(unittest.TestCase):
+    def test_malformed_policy_documents_leave_everything_enabled(self):
+        self.assertEqual(parse_skill_policy(None).disabled, frozenset())
+        self.assertEqual(parse_skill_policy({"disabled": "demo"}).disabled, frozenset())
+
+    def test_malformed_policy_entries_do_not_discard_the_good_ones(self):
+        policy = parse_skill_policy(
+            {
+                "disabled": [
+                    " demo ",
+                    "../escape",
+                    "UPPER",
+                    "tool_name",
+                    {"name": "other"},
+                    False,
+                ]
+            }
+        )
+
+        self.assertEqual(policy.disabled, frozenset({"demo"}))
+
+    def test_policy_fingerprint_changes_when_a_packaged_skill_is_disabled(self):
+        self.assertNotEqual(
+            skill_policy_fingerprint(parse_skill_policy({"disabled": ["demo"]})),
+            skill_policy_fingerprint(parse_skill_policy({"disabled": ["other"]})),
         )
 
 

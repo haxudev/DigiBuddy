@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  leadingMention,
   matchProfiles,
   mentionQuery,
   resolveMention,
@@ -46,6 +47,18 @@ test("a mention anywhere else is just text", () => {
 
 test("a trailing space ends the mention", () => {
   assert.equal(mentionQuery("@marketing "), null);
+});
+
+test("a leading mention can route a message in one submit", () => {
+  assert.deepEqual(leadingMention("@marketing draft a campaign"), {
+    query: "marketing",
+    message: "draft a campaign",
+  });
+  assert.deepEqual(leadingMention("  @Support-Desk\nHelp me"), {
+    query: "support-desk",
+    message: "Help me",
+  });
+  assert.equal(leadingMention("ask @marketing about this"), null);
 });
 
 test("a partial query filters, preferring the closest match", () => {

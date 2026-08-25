@@ -86,6 +86,14 @@ class DeployedSkill:
         )
 
 
+@dataclass(frozen=True)
+class SkillPolicy:
+    disabled: frozenset[str] = frozenset()
+
+    def fingerprint(self) -> str:
+        return "\0".join(sorted(self.disabled))
+
+
 def _text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
@@ -136,6 +144,32 @@ def registry_fingerprint(skills: tuple[DeployedSkill, ...]) -> str:
     return hashlib.sha256(
         "\0".join(skill.fingerprint() for skill in skills).encode("utf-8")
     ).hexdigest()
+
+
+def parse_skill_policy(document: Any) -> SkillPolicy:
+    """Parse ``skill-policy.json``.
+
+    The policy only applies to packaged skills. Deployed skills keep their own
+    registry switch; the installer refuses an upload that collides with an image
+    skill, so there is no second switch to reconcile.
+    """
+    entries = document.get("disabled") if isinstance(document, dict) else None
+    if not isinstance(entries, list):
+        return SkillPolicy()
+
+    disabled = {
+        name
+        for entry in entries
+        if isinstance(entry, str)
+        and (name := entry.strip())
+        and SKILL_NAME.fullmatch(name)
+    }
+    return SkillPolicy(frozenset(disabled))
+
+
+def skill_policy_fingerprint(policy: SkillPolicy) -> str:
+    """Identity of the packaged-skill switch state."""
+    return hashlib.sha256(policy.fingerprint().encode("utf-8")).hexdigest()
 
 
 def _safe_members(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
@@ -350,16 +384,30 @@ def load_registry(store: Any) -> tuple[DeployedSkill, ...]:
         return ()
 
 
+def load_skill_policy(store: Any) -> SkillPolicy:
+    from .config_store import SKILL_POLICY_DOCUMENT
+
+    try:
+        return parse_skill_policy(store.read(SKILL_POLICY_DOCUMENT) if store else None)
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not read the skill policy", exc_info=True)
+        return SkillPolicy()
+
+
 __all__ = [
     "PACKS_DIRECTORY",
     "MAX_BUNDLE_BYTES",
     "MAX_ENTRIES",
     "MAX_EXTRACTED_BYTES",
     "DeployedSkill",
+    "SkillPolicy",
     "extract_bundle",
     "install_deployed_skills",
     "install_pack_capabilities",
+    "load_skill_policy",
     "load_registry",
     "parse_registry",
+    "parse_skill_policy",
     "registry_fingerprint",
+    "skill_policy_fingerprint",
 ]

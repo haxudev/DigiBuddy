@@ -35,11 +35,20 @@ import {
   stripProfileMetadata,
 } from "@/lib/effective-profile";
 import {
+  leadingMention,
   matchProfiles,
   mentionQuery,
   resolveMention,
   stripMention,
 } from "@/lib/mentions";
+import {
+  commandQuery,
+  leadingCommand,
+  matchCommands,
+  resolveCommand,
+  stripCommand,
+  type SkillCommand,
+} from "@/lib/skill-commands";
 import { splitMessage } from "@/lib/ask-user";
 import {
   deliveryFocus,
@@ -67,10 +76,11 @@ import {
 import styles from "./page.module.css";
 
 const EFFORT_LABELS: Record<string, string> = {
-  minimal: "Minimal",
   low: "Low",
   medium: "Medium",
   high: "High",
+  xhigh: "Extra high",
+  max: "Maximum",
 };
 
 /** What the composer will accept, matching the formats Codex can open. */
@@ -129,10 +139,28 @@ export default function Home() {
   const [identity, setIdentity] = useState<{
     signedIn: boolean;
     providers: string[];
+    corporateOnly: boolean;
+    rejected: boolean;
+    reason: string;
   } | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [attachments, setAttachments] = useState<TurnAttachment[]>([]);
   const [reasoningEffort, setReasoningEffort] = useState("");
+  const [commands, setCommands] = useState<SkillCommand[]>([]);
+  /**
+   * The skill chosen for the next message.
+   *
+   * One message, not the conversation. A skill is markdown the model reads on
+   * demand, so unlike the agent it can be chosen per turn -- and pretending
+   * otherwise would either lie about the scope or force a new conversation for
+   * every command.
+   */
+  const [pendingCommand, setPendingCommand] = useState<SkillCommand | null>(null);
+  const [pendingTurn, setPendingTurn] = useState<{
+    sessionId: string;
+    text: string;
+    profile: string;
+  } | null>(null);
   // On phones and tablets the sidebar slides over the conversation instead of
   // squeezing it. The deliverable window is always an overlay.
   const [navOpen, setNavOpen] = useState(false);
@@ -224,18 +252,37 @@ export default function Home() {
     const controller = new AbortController();
     fetch("/api/me", { signal: controller.signal })
       .then((response) =>
-        response.ok ? response.json() : { signedIn: false, providers: [] },
+        response.ok
+          ? response.json()
+          : {
+              signedIn: false,
+              providers: [],
+              corporateOnly: false,
+              rejected: false,
+              reason: "",
+            },
       )
       .then((me) => {
         setSessionOwner(me.signedIn ? String(me.owner ?? "") : "");
         setIdentity({
           signedIn: Boolean(me.signedIn),
           providers: Array.isArray(me.providers) ? me.providers : [],
+          corporateOnly: Boolean(me.corporateOnly),
+          rejected: Boolean(me.rejected),
+          reason: String(me.reason ?? ""),
         });
       })
       // A deployment with no auth in front of it still has to be usable, and
       // the server refuses unauthenticated work regardless of what is shown.
-      .catch(() => setIdentity({ signedIn: true, providers: [] }));
+      .catch(() =>
+        setIdentity({
+          signedIn: true,
+          providers: [],
+          corporateOnly: false,
+          rejected: false,
+          reason: "",
+        }),
+      );
     return () => controller.abort();
   }, []);
 
@@ -250,6 +297,36 @@ export default function Home() {
   }, []);
 
   const messages = useMemo(() => activeSession?.messages ?? [], [activeSession]);
+
+  // Commands depend on the agent, because a command is only real when the
+  // profile behind the conversation can reach the skills it names.
+  const commandProfile = boundProfile || requestedProfile;
+  useEffect(() => {
+    const controller = new AbortController();
+    const query = commandProfile
+      ? `?profile=${encodeURIComponent(commandProfile)}`
+      : "";
+    fetch(`/api/commands${query}`, { signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : { commands: [] }))
+      .then((payload) => setCommands(payload.commands ?? []))
+      // No commands simply means `/` offers nothing; everything else still works.
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [commandProfile]);
+
+  // `/` stays meaningful for the whole conversation, unlike `@`: a skill is
+  // read per turn, so choosing one later is a promise the runtime can keep.
+  const command = commandQuery(prompt);
+  const commandMatches = useMemo(
+    () => (command ? matchCommands(commands, command.query) : []),
+    [command, commands],
+  );
+  const commandOpen = command !== null && commands.length > 0;
+
+  function chooseCommand(entry: SkillCommand) {
+    setPendingCommand(entry);
+    setPrompt(stripCommand(prompt));
+  }
 
   // `@` is meaningful only where it can still change something: the first
   // message of a conversation that has not been bound yet.
@@ -301,10 +378,14 @@ export default function Home() {
   }, [artifacts, activeSession?.id]);
 
   const send = useCallback(
-    async (value: string) => {
+    async (value: string, profileOverride = "", withCommand?: SkillCommand | null) => {
       const agent = agentRef.current;
       const text = value.trim();
-      if (!text || !agent || isRunning) return;
+      if (!text || isRunning) return;
+      if (!agent) {
+        setError("The conversation is still loading. Try sending again.");
+        return;
+      }
 
       setError("");
       setActivity([]);
@@ -315,15 +396,23 @@ export default function Home() {
       // as the request is on its way.
       const files = attachments;
       setAttachments([]);
+      // So does the skill. It was chosen for this message, and leaving it set
+      // would silently apply it to the next one too.
+      const chosen = withCommand === undefined ? pendingCommand : withCommand;
+      setPendingCommand(null);
 
       try {
         await agent.runAgent({
           forwardedProps: {
             // A bound conversation keeps its agent whatever the picker shows,
             // because the runtime will keep it regardless.
-            connection: { profile: boundProfile || requestedProfile },
+            connection: {
+              profile: profileOverride || boundProfile || requestedProfile,
+            },
             attachments: files,
             reasoningEffort,
+            skills: chosen?.skills ?? [],
+            command: chosen?.name ?? "",
           },
         });
       } catch (runError) {
@@ -335,8 +424,28 @@ export default function Home() {
         setIsRunning(false);
       }
     },
-    [attachments, boundProfile, isRunning, reasoningEffort, requestedProfile],
+    [
+      attachments,
+      boundProfile,
+      isRunning,
+      pendingCommand,
+      reasoningEffort,
+      requestedProfile,
+    ],
   );
+
+  useEffect(() => {
+    if (
+      !pendingTurn ||
+      pendingTurn.sessionId !== activeId ||
+      !agentRef.current ||
+      isRunning
+    ) {
+      return;
+    }
+    setPendingTurn(null);
+    void send(pendingTurn.text, pendingTurn.profile);
+  }, [activeId, isRunning, pendingTurn, send]);
 
   async function addFiles(list: FileList | null) {
     const files = Array.from(list ?? []);
@@ -353,11 +462,58 @@ export default function Home() {
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (mention) {
-      // The composer holds only a mention, so this is agent selection, not a
-      // message. Sending "@marketing" to the agent would be nonsense.
-      const resolved = resolveMention(profiles, mention.query);
-      if (resolved) chooseMention(resolved.name);
+    const invoked = leadingCommand(prompt);
+    if (invoked) {
+      const resolved = resolveCommand(commands, invoked.query);
+      if (!resolved) {
+        setError(`No skill matches /${invoked.query}.`);
+        return;
+      }
+      // `/command` on its own arms the skill and waits: the command says which
+      // skill to use, not what to do with it.
+      if (!invoked.message) {
+        chooseCommand(resolved);
+        return;
+      }
+      setError("");
+      setPrompt("");
+      void send(invoked.message, "", resolved);
+      return;
+    }
+    const addressed = leadingMention(prompt);
+    if (addressed) {
+      const resolved = resolveMention(profiles, addressed.query);
+      if (!resolved) {
+        setError(`No agent matches @${addressed.query}.`);
+        return;
+      }
+      if (!addressed.message) {
+        chooseMention(resolved.name);
+        return;
+      }
+
+      setError("");
+      setPrompt("");
+      if (boundProfile && boundProfile !== resolved.name) {
+        const sessionId = createNewSession(resolved.name);
+        setPendingTurn({
+          sessionId,
+          text: addressed.message,
+          profile: resolved.name,
+        });
+        return;
+      }
+      if (!boundProfile) {
+        updateSession(activeId, (item) => ({
+          ...item,
+          requestedProfile: resolved.name,
+        }));
+      }
+      void send(addressed.message, resolved.name);
+      return;
+    }
+    if (!activeId || !agentRef.current) {
+      setError("The conversation is still loading. Try sending again.");
       return;
     }
     const value = prompt;
@@ -373,12 +529,17 @@ export default function Home() {
     // Activity describes one run, so it never follows the reader to another
     // session.
     setActivity([]);
+    // Neither does an armed skill. Each conversation runs its own agent, and a
+    // skill that agent cannot reach would be dropped by the runtime — leaving a
+    // chip that promises something the next message would not do.
+    setPendingCommand(null);
   }
 
-  function createNewSession(withProfile = "") {
+  function createNewSession(withProfile = ""): string {
     const session = createSession(withProfile);
     replaceSessions(upsertSession(sessions, session));
     selectSession(session.id);
+    return session.id;
   }
 
   function deleteSession(sessionId: string) {
@@ -388,7 +549,14 @@ export default function Home() {
   }
 
   if (identity && !identity.signedIn) {
-    return <SignIn providers={identity.providers} />;
+    return (
+      <SignIn
+        providers={identity.providers}
+        corporateOnly={identity.corporateOnly}
+        rejected={identity.rejected}
+        reason={identity.reason}
+      />
+    );
   }
 
   return (
@@ -457,7 +625,7 @@ export default function Home() {
           {messages.length === 0 ? (
             <div className={styles.emptyState}>
               <span>⌁</span>
-              <h2>What should DigiBuddy build?</h2>
+              <h2>What should GTMBuddy build?</h2>
               <p>
                 Analyze a repository, implement a focused change, or run validation
                 in the isolated Foundry workspace.
@@ -472,7 +640,7 @@ export default function Home() {
                 </article>
               ) : (
                 <article className={styles.agentMessage} key={message.id}>
-                  <small>DigiBuddy</small>
+                  <small>GTMBuddy</small>
                   {splitMessage(
                     stripProfileMetadata(stripArtifactMetadata(message.content)),
                     message.id,
@@ -513,6 +681,26 @@ export default function Home() {
         )}
 
         <form className={styles.composer} onSubmit={submit}>
+          {commandOpen && (
+            <div className={styles.mentions} role="listbox" aria-label="Choose a skill">
+              {commandMatches.length === 0 ? (
+                <p className={styles.mentionNote}>No skill matches that name.</p>
+              ) : (
+                commandMatches.map((entry) => (
+                  <button
+                    key={entry.name}
+                    type="button"
+                    role="option"
+                    aria-selected={entry.name === pendingCommand?.name}
+                    onClick={() => chooseCommand(entry)}
+                  >
+                    <strong>{entry.title}</strong>
+                    {entry.description && <span>{entry.description}</span>}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
           {mentionOpen && (
             <div className={styles.mentions} role="listbox" aria-label="Choose an agent">
               {boundProfile && (
@@ -541,6 +729,23 @@ export default function Home() {
               )}
             </div>
           )}
+          {pendingCommand && (
+            <ul className={styles.attachments}>
+              <li>
+                <span>
+                  /{pendingCommand.name}
+                  {pendingCommand.hint ? ` — ${pendingCommand.hint}` : ""}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${pendingCommand.title}`}
+                  onClick={() => setPendingCommand(null)}
+                >
+                  ×
+                </button>
+              </li>
+            </ul>
+          )}
           {attachments.length > 0 && (
             <ul className={styles.attachments}>
               {attachments.map((attachment, index) => (
@@ -565,9 +770,21 @@ export default function Home() {
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Escape" && mentionOpen) {
+              if (event.key === "Escape" && (mentionOpen || commandOpen)) {
                 event.preventDefault();
                 setPrompt("");
+                return;
+              }
+              // Backspace into an empty composer takes the skill back off,
+              // matching how the chip reads: it sits where a typed token was.
+              if (
+                event.key === "Backspace" &&
+                !prompt &&
+                pendingCommand &&
+                !commandOpen
+              ) {
+                event.preventDefault();
+                setPendingCommand(null);
                 return;
               }
               if (event.key === "Enter" && !event.shiftKey) {
@@ -576,9 +793,11 @@ export default function Home() {
               }
             }}
             placeholder={
-              requestedProfile || boundProfile
-                ? "Describe the outcome you need…"
-                : "Describe the outcome you need, or type @ to choose an agent…"
+              pendingCommand
+                ? `Describe the outcome you need for ${pendingCommand.title}…`
+                : requestedProfile || boundProfile
+                  ? "Describe the outcome you need, or type / to load a skill…"
+                  : "Describe the outcome you need, or type @ for an agent and / for a skill…"
             }
             rows={3}
           />
@@ -621,6 +840,7 @@ export default function Home() {
             <button
               disabled={
                 !prompt.trim() ||
+                !activeId ||
                 isRunning ||
                 (mention !== null && !resolveMention(profiles, mention.query))
               }

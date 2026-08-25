@@ -146,7 +146,9 @@ export async function POST(request: Request) {
 
       try {
         const connection = resolveConnection(input.forwardedProps);
-        const { attachments, reasoningEffort } = turnOptions(input.forwardedProps);
+        const { attachments, reasoningEffort, skills, command } = turnOptions(
+          input.forwardedProps,
+        );
         const body = agentRequestBody({
           connection,
           input: turnInput(latestUserText(input.messages), attachments),
@@ -154,6 +156,8 @@ export async function POST(request: Request) {
           reasoningEffort,
           // Files this turn generates belong to whoever asked for them.
           owner,
+          skills,
+          command,
         });
 
         const headers: Record<string, string> = {

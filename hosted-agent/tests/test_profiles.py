@@ -66,6 +66,19 @@ class ParseProfilesTests(unittest.TestCase):
 
         self.assertEqual(profiles["a"].reasoning_effort, "")
 
+    def test_current_reasoning_efforts_are_kept(self):
+        profiles = parse_profiles(
+            {
+                "profiles": [
+                    {"name": "deep", "reasoning_effort": "xhigh"},
+                    {"name": "maximum", "reasoning_effort": "max"},
+                ]
+            }
+        )
+
+        self.assertEqual(profiles["deep"].reasoning_effort, "xhigh")
+        self.assertEqual(profiles["maximum"].reasoning_effort, "max")
+
     def test_a_malformed_selection_rejects_the_profile_instead_of_widening_it(self):
         """A non-list selection must never be read as "every capability".
 
@@ -119,6 +132,58 @@ class ResolveProfileTests(unittest.TestCase):
 
     def test_no_request_and_no_catalogue_uses_the_unrestricted_default(self):
         self.assertIs(resolve_profile({}, None), DEFAULT_PROFILE)
+
+    def test_the_builtin_default_can_be_addressed_explicitly(self):
+        self.assertIs(resolve_profile({}, "digibuddy"), DEFAULT_PROFILE)
+
+    def test_curated_profiles_cannot_reenter_the_unrestricted_default_by_name(self):
+        profiles = parse_profiles(
+            {"profiles": [{"name": "support-desk", "skills": ["faq"]}]}
+        )
+
+        with self.assertRaises(UnknownProfileError):
+            resolve_profile(profiles, "digibuddy")
+
+    def test_curated_profiles_without_a_default_fail_closed_when_none_is_requested(self):
+        profiles = parse_profiles(
+            {"profiles": [{"name": "support-desk", "skills": ["faq"]}]}
+        )
+
+        with self.assertRaises(UnknownProfileError):
+            resolve_profile(profiles, None)
+
+    def test_a_malformed_default_cannot_fall_back_to_the_unrestricted_builtin(self):
+        profiles = parse_profiles(
+            {
+                "profiles": [
+                    {"name": "digibuddy", "skills": "not-a-list"},
+                    {"name": "support-desk", "skills": ["faq"]},
+                ]
+            }
+        )
+
+        self.assertNotIn("digibuddy", profiles)
+        with self.assertRaises(UnknownProfileError):
+            resolve_profile(profiles, "digibuddy")
+
+    def test_an_empty_profiles_document_is_not_the_same_as_no_configuration(self):
+        profiles = parse_profiles({"profiles": []})
+
+        with self.assertRaises(UnknownProfileError):
+            resolve_profile(profiles, None)
+        with self.assertRaises(UnknownProfileError):
+            resolve_profile(profiles, "digibuddy")
+
+    def test_an_all_invalid_profiles_document_fails_closed(self):
+        profiles = parse_profiles(
+            {"profiles": [{"name": "digibuddy", "skills": "not-a-list"}]}
+        )
+
+        self.assertEqual(profiles, {})
+        with self.assertRaises(UnknownProfileError):
+            resolve_profile(profiles, None)
+        with self.assertRaises(UnknownProfileError):
+            resolve_profile(profiles, "digibuddy")
 
 
 class FingerprintTests(unittest.TestCase):

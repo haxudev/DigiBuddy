@@ -72,7 +72,9 @@ test("a manifest archive becomes one self-contained bundle per skill", () => {
   assert.ok(assess.has("agent-maturity-assess/_lib/agent_maturity/cli.py"));
   assert.match(
     assess.get("agent-maturity-assess/scripts/amx.py")!.body,
-    /sys\.path\.insert\(0, str\(Path\(__file__\)\.resolve\(\)\.parent \/ "_lib"\)\)/,
+    // `parents[1]`, not `.parent`: the script sits in `scripts/`, so the
+    // skill's own root -- and the `_lib` beside it -- is one level further up.
+    /sys\.path\.insert\(0, str\(Path\(__file__\)\.resolve\(\)\.parents\[1\] \/ "_lib"\)\)/,
   );
   assert.match(
     assess.get("agent-maturity-assess/scripts/amx.py")!.body,

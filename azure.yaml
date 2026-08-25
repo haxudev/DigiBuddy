@@ -1,43 +1,41 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
 
 requiredVersions:
+  azd: ">=1.27.1"
   extensions:
-    azure.ai.agents: ">=1.0.0-beta.4"
-name: ${FOUNDRY_AGENT_NAME=digibuddy-codex}
+    azure.ai.agents: ">=1.0.0-beta.8"
+    azure.ai.projects: ">=1.0.0-beta.4"
+name: digibuddy
 services:
   ai-project:
     host: azure.ai.project
+    endpoint: https://haxuinternalfoundry.services.ai.azure.com/api/projects/haxuinternalproj
   digibuddy-codex:
     host: azure.ai.agent
     uses:
       - ai-project
     project: .
-    language: python
+    language: docker
     docker:
       path: hosted-agent/Dockerfile
       remoteBuild: true
+    image: haxuinternalfoundryacr.azurecr.io/digibuddy-codex@sha256:9569f4b001ce9fcb6be00f231c2eb12a57b91433a8fe48b18b9709bcc214d808
     kind: hosted
     name: digibuddy-codex
-    displayName: DigiBuddy Codex
+    displayName: GTMBuddy Codex
     description: Codex coding runtime hosted in a Microsoft Foundry session sandbox.
     protocols:
       - protocol: responses
         version: 2.0.0
-    environmentVariables:
-      - name: CODEX_MODEL_ENDPOINT
-        value: ${CODEX_MODEL_ENDPOINT}
-      - name: CODEX_MODEL_API_KEY
-        value: ${CODEX_MODEL_API_KEY}
-      - name: CODEX_MODEL_NAME
-        value: ${CODEX_MODEL_NAME=gpt-5.2-codex}
-      - name: CODEX_APPROVAL_POLICY
-        value: ${CODEX_APPROVAL_POLICY=never}
-      - name: CODEX_SANDBOX
-        value: ${CODEX_SANDBOX=workspace-write}
-      - name: CODEX_NETWORK_ACCESS
-        value: ${CODEX_NETWORK_ACCESS=true}
-      - name: DIGIBUDDY_CONFIG_URI
-        value: ${DIGIBUDDY_CONFIG_URI=}
+    env:
+      CODEX_MODEL_ENDPOINT: ${CODEX_MODEL_ENDPOINT}
+      CODEX_MODEL_API_KEY: ${CODEX_MODEL_API_KEY}
+      CODEX_MODEL_NAME: ${CODEX_MODEL_NAME}
+      CODEX_REASONING_EFFORT: ${CODEX_REASONING_EFFORT=high}
+      CODEX_APPROVAL_POLICY: never
+      CODEX_SANDBOX: workspace-write
+      CODEX_NETWORK_ACCESS: "true"
+      DIGIBUDDY_CONFIG_URI: https://haxuinternaldigibuddy.blob.core.windows.net/digibuddy-config
     container:
       resources:
         cpu: "2"

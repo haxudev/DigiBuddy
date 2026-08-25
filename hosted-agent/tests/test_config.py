@@ -22,7 +22,11 @@ from codex_adapter.config import (
     runtime_fingerprint,
     validate_settings,
 )
-from codex_adapter.config_store import FileConfigStore
+from codex_adapter.config_store import (
+    FileConfigStore,
+    SKILLS_DOCUMENT,
+    SKILL_POLICY_DOCUMENT,
+)
 from codex_adapter.profiles import AgentProfile
 
 
@@ -204,6 +208,26 @@ class GlobalSkillInstallTests(unittest.TestCase):
                 ["skill-0"],
             )
 
+    def test_disabled_packaged_skill_is_not_installed(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / "pack"
+            for name in ("keep", "remove"):
+                skill = source / name
+                skill.mkdir(parents=True)
+                (skill / "SKILL.md").write_text("x", encoding="utf-8")
+            codex_home = Path(root) / "codex"
+            store = FileConfigStore(Path(root) / "config")
+            store.write(
+                SKILL_POLICY_DOCUMENT, {"schema_version": 1, "disabled": ["remove"]}
+            )
+            current = settings(skills_source=source, codex_home=codex_home)
+
+            self.assertEqual(install_global_skills(current, store=store), 1)
+            self.assertEqual(
+                [entry.name for entry in (codex_home / "skills").iterdir()],
+                ["keep"],
+            )
+
 
 class ModelOverrideTests(unittest.TestCase):
     def test_blank_fields_keep_the_deployed_values(self):
@@ -347,6 +371,21 @@ class RuntimeFingerprintTests(unittest.TestCase):
                 original, runtime_fingerprint(configured, store, profile)
             )
 
+    def test_packaged_skill_policy_changes_restart_the_runtime(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(directory, skills=["pptx", "docx"])
+            profile = AgentProfile(name="profile")
+            store = FileConfigStore(Path(directory) / "config")
+            original = runtime_fingerprint(configured, store, profile)
+
+            store.write(
+                SKILL_POLICY_DOCUMENT, {"schema_version": 1, "disabled": ["docx"]}
+            )
+
+            self.assertNotEqual(
+                original, runtime_fingerprint(configured, store, profile)
+            )
+
 
 class ProfileEnvironmentTests(unittest.TestCase):
     def test_restricted_profile_gets_a_filtered_view(self):
@@ -380,6 +419,37 @@ class ProfileEnvironmentTests(unittest.TestCase):
             self.assertEqual(
                 environment["DIGIBUDDY_TOOLS_ROOT"],
                 str(configured.payload_root / "tools"),
+            )
+
+    def test_disabled_payload_skill_is_excluded_from_the_profile_view(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(directory, skills=["pptx", "docx"])
+            store = FileConfigStore(Path(directory) / "config")
+            store.write(
+                SKILL_POLICY_DOCUMENT, {"schema_version": 1, "disabled": ["docx"]}
+            )
+
+            environment = prepare_codex_environment(configured, store)
+
+            skills_root = Path(environment["DIGIBUDDY_SKILLS_ROOT"])
+            self.assertNotEqual(skills_root, configured.payload_root / "skills")
+            self.assertEqual(
+                [entry.name for entry in skills_root.iterdir()], ["pptx"]
+            )
+
+    def test_empty_policy_keeps_the_unrestricted_payload_symlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(directory, skills=["pptx"])
+            store = FileConfigStore(Path(directory) / "config")
+            store.write(
+                SKILL_POLICY_DOCUMENT, {"schema_version": 1, "disabled": []}
+            )
+
+            environment = prepare_codex_environment(configured, store)
+
+            self.assertEqual(
+                environment["DIGIBUDDY_SKILLS_ROOT"],
+                str(configured.payload_root / "skills"),
             )
 
 
@@ -417,6 +487,66 @@ class CatalogueTests(unittest.TestCase):
                 build_catalogue(configured).skills,
                 ("docx", "superclarity"),
             )
+
+    def test_catalogue_separates_inventory_from_effective_skills(self):
+        digest = "a" * 64
+        other_digest = "b" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(directory, skills=["alpha", "beta"])
+            global_skills = Path(directory) / "global-skills"
+            global_skill = global_skills / "global"
+            global_skill.mkdir(parents=True)
+            (global_skill / "SKILL.md").write_text("# global", encoding="utf-8")
+            configured = settings(
+                **{
+                    **configured.__dict__,
+                    "skills_source": global_skills,
+                }
+            )
+            store = FileConfigStore(Path(directory) / "config")
+            store.write(
+                SKILL_POLICY_DOCUMENT,
+                {"schema_version": 1, "disabled": ["beta", "global"]},
+            )
+            store.write(
+                SKILLS_DOCUMENT,
+                {
+                    "schema_version": 1,
+                    "skills": [
+                        {
+                            "name": "cloud",
+                            "description": "runtime upload",
+                            "sha256": digest,
+                            "bundle": f"bundles/cloud/{digest}.zip",
+                        },
+                        {
+                            "name": "asleep",
+                            "description": "disabled upload",
+                            "enabled": False,
+                            "sha256": other_digest,
+                            "bundle": f"bundles/asleep/{other_digest}.zip",
+                        },
+                    ],
+                },
+            )
+
+            catalogue = build_catalogue(configured, store)
+
+            self.assertEqual(catalogue.skills, ("alpha", "cloud"))
+            entries = {
+                entry["name"]: entry
+                for entry in catalogue.as_document()["skill_entries"]
+            }
+            self.assertEqual(
+                set(entries),
+                {"alpha", "asleep", "beta", "cloud", "global"},
+            )
+            self.assertTrue(entries["alpha"]["enabled"])
+            self.assertFalse(entries["beta"]["enabled"])
+            self.assertFalse(entries["global"]["enabled"])
+            self.assertTrue(entries["cloud"]["enabled"])
+            self.assertFalse(entries["asleep"]["enabled"])
+            self.assertEqual(entries["cloud"]["source"], "deployed")
 
 
 class ProfileSourceTests(unittest.TestCase):

@@ -1,7 +1,6 @@
 defaultEnvironment: prod
 environments:
   prod:
-    projectEndpoint: https://haxuaifoundryaiservice.services.ai.azure.com/api/projects/haxuaifoundryaiservice-agent
-    agentName: haeronclaw-codex
-    azureContainerRegistry: haxureg.azurecr.io
+    projectEndpoint: https://haxuinternalfoundry.services.ai.azure.com/api/projects/haxuinternalproj
+    agentName: digibuddy-codex
     testCases: []

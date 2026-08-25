@@ -13,6 +13,25 @@ Open `http://localhost:3000`. The chat window carries no connection settings. Th
 
 The browser speaks AG-UI only to `/api/agent`. The Next.js route validates the endpoint, keeps server-configured keys out of browser responses, invokes the Foundry Responses API, and translates its stream into AG-UI events.
 
+Set `AUTH_REQUIRE_CORPORATE_ACCOUNT=true` with `AUTH_TENANT_ID` and `AUTH_ALLOWED_UPN_DOMAINS` to accept native Microsoft Entra work accounts. Corporate B2B accounts can be admitted with matching `AUTH_ALLOWED_HOME_TENANT_IDS` and `AUTH_ALLOWED_EMAIL_DOMAINS`; this allows trusted employee accounts represented as `#EXT#` in the resource tenant while still rejecting Hotmail and untrusted guests. Authorisation reads the issuing tenant, the `idp` claim, and the verified sign-in address — never the Easy Auth provider label, which is `bearer` on Container Apps and `aad` on App Service.
+
+`AUTH_TENANT_ID` accepts a comma-separated set, so one deployment can serve several trusted tenants.
+
+### Admitting users from another tenant
+
+An app registration is bound to the tenant that owns it. A user from a different tenant cannot authenticate against it unless either the registration is multi-tenant, or the account exists in the resource tenant as an external user:
+
+> Selected user account does not exist in tenant '…' and cannot access the application '…' in that tenant. The account needs to be added as an external user in the tenant first.
+
+Some tenants forbid a multi-tenant audience through an application management policy, in which case `AzureADMultipleOrgs` is rejected and B2B invitation is the supported route:
+
+```bash
+scripts/invite-production-users.sh alice@example.com bob@example.com
+scripts/invite-production-users.sh --file users.txt --dry-run
+```
+
+Inviting an account is necessary but not sufficient: the guest still has to satisfy `AUTH_ALLOWED_EMAIL_DOMAINS` and `AUTH_ALLOWED_HOME_TENANT_IDS` before the app admits it.
+
 ## Console layout
 
 The chat page is a two-pane console that fills the viewport (`100dvh`, so it stays full screen once mobile browser chrome hides). The left pane lists sessions; each one keeps its own thread id and Responses `previous_response_id`, so switching never mixes transcripts. Sessions live in browser storage under `digibuddy.sessions.v1` — double-click a title to rename, `×` to delete. The pane closes with the line *Powered by Codex on Microsoft Foundry Hosted Agent*; there are no connection settings to expose. The right pane renders the transcript as GitHub-flavoured Markdown with inline HTML sanitised on the way in.
@@ -70,7 +89,7 @@ The preview is a floating window rather than a permanent column: the conversatio
 
 The capability lists the console offers come from `catalogue.json`, published by the runtime at startup, so the console cannot offer a skill or tool the image does not ship.
 
-Access is guarded by `requireAdmin`: put Easy Auth in front of the container and list the allowed Entra object IDs in `ADMIN_PRINCIPAL_IDS`. An empty list denies everyone. The model API key is write-only — it is never returned to the browser, and leaving the field blank preserves the stored value.
+Access is guarded by `requireAdmin`. A deployment can configure `ADMIN_USERNAME`, a scrypt `ADMIN_PASSWORD_HASH`, and a random `ADMIN_SESSION_SECRET` to show a dedicated administrator login mask and issue an eight-hour HttpOnly session cookie. When those values are absent, the existing Easy Auth allowlist in `ADMIN_PRINCIPAL_IDS` is used; an empty list denies everyone. The model API key is write-only — it is never returned to the browser, and leaving the field blank preserves the stored value.
 
 Skills are deployed from a zip. A repository archive holding several skills, a shared library and helper scripts is accepted too: the console explodes it into one self-contained bundle per skill, following a `digibuddy-skills.json` manifest when the archive ships one. Every deployment is confirmed against a preview that writes nothing. Importing straight from a URL is off unless `SKILL_IMPORT_ALLOWED_HOSTS` names the hosts it may fetch from (for example `codeload.github.com`); the fetch is HTTPS-only, refuses private addresses, and re-checks every redirect hop.
 
