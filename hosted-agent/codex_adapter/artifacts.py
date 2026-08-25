@@ -165,10 +165,13 @@ def publish_artifacts(
     return published, failures
 
 
-def artifact_manifest(artifacts: list[dict[str, object]]) -> str:
+def artifact_manifest(artifacts: list[dict[str, object]], failed: int = 0) -> str:
     """Encode transport metadata in an invisible, backwards-compatible comment."""
+    document: dict[str, object] = {"version": 1, "artifacts": artifacts}
+    if failed:
+        document["failed"] = failed
     payload = json.dumps(
-        {"version": 1, "artifacts": artifacts},
+        document,
         ensure_ascii=False,
         separators=(",", ":"),
     )

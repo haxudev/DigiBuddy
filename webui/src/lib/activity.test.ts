@@ -3,8 +3,10 @@ import test from "node:test";
 
 import {
   activityFromUpstream,
+  liveSummary,
   reduceActivity,
   settleActivity,
+  summarize,
   type ActivityEntry,
 } from "./activity.ts";
 
@@ -103,4 +105,44 @@ test("settling closes rows the run left open", () => {
   assert.equal(settleActivity(running)[0].status, "done");
   const settled = settleActivity(running);
   assert.equal(settleActivity(settled), settled);
+});
+
+test("a thought still being written shows its newest line", () => {
+  // `summarize` reads from the start, which would freeze the row on the first
+  // sentence for the whole of a long reasoning block.
+  const detail = "**Reading the repository**\nNow checking the test suite";
+
+  assert.equal(liveSummary(detail), "Now checking the test suite");
+  assert.equal(summarize(detail), "Reading the repository Now checking the test suite");
+});
+
+test("a live line keeps its end rather than its beginning", () => {
+  const tail = "the part that matters";
+  const line = `${"x".repeat(400)} ${tail}`;
+
+  const live = liveSummary(line);
+  assert.ok(live.startsWith("…"));
+  assert.ok(live.endsWith(tail));
+  assert.ok(live.length <= 121);
+});
+
+test("a thought with nothing in it yet still says something", () => {
+  assert.equal(liveSummary(""), "Thinking…");
+  assert.equal(liveSummary("\n \n"), "Thinking…");
+  assert.equal(liveSummary("", "Working…"), "Working…");
+});
+
+test("the collapsed line drops markdown the trail cannot render", () => {
+  // Reasoning summaries are written as markdown and the row is one plain line,
+  // so the emphasis markers would otherwise be shown literally.
+  assert.equal(summarize("**Reading the request**"), "Reading the request");
+  assert.equal(summarize("## Planning\nSix slides"), "Planning Six slides");
+  assert.equal(summarize("Ran `npm test` twice"), "Ran npm test twice");
+  assert.equal(liveSummary("**Planning the deck**"), "Planning the deck");
+});
+
+test("what is not markdown emphasis is left alone", () => {
+  assert.equal(summarize("2 * 3 * 4"), "2 * 3 * 4");
+  assert.equal(summarize("snake_case_name stays"), "snake_case_name stays");
+  assert.equal(summarize("a*b"), "a*b");
 });

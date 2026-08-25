@@ -202,6 +202,17 @@ export type Catalogue = {
 export class ConfigValidationError extends Error {}
 
 /**
+ * The configuration store could not be reached.
+ *
+ * Distinct from an absent document, and the distinction matters: a store that
+ * answers "no such blob" means the deployment has not been seeded yet, while a
+ * store that cannot be reached at all means every surface built on it is
+ * guessing. Both used to read as "absent", which is how an unreachable storage
+ * account came to look like a deployment with no skills.
+ */
+export class ConfigStoreUnavailableError extends Error {}
+
+/**
  * Another writer changed the document between this caller's read and its write.
  *
  * The profiles document and the capability registry are both read-modify-write
@@ -589,9 +600,17 @@ export interface ConfigStore {
   ): Promise<DocumentRevision>;
   /** Skill bundles share the container with the documents, under `bundles/`. */
   writeBundle(path: string, payload: Buffer): Promise<void>;
+  readBundle(path: string): Promise<Buffer | null>;
   deleteBundle(path: string): Promise<void>;
   /** Generated deliverables are immutable blobs below the reserved prefix. */
   readArtifact(id: string, filename: string, owner?: string): Promise<Buffer | null>;
+  writeArtifact(
+    id: string,
+    filename: string,
+    payload: Buffer,
+    contentType: string,
+    owner?: string,
+  ): Promise<void>;
 }
 
 
@@ -668,7 +687,12 @@ class FileConfigStore implements ConfigStore {
     let raw: string;
     try {
       raw = await readFile(join(this.directory, assertDocumentName(name)), "utf-8");
-    } catch {
+    } catch (error) {
+      if (!isMissingFile(error)) {
+        throw new ConfigStoreUnavailableError(
+          `Could not read ${name} from ${this.directory}: ${describeCause(error)}`,
+        );
+      }
       return { document: null, revision: ABSENT_REVISION };
     }
     const revision = await fileRevision(raw);
@@ -722,6 +746,16 @@ class FileConfigStore implements ConfigStore {
     await rename(temporary, target);
   }
 
+  async readBundle(path: string): Promise<Buffer | null> {
+    const { readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    try {
+      return await readFile(join(this.directory, assertBundlePath(path)));
+    } catch {
+      return null;
+    }
+  }
+
   async deleteBundle(path: string): Promise<void> {
     const { rm } = await import("node:fs/promises");
     const { join } = await import("node:path");
@@ -742,6 +776,23 @@ class FileConfigStore implements ConfigStore {
       return null;
     }
   }
+
+  async writeArtifact(
+    id: string,
+    filename: string,
+    payload: Buffer,
+    contentType: string,
+    owner = "",
+  ): Promise<void> {
+    void contentType;
+    const { mkdir, writeFile, rename } = await import("node:fs/promises");
+    const { dirname, join } = await import("node:path");
+    const target = join(this.directory, artifactStoragePath(id, filename, owner));
+    await mkdir(dirname(target), { recursive: true });
+    const temporary = `${target}.${process.pid}.tmp`;
+    await writeFile(temporary, payload, { mode: 0o600 });
+    await rename(temporary, target);
+  }
 }
 
 async function streamToBuffer(
@@ -753,6 +804,31 @@ async function streamToBuffer(
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
   }
   return Buffer.concat(chunks);
+}
+
+/** A document that is simply not there yet, as opposed to one we cannot reach. */
+function isMissingFile(error: unknown): boolean {
+  return record(error).code === "ENOENT";
+}
+
+/**
+ * The same question for a blob.
+ *
+ * Only "the container answered, and the blob is not in it" counts as absent.
+ * A network failure, a refused connection or a rejected token all mean the
+ * store is unreachable, which is a different answer entirely.
+ */
+function isMissingBlob(error: unknown): boolean {
+  const cause = record(error);
+  return cause.statusCode === 404 || cause.code === "BlobNotFound";
+}
+
+/** One line about a failure, with nothing that could carry a credential. */
+function describeCause(error: unknown): string {
+  const cause = record(error);
+  const code = cause.code ?? cause.statusCode;
+  const name = error instanceof Error ? error.name : "Error";
+  return code ? `${name} (${String(code)})` : name;
 }
 
 class BlobConfigStore implements ConfigStore {
@@ -784,7 +860,13 @@ class BlobConfigStore implements ConfigStore {
       const response = await blob.download();
       revision = response.etag ?? ABSENT_REVISION;
       buffer = await streamToBuffer(response.readableStreamBody);
-    } catch {
+    } catch (error) {
+      if (!isMissingBlob(error)) {
+        throw new ConfigStoreUnavailableError(
+          `Could not read ${name} from the configuration container: ` +
+            describeCause(error),
+        );
+      }
       return { document: null, revision: ABSENT_REVISION };
     }
     let parsed: unknown;
@@ -846,6 +928,16 @@ class BlobConfigStore implements ConfigStore {
       });
   }
 
+  async readBundle(path: string): Promise<Buffer | null> {
+    try {
+      return await (await this.container())
+        .getBlockBlobClient(assertBundlePath(path))
+        .downloadToBuffer();
+    } catch {
+      return null;
+    }
+  }
+
   async deleteBundle(path: string): Promise<void> {
     await (await this.container())
       .getBlockBlobClient(assertBundlePath(path))
@@ -865,6 +957,24 @@ class BlobConfigStore implements ConfigStore {
     } catch {
       return null;
     }
+  }
+
+  async writeArtifact(
+    id: string,
+    filename: string,
+    payload: Buffer,
+    contentType: string,
+    owner = "",
+  ): Promise<void> {
+    const container = await this.container();
+    await container.createIfNotExists();
+    await container
+      .getBlockBlobClient(artifactStoragePath(id, filename, owner))
+      .upload(payload, payload.byteLength, {
+        blobHTTPHeaders: {
+          blobContentType: contentType || "application/octet-stream",
+        },
+      });
   }
 }
 

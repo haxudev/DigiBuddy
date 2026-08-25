@@ -21,7 +21,8 @@ DigiBuddy 将 Codex app-server 封装为 Microsoft Foundry Hosted Agent 内部�
 
 ## Agent 能力
 
-- **平台托管交付物**：生成文件保存到私有共享存储，通过同源交付卡片安全预览和下载；仅在明确要求外部分享时使用临时 SAS 链接。
+- **平台托管交付物**：生成文件保存到私有共享存储，通过同源交付卡片安全预览和下载；仅在明确要求外部分享时使用临时 SAS 链接。若重试后仍写入失败，答案照常交付，控制台在回答下方显示可关闭的交付提醒，而不是把失败句子写进会话记录。
+- **实时运行轨迹**：消息一发出，控制台就显示脉动占位和耗时计时；reasoning 开始流式返回后，轨迹跟随最新一行更新，行默认折叠，并在 `prefers-reduced-motion` 下关闭动画。
 - **Microsoft 365 工作流**：`m365_cli` 工具可在 agent 运行时中发送邮件、读取邮件、查看日历、浏览 OneDrive 并查询 SharePoint。
 - **基于 Blob 的邮件附件**：二进制附件会自动暂存到 Blob Storage 并改写为简洁的下载链接；纯文本文件仍作为直接附件发送。
 - **SharePoint 与 OneDrive 接入**：共享文档链接通过 Microsoft Graph 解析，默认使用 app-only 凭据，在提供用户断言时使用 on-behalf-of。
@@ -76,7 +77,7 @@ Codex 沙箱只暴露一个 shell —— 没有工具注册表。因此能力以
 
 一个 skill 是一个目录，包含 `SKILL.md` 以及它工作所需的一切 —— 参考资料、脚本、随包携带的库、CLI。skills 通过三个平面到达 agent。
 
-**用户**用斜杠命令加载。在输入框中键入 `/` 会筛选当前 agent profile 可触达的 skills，选中后即附加到下一条消息。选择是按消息生效，而非按会话：skill 是模型按需读取的 markdown，因此不同于 `@agent` 提及（Codex 在线程启动时就已固定），它可以在会话的任意时刻选择。运行时会依据已绑定的 profile 校验该请求，并在这一轮的提示词前加上指向该 skill `SKILL.md` 的指令。
+**用户**用斜杠命令加载。在输入框中键入 `/` 会打开一个菜单，列出当前 agent profile 可触达的 skills：方向键移动选中项，Enter 确认，Esc 关闭菜单且不会动到已经输入的文字。选中后即附加到下一条消息。选择是按消息生效，而非按会话：skill 是模型按需读取的 markdown，因此不同于 `@agent` 提及（Codex 在线程启动时就已固定），它可以在会话的任意时刻选择。运行时会依据已绑定的 profile 校验该请求，并在这一轮的提示词前加上指向该 skill `SKILL.md` 的指令。当目录读不到时，菜单会直接说明原因，而不是显示为空——"这个部署没有装 skill"和"配置存储不可达"是两个不同的问题，修法也不同。
 
 profile 可触达的每个 skill 都会自动出现在菜单中。`commands.json` 文档在其上叠加一层策展能力，管理员可以重命名命令、撰写更好的描述、隐藏不适合出现在聊天菜单中的条目，或将多个 skills 归并到一个命令下。`/agent-adoption-assessment` 作为内置示例随附：它会加载 `agent-maturity-assess` 与 `agent-maturity-report`。
 

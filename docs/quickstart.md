@@ -99,10 +99,52 @@ docker run --rm -p 3000:3000 \
 Both containers use the store with their managed identity, so grant each the **Storage Blob Data Contributor** role on the container. The hosted agent writes generated files below `artifacts/`, and the Web UI reads them back through its same-origin API. Configure a storage lifecycle rule for that prefix when deliverables need a retention limit. For local development set `DIGIBUDDY_CONFIG_DIR` to a shared directory and `ADMIN_ALLOW_ANONYMOUS=true` instead; the anonymous opt-in is ignored when `NODE_ENV=production`.
 
 ::: warning
+The role assignment is necessary but not sufficient: the storage account's **network** must also admit both callers. RBAC and reachability fail differently and are easy to confuse, so check both. See [When the configuration store is unreachable](#when-the-configuration-store-is-unreachable).
+:::
+
+::: warning
 Store only the scrypt hash in `ADMIN_PASSWORD_HASH`, never the plaintext password. If dedicated credentials are omitted, put Easy Auth in front of the Web UI and set `ADMIN_PRINCIPAL_IDS`; without either mode no production caller is admitted.
 :::
 
 Open `http://localhost:3000/admin` to manage models, remote MCP servers, and agent profiles. Changes apply at the next turn.
+
+## When the configuration store is unreachable
+
+Two symptoms point at the same cause, because both surfaces are built on the shared store:
+
+- Typing `/` in the composer opens a menu that says the skill catalogue could not be loaded. The runtime publishes `catalogue.json`, so a store the Web UI cannot read leaves it with no skills to offer.
+- Every reply reports that generated files could not be saved to the delivery area. The hosted agent writes deliverables below `artifacts/` in the same container.
+
+Check reachability before checking permissions, because a blocked network and a missing role both surface as a failed request:
+
+```bash
+# Is the data plane open at all? `Disabled` means private endpoints only,
+# whatever `networkAcls` says -- the public endpoint does not exist, so
+# trusted-service bypass and resource instance rules do not apply either.
+az storage account show -n <account> -g <group> --query publicNetworkAccess -o tsv
+
+# Can this caller actually read the container?
+az storage blob list --account-name <account> --container-name <container> \
+  --auth-mode login -o table
+
+# Do both identities hold the data role?
+az role assignment list --scope <storage-account-resource-id> \
+  --include-inherited --query "[?roleDefinitionName=='Storage Blob Data Contributor'].principalId" -o tsv
+```
+
+Where corporate policy pins `publicNetworkAccess` to `Disabled` — a `Modify`-effect assignment silently reverts an attempt to enable it, so the `az storage account update` call appears to succeed — the supported answer is a private endpoint for the blob subresource, a `privatelink.blob.core.windows.net` zone linked to that virtual network, and callers that sit inside it.
+
+How the Web UI joins that network is worth choosing deliberately. App Service regional virtual network integration can be added to, moved between, or removed from an existing app at any time, and by default routes only application traffic, so the app reaches the private endpoint while its ordinary outbound path to the agent endpoint is untouched. A Container Apps environment fixes its network type at creation, so the same change means recreating the environment and every app in it. That is why this repository targets Web App for Containers.
+
+Weigh the runtime side separately, because putting the *agent* inside a virtual network is far more expensive than it first appears:
+
+- Network injection for a hosted agent can only be set when the Foundry account is created, and it obliges the whole Standard Agent Setup — bring-your-own Cosmos DB, AI Search, Storage and Key Vault. There is no inject-only path.
+- An injected agent subnet has **no public egress by design**; the documentation lists "no public egress" as a feature. An agent that reaches remote MCP servers, documentation sites or a public model endpoint needs a NAT gateway or a firewall with FQDN allow-listing added back.
+- Recreating the Foundry account starts agent versions and conversation history from empty. There is no migration path, and this runtime resumes Codex threads from `previous_response_id`.
+
+Note also how much of the store the runtime needs, before assuming only file delivery is at stake. The hosted agent **writes** `catalogue.json`, which is the document the `/` menu is built from, and **reads** `models.json`, `profiles.json`, `mcp.json`, `credentials.json`, `skills.json`, `skill-policy.json` and every uploaded skill bundle. Routing generated files around the store therefore fixes delivery and nothing else: the skill menu stays empty and the admin console stops reaching the runtime. Any topology has to leave the agent itself a path to the container — either inside the network, or through a caller that is.
+
+Neither symptom is fatal. The composer still sends messages, `@` still selects an agent, attachments still work, and the answer itself is unaffected: only skills and file delivery depend on the store.
 
 ## Local checks
 

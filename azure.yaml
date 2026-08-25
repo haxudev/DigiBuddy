@@ -35,7 +35,7 @@ services:
       CODEX_APPROVAL_POLICY: never
       CODEX_SANDBOX: workspace-write
       CODEX_NETWORK_ACCESS: "true"
-      DIGIBUDDY_CONFIG_URI: https://haxuinternaldigibuddy.blob.core.windows.net/digibuddy-config
+      DIGIBUDDY_CONFIG_URI: https://digibuddyprodeus2.blob.core.windows.net/digibuddy-config
     container:
       resources:
         cpu: "2"

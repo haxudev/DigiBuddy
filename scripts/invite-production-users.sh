@@ -27,7 +27,7 @@
 #
 set -euo pipefail
 
-REDIRECT_URL="${DIGIBUDDY_INVITE_REDIRECT:-https://digibuddy-haxuinternal.lemonbush-30e189d0.eastus.azurecontainerapps.io/}"
+REDIRECT_URL="${DIGIBUDDY_INVITE_REDIRECT:-https://digibuddy-webui.gentlemeadow-add1d43f.eastus2.azurecontainerapps.io/}"
 SEND_EMAIL=true
 DRY_RUN=false
 RECIPIENTS=()

@@ -9,6 +9,13 @@
 			"type": "http",
 			"enabled": false
 		},
+		"msxi-lake": {
+			"url": "https://ifacr-mcp-aca-d2kcgr7r.ambitiousriver-db9f64e9.eastus2.azurecontainerapps.io/mcp",
+			"type": "http",
+			"enabled": true,
+			"bearer_token_env_var": "DIGIBUDDY_MCP_BEARER_TOKEN",
+			"startup_timeout_sec": 30
+		},
 		"agent-maturity": {
 			"command": "python",
 			"args": ["-m", "agent_maturity.mcp"],

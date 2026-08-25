@@ -21,6 +21,16 @@ AUTH_ALLOWED_EMAIL_DOMAINS=
 # agent at the same location so admin changes reach it.
 DIGIBUDDY_CONFIG_URI=https://yourstorage.blob.core.windows.net/digibuddy-config
 # DIGIBUDDY_CONFIG_DIR=/var/lib/digibuddy/config
+# Hosted-agent config proxy; agents call this instead of private storage.
+DIGIBUDDY_CONFIG_API=https://your-console-host/api/runtime
+# Entra scope requested by the agent and audience accepted by the runtime API.
+DIGIBUDDY_CONFIG_API_SCOPE=api://your-console-app-id/.default
+# Hosted-agent config proxy secret; at least 32 characters, delivered out of band.
+DIGIBUDDY_CONFIG_API_SECRET=
+# Managed identity object IDs allowed to call /api/runtime through Entra.
+DIGIBUDDY_RUNTIME_PRINCIPAL_IDS=
+# Runtime API shared secret; at least 32 characters, delivered out of band.
+DIGIBUDDY_RUNTIME_SHARED_SECRET=
 
 # Agent profile used when a chat user does not pick one.
 # DIGIBUDDY_PROFILE=digibuddy

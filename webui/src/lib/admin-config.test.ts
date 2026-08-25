@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
   ConfigConflictError,
+  ConfigStoreUnavailableError,
   ConfigValidationError,
   SCHEMA_VERSION,
   artifactStoragePath,
@@ -198,6 +199,51 @@ test("an unconfigured store is refused rather than silently empty", () => {
     () => buildConfigStore({ DIGIBUDDY_CONFIG_URI: "http://example.com/c" }),
     ConfigValidationError,
   );
+});
+
+test("an absent document reads as absent, an unreachable store does not", async () => {
+  // The two used to be indistinguishable, which is how an unreachable storage
+  // account came to look like a deployment that simply had no skills.
+  const directory = mkdtempSync(join(tmpdir(), "digibuddy-unreachable-"));
+  try {
+    assert.equal(
+      await buildConfigStore({ DIGIBUDDY_CONFIG_DIR: directory }).read(
+        "catalogue.json",
+      ),
+      null,
+    );
+
+    // A path that is a file, not a directory, fails with ENOTDIR rather than
+    // ENOENT: the store cannot be read at all.
+    const blocked = join(directory, "not-a-directory");
+    writeFileSync(blocked, "", "utf-8");
+    await assert.rejects(
+      () =>
+        buildConfigStore({ DIGIBUDDY_CONFIG_DIR: blocked }).read("catalogue.json"),
+      ConfigStoreUnavailableError,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("a store failure never repeats anything that could carry a credential", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "digibuddy-unreachable-"));
+  try {
+    const blocked = join(directory, "not-a-directory");
+    writeFileSync(blocked, "", "utf-8");
+    await assert.rejects(
+      () =>
+        buildConfigStore({ DIGIBUDDY_CONFIG_DIR: blocked }).read("catalogue.json"),
+      (error: Error) => {
+        assert.match(error.message, /catalogue\.json/);
+        assert.match(error.message, /ENOTDIR/);
+        return true;
+      },
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("every normalised document declares the schema it was written to", () => {

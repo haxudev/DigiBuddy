@@ -21,7 +21,7 @@ const MARKDOWN_LINK = /\[([^\]]+)\]\(([^)\s]+)\)/g;
 const WORKSPACE_PATH = /`?\/workspace\/[^\s`<>()\[\]"']+`?/g;
 const ARTIFACT_COMMENT =
   /<!--\s*digibuddy-artifacts:(\{[\s\S]*?\})\s*-->/g;
-const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
+export const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
 
 const PREVIEWABLE_EXTENSIONS = new Set([
   "pptx",
@@ -117,6 +117,38 @@ function managedArtifacts(text: string, messageId: string): Artifact[] {
     }
   }
   return artifacts;
+}
+
+/**
+ * How many deliverables the runtime could not save, according to the manifest.
+ *
+ * The runtime used to append a sentence to the answer when a file failed to
+ * publish, which meant a transient storage outage was written into the
+ * transcript for good and re-read on every reload. The count travels in the
+ * same invisible manifest the artifacts do, so the console can show it once,
+ * as a notice the reader can dismiss.
+ */
+export function deliveryFailures(text: string): number {
+  let failed = 0;
+  ARTIFACT_COMMENT.lastIndex = 0;
+  for (
+    let match = ARTIFACT_COMMENT.exec(text);
+    match;
+    match = ARTIFACT_COMMENT.exec(text)
+  ) {
+    try {
+      const payload = JSON.parse(match[1]) as Record<string, unknown>;
+      if (payload.version !== 1) continue;
+      const count = payload.failed;
+      if (typeof count !== "number" || !Number.isSafeInteger(count) || count <= 0) {
+        continue;
+      }
+      failed += count;
+    } catch {
+      // A manifest still being streamed is not yet valid JSON.
+    }
+  }
+  return failed;
 }
 
 export function stripArtifactMetadata(text: string): string {

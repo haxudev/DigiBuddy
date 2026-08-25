@@ -238,6 +238,7 @@ async def handle_response(
     reasoning: Any = None
     reasoning_part: Any = None
     reasoning_text = ""
+    message: Any = None
     tools: dict[str, tuple[Any, str]] = {}
     text: Any = None
     output = ""
@@ -364,31 +365,29 @@ async def handle_response(
         yield call.emit_arguments_done(arguments)
         yield call.emit_done()
 
-    if artifacts:
+    if artifacts or artifact_failures:
+        if artifact_failures:
+            logger.warning(
+                "Artifact publication failed for %s file(s)", artifact_failures
+            )
         if not output.strip():
             ready = "Your files are ready in the delivery area."
-            if text is None:
+            if artifacts and text is None:
                 message = stream.add_output_item_message()
                 yield message.emit_added()
                 text = message.add_text_content()
                 yield text.emit_added()
-            output += ready
-            yield text.emit_delta(ready)
-        metadata = artifact_manifest(artifacts)
-        output += metadata
-        yield text.emit_delta(metadata)
-    if artifact_failures:
-        warning = (
-            "\n\nSome generated files could not be saved to the delivery area. "
-            "Please retry the request."
-        )
+            if artifacts:
+                output += ready
+                yield text.emit_delta(ready)
         if text is None:
             message = stream.add_output_item_message()
             yield message.emit_added()
             text = message.add_text_content()
             yield text.emit_added()
-        output += warning
-        yield text.emit_delta(warning)
+        metadata = artifact_manifest(artifacts, artifact_failures)
+        output += metadata
+        yield text.emit_delta(metadata)
 
     if not output:
         raise RuntimeError("Codex turn completed without assistant output")

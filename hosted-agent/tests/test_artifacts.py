@@ -78,6 +78,33 @@ class ArtifactPublishingTests(unittest.TestCase):
             self.assertEqual(payload["artifacts"][0]["name"], "报告.md")
 
 
+class ArtifactManifestTests(unittest.TestCase):
+    def test_zero_failures_keeps_legacy_shape(self):
+        artifacts = [
+            {
+                "id": "a" * 32,
+                "name": "报告.md",
+                "mimeType": "text/markdown",
+                "size": 10,
+            }
+        ]
+
+        self.assertEqual(
+            artifact_manifest(artifacts, failed=0),
+            '\n\n<!-- digibuddy-artifacts:{"version":1,"artifacts":[{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","name":"报告.md","mimeType":"text/markdown","size":10}]} -->',
+        )
+
+    def test_non_zero_failures_are_recorded_in_the_manifest(self):
+        block = artifact_manifest([], failed=2)
+        payload = json.loads(block.split(":", 1)[1].rsplit("-->", 1)[0])
+
+        self.assertEqual(
+            block,
+            '\n\n<!-- digibuddy-artifacts:{"version":1,"artifacts":[],"failed":2} -->',
+        )
+        self.assertEqual(payload, {"version": 1, "artifacts": [], "failed": 2})
+
+
 if __name__ == "__main__":
     unittest.main()
 

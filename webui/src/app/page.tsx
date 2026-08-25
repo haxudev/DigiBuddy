@@ -17,6 +17,11 @@ import AskUserCard from "@/components/AskUserCard";
 import Markdown from "@/components/Markdown";
 import SessionSidebar from "@/components/SessionSidebar";
 import SignIn from "@/components/SignIn";
+import SuggestionMenu, {
+  suggestionOptionId,
+  type SuggestionItem,
+  type SuggestionStatus,
+} from "@/components/SuggestionMenu";
 import {
   ACTIVITY_EVENT_NAME,
   isActivityEvent,
@@ -26,6 +31,7 @@ import {
 } from "@/lib/activity";
 import { REASONING_EFFORTS, type TurnAttachment } from "@/lib/agent-proxy";
 import {
+  deliveryFailures,
   extractArtifacts,
   stripArtifactMetadata,
   type Artifact,
@@ -56,6 +62,7 @@ import {
   type DeliveryFocus,
 } from "@/lib/deliverables";
 import type { ProfileCapabilities } from "@/lib/profile-capabilities";
+import { clampActive, isSuggestionKey, moveActive } from "@/lib/suggestions";
 import {
   getServerSessions,
   getSession,
@@ -82,6 +89,9 @@ const EFFORT_LABELS: Record<string, string> = {
   xhigh: "Extra high",
   max: "Maximum",
 };
+
+/** Stable empty list, so a menu with nothing in it does not rerender the page. */
+const EMPTY_COMMANDS: SkillCommand[] = [];
 
 /** What the composer will accept, matching the formats Codex can open. */
 const ATTACHMENT_ACCEPT =
@@ -146,7 +156,37 @@ export default function Home() {
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [attachments, setAttachments] = useState<TurnAttachment[]>([]);
   const [reasoningEffort, setReasoningEffort] = useState("");
-  const [commands, setCommands] = useState<SkillCommand[]>([]);
+  /**
+   * The skill menu, and which agent it describes.
+   *
+   * The two travel together because a catalogue fetched for the previous agent
+   * is not an answer about this one, and showing it as if it were would offer
+   * a skill the runtime would then refuse. Whether the catalogue could be read
+   * at all travels with it too: an empty menu and an unreachable configuration
+   * store are different answers, and showing the second as the first is what
+   * made `/` look like a keystroke that does nothing.
+   */
+  const [commandCatalogue, setCommandCatalogue] = useState<{
+    profile: string;
+    status: "ready" | "unavailable";
+    commands: SkillCommand[];
+  } | null>(null);
+  /**
+   * The open menu's highlight, and the token it belongs to.
+   *
+   * Keyed by the token so a new query resets both the highlight and a menu
+   * dismissed with Escape, without an effect having to notice and correct it
+   * after the fact.
+   */
+  const [suggestion, setSuggestion] = useState({
+    token: "",
+    active: 0,
+    dismissed: false,
+  });
+  /** Deliveries the runtime could not save, dismissed by the reader. */
+  const [dismissedFailures, setDismissedFailures] = useState<string[]>([]);
+  /** When the current turn was sent, so the wait can be counted honestly. */
+  const [runStartedAt, setRunStartedAt] = useState(0);
   /**
    * The skill chosen for the next message.
    *
@@ -307,12 +347,37 @@ export default function Home() {
       ? `?profile=${encodeURIComponent(commandProfile)}`
       : "";
     fetch(`/api/commands${query}`, { signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : { commands: [] }))
-      .then((payload) => setCommands(payload.commands ?? []))
-      // No commands simply means `/` offers nothing; everything else still works.
-      .catch(() => undefined);
+      .then((response) =>
+        response.ok ? response.json() : { commands: [], status: "unavailable" },
+      )
+      .then((payload) =>
+        setCommandCatalogue({
+          profile: commandProfile,
+          status: payload.status === "unavailable" ? "unavailable" : "ready",
+          commands: payload.commands ?? [],
+        }),
+      )
+      // A menu that cannot be loaded says so; everything else still works.
+      .catch((reason) => {
+        if (controller.signal.aborted) return;
+        console.error("could not load the skill menu", reason);
+        setCommandCatalogue({
+          profile: commandProfile,
+          status: "unavailable",
+          commands: [],
+        });
+      });
     return () => controller.abort();
   }, [commandProfile]);
+
+  // The catalogue records which agent it was fetched for, so a menu for the
+  // previous agent is never shown as if it were this one's: until the answer
+  // for this agent arrives, the honest state is "still loading".
+  const catalogueMatches = commandCatalogue?.profile === commandProfile;
+  const commands = catalogueMatches ? commandCatalogue.commands : EMPTY_COMMANDS;
+  const commandsStatus: SuggestionStatus = catalogueMatches
+    ? commandCatalogue.status
+    : "loading";
 
   // `/` stays meaningful for the whole conversation, unlike `@`: a skill is
   // read per turn, so choosing one later is a promise the runtime can keep.
@@ -321,12 +386,6 @@ export default function Home() {
     () => (command ? matchCommands(commands, command.query) : []),
     [command, commands],
   );
-  const commandOpen = command !== null && commands.length > 0;
-
-  function chooseCommand(entry: SkillCommand) {
-    setPendingCommand(entry);
-    setPrompt(stripCommand(prompt));
-  }
 
   // `@` is meaningful only where it can still change something: the first
   // message of a conversation that has not been bound yet.
@@ -335,7 +394,77 @@ export default function Home() {
     () => (mention ? matchProfiles(profiles, mention.query) : []),
     [mention, profiles],
   );
-  const mentionOpen = mention !== null && profiles.length > 0;
+
+  // A new token is a new list, so the highlight goes back to the top and a
+  // menu dismissed for the previous token comes back. Adjusting during the
+  // render that noticed is what React recommends over correcting afterwards
+  // in an effect, which would show one frame of the stale highlight first.
+  const token = command ? `/${command.query}` : mention ? `@${mention.query}` : "";
+  if (suggestion.token !== token) {
+    setSuggestion({ token, active: 0, dismissed: false });
+  }
+  const dismissed = suggestion.token === token && suggestion.dismissed;
+
+  // Typing `/` opens the menu, whatever is behind it. A menu that stayed
+  // hidden when the catalogue was empty is indistinguishable from a broken
+  // keystroke, and gave the reader nothing to act on.
+  const commandOpen = command !== null && !dismissed;
+  const mentionOpen = mention !== null && !dismissed;
+
+  function chooseCommand(entry: SkillCommand) {
+    setPendingCommand(entry);
+    setPrompt(stripCommand(prompt));
+  }
+
+  const menuItems: SuggestionItem[] = useMemo(() => {
+    if (commandOpen) {
+      return commandMatches.map((entry) => ({
+        key: entry.name,
+        title: entry.title,
+        description: entry.description || entry.hint,
+        token: `/${entry.name}`,
+        current: entry.name === pendingCommand?.name,
+      }));
+    }
+    if (mentionOpen) {
+      return mentionMatches.map((entry) => ({
+        key: entry.name,
+        title: entry.display_name || entry.name,
+        description: entry.description,
+        token: `@${entry.name}`,
+        current: entry.name === (boundProfile || requestedProfile),
+      }));
+    }
+    return [];
+  }, [
+    boundProfile,
+    commandMatches,
+    commandOpen,
+    mentionMatches,
+    mentionOpen,
+    pendingCommand,
+    requestedProfile,
+  ]);
+
+  const menuOpen = commandOpen || mentionOpen;
+  // The list is refiltered on every keystroke, so the remembered highlight
+  // regularly points past the end of the list actually on screen.
+  const highlighted = clampActive(suggestion.active, menuItems.length);
+
+  function highlight(index: number) {
+    setSuggestion((current) => ({ ...current, token, active: index }));
+  }
+
+  function chooseSuggestion(index: number) {
+    const item = menuItems[index];
+    if (!item) return;
+    if (commandOpen) {
+      const entry = commands.find((candidate) => candidate.name === item.key);
+      if (entry) chooseCommand(entry);
+      return;
+    }
+    chooseMention(item.key);
+  }
 
   function chooseMention(name: string) {
     const rest = stripMention(prompt);
@@ -377,6 +506,25 @@ export default function Home() {
     if (shouldOpenDeliverables(previous, next)) setPanelOpen(true);
   }, [artifacts, activeSession?.id]);
 
+  /**
+   * Deliverables the runtime could not save, per message.
+   *
+   * The count rides in the same invisible manifest the artifacts do, so it is
+   * shown once as a notice the reader can dismiss rather than written into the
+   * answer, where a transient storage outage used to live forever.
+   */
+  const failedDeliveries = useMemo(
+    () =>
+      messages
+        .filter((message) => message.role === "assistant")
+        .map((message) => ({
+          id: message.id,
+          failed: deliveryFailures(message.content),
+        }))
+        .filter((entry) => entry.failed > 0 && !dismissedFailures.includes(entry.id)),
+    [dismissedFailures, messages],
+  );
+
   const send = useCallback(
     async (value: string, profileOverride = "", withCommand?: SkillCommand | null) => {
       const agent = agentRef.current;
@@ -389,6 +537,7 @@ export default function Home() {
 
       setError("");
       setActivity([]);
+      setRunStartedAt(Date.now());
       setIsRunning(true);
       agent.addMessage({ id: crypto.randomUUID(), role: "user", content: text });
 
@@ -466,7 +615,11 @@ export default function Home() {
     if (invoked) {
       const resolved = resolveCommand(commands, invoked.query);
       if (!resolved) {
-        setError(`No skill matches /${invoked.query}.`);
+        setError(
+          commandsStatus === "unavailable"
+            ? "The skill catalogue could not be loaded, so /commands are unavailable. Send the message without one, or ask an administrator to check the configuration store."
+            : `No skill matches /${invoked.query}.`,
+        );
         return;
       }
       // `/command` on its own arms the skill and waits: the command says which
@@ -529,6 +682,7 @@ export default function Home() {
     // Activity describes one run, so it never follows the reader to another
     // session.
     setActivity([]);
+    setRunStartedAt(0);
     // Neither does an armed skill. Each conversation runs its own agent, and a
     // skill that agent cannot reach would be dropped by the runtime — leaving a
     // chip that promises something the next message would not do.
@@ -658,11 +812,42 @@ export default function Home() {
                       </Markdown>
                     ),
                   )}
+                  {failedDeliveries
+                    .filter((entry) => entry.id === message.id)
+                    .map((entry) => (
+                      <div
+                        className={styles.deliveryWarning}
+                        key={`${entry.id}-delivery`}
+                        role="status"
+                      >
+                        <span aria-hidden="true">⚠</span>
+                        <p>
+                          {entry.failed === 1
+                            ? "One generated file could not be saved to the delivery area."
+                            : `${entry.failed} generated files could not be saved to the delivery area.`}{" "}
+                          The answer above is unaffected. Ask again to retry the
+                          files, or tell an administrator if it keeps happening.
+                        </p>
+                        <button
+                          type="button"
+                          aria-label="Dismiss the delivery warning"
+                          onClick={() =>
+                            setDismissedFailures((current) => [...current, entry.id])
+                          }
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
                 </article>
               ),
             )
           )}
-          <ActivityTrail entries={activity} running={isRunning} />
+          <ActivityTrail
+            entries={activity}
+            running={isRunning}
+            startedAt={runStartedAt}
+          />
         </div>
 
         {error && (
@@ -682,52 +867,44 @@ export default function Home() {
 
         <form className={styles.composer} onSubmit={submit}>
           {commandOpen && (
-            <div className={styles.mentions} role="listbox" aria-label="Choose a skill">
-              {commandMatches.length === 0 ? (
-                <p className={styles.mentionNote}>No skill matches that name.</p>
-              ) : (
-                commandMatches.map((entry) => (
-                  <button
-                    key={entry.name}
-                    type="button"
-                    role="option"
-                    aria-selected={entry.name === pendingCommand?.name}
-                    onClick={() => chooseCommand(entry)}
-                  >
-                    <strong>{entry.title}</strong>
-                    {entry.description && <span>{entry.description}</span>}
-                  </button>
-                ))
-              )}
-            </div>
+            <SuggestionMenu
+              id="skill-suggestions"
+              heading="Skills"
+              label="Choose a skill"
+              items={menuItems}
+              activeIndex={highlighted}
+              status={commandsStatus}
+              emptyMessage={
+                commands.length === 0
+                  ? "This agent has no skills published yet."
+                  : "No skill matches that name."
+              }
+              unavailableMessage="The skill catalogue could not be loaded. Everything else still works; ask an administrator to check the configuration store."
+              onHighlight={highlight}
+              onChoose={chooseSuggestion}
+            />
           )}
           {mentionOpen && (
-            <div className={styles.mentions} role="listbox" aria-label="Choose an agent">
-              {boundProfile && (
-                <p className={styles.mentionNote}>
-                  This conversation runs{" "}
-                  {profiles.find((entry) => entry.name === boundProfile)
-                    ?.display_name ?? boundProfile}
-                  . Choosing another agent starts a new conversation.
-                </p>
-              )}
-              {mentionMatches.length === 0 ? (
-                <p className={styles.mentionNote}>No agent matches that name.</p>
-              ) : (
-                mentionMatches.map((entry) => (
-                  <button
-                    key={entry.name}
-                    type="button"
-                    role="option"
-                    aria-selected={entry.name === requestedProfile}
-                    onClick={() => chooseMention(entry.name)}
-                  >
-                    <strong>{entry.display_name}</strong>
-                    {entry.description && <span>{entry.description}</span>}
-                  </button>
-                ))
-              )}
-            </div>
+            <SuggestionMenu
+              id="agent-suggestions"
+              heading="Agents"
+              label="Choose an agent"
+              items={menuItems}
+              activeIndex={highlighted}
+              status="ready"
+              note={
+                boundProfile
+                  ? `This conversation runs ${
+                      profiles.find((entry) => entry.name === boundProfile)
+                        ?.display_name ?? boundProfile
+                    }. Choosing another agent starts a new conversation.`
+                  : undefined
+              }
+              emptyMessage="No agent matches that name."
+              unavailableMessage="The agent list could not be loaded."
+              onHighlight={highlight}
+              onChoose={chooseSuggestion}
+            />
           )}
           {pendingCommand && (
             <ul className={styles.attachments}>
@@ -769,10 +946,50 @@ export default function Home() {
           <textarea
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
+            role="combobox"
+            aria-expanded={menuOpen}
+            aria-controls={
+              menuOpen
+                ? commandOpen
+                  ? "skill-suggestions"
+                  : "agent-suggestions"
+                : undefined
+            }
+            aria-activedescendant={
+              menuOpen && menuItems.length > 0
+                ? suggestionOptionId(
+                    commandOpen ? "skill-suggestions" : "agent-suggestions",
+                    highlighted,
+                  )
+                : undefined
+            }
+            aria-autocomplete="list"
             onKeyDown={(event) => {
-              if (event.key === "Escape" && (mentionOpen || commandOpen)) {
+              // Escape closes the menu for the token as typed. It used to
+              // clear the composer, which threw away a message someone had
+              // already written just because they wanted the list gone.
+              if (event.key === "Escape" && menuOpen) {
                 event.preventDefault();
-                setPrompt("");
+                setSuggestion((current) => ({
+                  ...current,
+                  token,
+                  dismissed: true,
+                }));
+                return;
+              }
+              if (menuOpen && menuItems.length > 0 && isSuggestionKey(event.key)) {
+                event.preventDefault();
+                highlight(moveActive(highlighted, menuItems.length, event.key));
+                return;
+              }
+              if (
+                menuOpen &&
+                menuItems.length > 0 &&
+                (event.key === "Tab" ||
+                  (event.key === "Enter" && !event.shiftKey))
+              ) {
+                event.preventDefault();
+                chooseSuggestion(highlighted);
                 return;
               }
               // Backspace into an empty composer takes the skill back off,
@@ -795,9 +1012,11 @@ export default function Home() {
             placeholder={
               pendingCommand
                 ? `Describe the outcome you need for ${pendingCommand.title}…`
-                : requestedProfile || boundProfile
-                  ? "Describe the outcome you need, or type / to load a skill…"
-                  : "Describe the outcome you need, or type @ for an agent and / for a skill…"
+                : commandsStatus === "unavailable"
+                  ? "Describe the outcome you need…"
+                  : requestedProfile || boundProfile
+                    ? "Describe the outcome you need, or type / to load a skill…"
+                    : "Describe the outcome you need, or type @ for an agent and / for a skill…"
             }
             rows={3}
           />
@@ -842,11 +1061,18 @@ export default function Home() {
                 !prompt.trim() ||
                 !activeId ||
                 isRunning ||
-                (mention !== null && !resolveMention(profiles, mention.query))
+                (mention !== null && !resolveMention(profiles, mention.query)) ||
+                (command !== null && !resolveCommand(commands, command.query))
               }
               type="submit"
             >
-              {mention ? "Choose agent" : isRunning ? "Sending…" : "Send"}
+              {mention
+                ? "Choose agent"
+                : command
+                  ? "Load skill"
+                  : isRunning
+                    ? "Sending…"
+                    : "Send"}
             </button>
           </div>
         </form>

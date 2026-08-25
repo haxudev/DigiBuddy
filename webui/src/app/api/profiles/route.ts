@@ -37,6 +37,7 @@ export async function GET() {
     );
     return Response.json(
       {
+        status: "ready",
         profiles:
           profiles.length > 0
             ? profiles
@@ -50,11 +51,15 @@ export async function GET() {
       },
       { headers: { "Cache-Control": "no-store" } },
     );
-  } catch {
+  } catch (error) {
     // The hosted runtime has this same unrestricted fallback, so the picker
     // remains truthful even before the shared configuration store is seeded.
+    // The status still says the capability lists behind these names could not
+    // be read, because an empty capability list is a claim of its own.
+    console.error("agent profiles unavailable", error);
     return Response.json(
       {
+        status: "unavailable",
         profiles: [
           defaultProfileCapabilities(
             { skills: [], tools: [], mcp_servers: [], skill_entries: [] },

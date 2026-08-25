@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   artifactPreviewKind,
+  deliveryFailures,
   extractArtifacts,
   isImageArtifact,
   stripArtifactMetadata,
@@ -88,4 +89,43 @@ test("remote markdown links use the document preview", () => {
   assert.equal(artifactPreviewKind(artifact), "markdown");
   assert.equal(stripArtifactMetadata("Done: https://example.com/report.md"), 
     "Done: [report.md](https://example.com/report.md)");
+});
+
+test("the manifest reports deliveries the runtime could not save", () => {
+  const manifest =
+    '<!-- digibuddy-artifacts:{"version":1,"artifacts":[],"failed":2} -->';
+
+  assert.equal(deliveryFailures(manifest), 2);
+  assert.deepEqual(extractArtifacts(manifest, "m1"), []);
+  assert.equal(stripArtifactMetadata(`Done.${manifest}`).trim(), "Done.");
+});
+
+test("a manifest with nothing to report claims no failures", () => {
+  const id = "a".repeat(32);
+  const manifest =
+    `<!-- digibuddy-artifacts:{"version":1,"artifacts":[{"id":"${id}",` +
+    '"name":"report.md","mimeType":"text/markdown","size":12}]} -->';
+
+  assert.equal(deliveryFailures(manifest), 0);
+  assert.equal(deliveryFailures("An ordinary answer with no manifest."), 0);
+  assert.equal(extractArtifacts(manifest, "m1").length, 1);
+});
+
+test("a half-streamed or nonsensical failure count is ignored", () => {
+  assert.equal(
+    deliveryFailures('<!-- digibuddy-artifacts:{"version":1,"artifacts":[],"fail'),
+    0,
+  );
+  assert.equal(
+    deliveryFailures(
+      '<!-- digibuddy-artifacts:{"version":1,"artifacts":[],"failed":-3} -->',
+    ),
+    0,
+  );
+  assert.equal(
+    deliveryFailures(
+      '<!-- digibuddy-artifacts:{"version":2,"artifacts":[],"failed":3} -->',
+    ),
+    0,
+  );
 });

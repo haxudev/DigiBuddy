@@ -26,7 +26,7 @@ The runtime concatenates the hosted-agent guardrails with the payload persona in
 
 A turn may carry more than text. Responses `input_image` and `input_file` parts are written into `<workspace>/uploads` and their paths are appended to the prompt, so Codex opens attachments as ordinary files; a per-turn budget caps how much is materialised. A `reasoning.effort` of `minimal`, `low`, `medium`, or `high` overrides the configured thinking strength for that turn and restarts the Codex engine through its configuration fingerprint.
 
-While the turn runs, reasoning summaries and tool calls stream back as Responses reasoning items and function calls, which the console renders as a live activity trail.
+While the turn runs, the console renders a live activity trail from send time, before the first assistant token. It starts with a pulsing placeholder and elapsed timer; reasoning summaries and tool calls then stream back as Responses reasoning items and function calls. A reasoning row shows the newest line while it is still running, rows stay collapsed until opened, and animation respects `prefers-reduced-motion`.
 
 ## Tools
 
@@ -83,7 +83,7 @@ Credentials are the part with teeth. A profile binds values to named slots, and 
 
 ### Addressing an agent
 
-Type `@` at the start of an empty message to choose an agent, or use the control in the chat header. The choice belongs to the conversation, not to the browser tab: switching sessions follows it and a reload restores it.
+Type `@` at the start of an empty message to choose an agent, or use the control in the chat header. `@` uses the same highlighted suggestion menu as `/` skills: arrow keys move, Enter chooses, and Escape dismisses without clearing the composer. The choice belongs to the conversation, not to the browser tab: switching sessions follows it and a reload restores it.
 
 A conversation stays with the agent it began with. Codex fixes a thread's base instructions when the thread starts, so nothing can change the agent mid-conversation without discarding the thread — and pretending otherwise is how a console ends up displaying one agent while another one runs. After the first turn the header reports the agent in force, and choosing another one starts a new conversation with it.
 
@@ -104,6 +104,8 @@ The model API key is write-only: reads return `api_key_set` instead of the value
 New or changed generated files are automatically written to the private shared store below `artifacts/` and represented as delivery cards in the Web UI. The browser downloads them through `/api/artifacts/<id>/<name>` and never receives a storage credential or an internal `/workspace` URL. Markdown, HTML, SVG, images, PDF, JSON, CSV, and text can be previewed in the delivery area; Office documents and archives remain downloadable.
 
 The `azure_blob` tool still provides **user-delegation SAS** links for explicit external-sharing workflows such as links inserted into email.
+
+A file that cannot be written is retried before it is given up on, and a turn that still ends with unsaved files reports how many in the same invisible manifest that carries the delivery cards. The console renders that as a dismissible notice under the answer rather than as a sentence inside it, so a storage outage does not become a permanent line in the transcript. The answer itself is delivered either way.
 
 | Variable | Description |
 | --- | --- |

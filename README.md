@@ -21,7 +21,8 @@ On top of the runtime, this repository ships an agent payload that turns Codex i
 
 ## Agent Capabilities
 
-- **Managed artifact delivery**: generated files are persisted in private shared storage and exposed through same-origin delivery cards with safe previews; external SAS links remain available only for explicit sharing workflows.
+- **Managed artifact delivery**: generated files are persisted in private shared storage and exposed through same-origin delivery cards with safe previews; external SAS links remain available only for explicit sharing workflows. If storage still fails after retry, the answer is delivered and the console shows a dismissible notice instead of writing a failure sentence into the transcript.
+- **Live turn activity**: as soon as a message is sent, the console shows a pulsing activity placeholder and elapsed timer; reasoning then updates to the newest line while rows stay collapsed, with animation disabled for reduced-motion users.
 - **Microsoft 365 workflows**: the `m365_cli` tool can send email, read mail, inspect calendars, browse OneDrive, and query SharePoint from the agent runtime.
 - **Blob-backed email attachments**: binary attachments are automatically staged to Blob Storage and rewritten as clean download links; plain-text files stay as direct attachments.
 - **SharePoint and OneDrive ingestion**: shared document links are resolved through Microsoft Graph, using app-only credentials by default and on-behalf-of when a user assertion is supplied.
@@ -97,13 +98,17 @@ A skill is a directory holding `SKILL.md` and whatever it needs to do its job �
 references, scripts, a vendored library, a CLI. Skills reach the agent through
 three planes.
 
-**Users** load one with a slash command. Typing `/` in the composer filters the
-skills the current agent profile can reach; picking one attaches it to the next
-message. Selection is per message, not per conversation: a skill is markdown the
-model reads on demand, so unlike the `@agent` mention — which Codex fixes when a
-thread starts — it can be chosen at any point. The runtime resolves the request
-against the bound profile and prefixes the turn with a directive naming the
-skill's `SKILL.md`.
+**Users** load one with a slash command. Typing `/` in the composer opens a menu
+of the skills the current agent profile can reach; arrow keys move the
+selection, Enter picks it, and Escape dismisses the menu without disturbing what
+has been typed. Picking one attaches it to the next message. Selection is per
+message, not per conversation: a skill is markdown the model reads on demand, so
+unlike the `@agent` mention — which Codex fixes when a thread starts — it can be
+chosen at any point. The runtime resolves the request against the bound profile
+and prefixes the turn with a directive naming the skill's `SKILL.md`. When the
+catalogue cannot be read, the menu says so rather than appearing empty, because
+"this deployment ships no skills" and "the configuration store is unreachable"
+are different problems with different fixes.
 
 Every skill a profile can reach is offered automatically. A `commands.json`
 document layers curation on top, so an administrator can rename a command, give

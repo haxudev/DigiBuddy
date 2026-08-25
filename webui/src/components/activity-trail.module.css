@@ -24,12 +24,84 @@
   background: #e4eeee;
 }
 
+.toggle[data-running="true"] {
+  color: #14655c;
+  background: #e3f3ef;
+  border-color: #bfe2da;
+}
+
 .count {
   padding: 0 7px;
   color: #66787d;
   background: #fff;
   border-radius: 20px;
   font-size: 11.5px;
+}
+
+/* The clock. Tabular figures so a ticking second never shifts the row. */
+.elapsed {
+  padding: 0 7px;
+  color: #4a5b60;
+  background: #fff;
+  border-radius: 20px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The placeholder for the gap between sending and the first thing the agent
+ * says. It is deliberately a real row rather than a spinner in the corner:
+ * the reader is waiting on an answer, so the wait belongs where the answer
+ * will be.
+ */
+.waiting {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  margin: 0;
+  color: #4a5b60;
+  background: #fbfcfc;
+  border: 1px solid #e6ecee;
+  border-radius: 10px;
+  font-size: 12.5px;
+}
+
+.dots {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
+}
+
+.dots span {
+  width: 6px;
+  height: 6px;
+  background: #57b9aa;
+  border-radius: 50%;
+  animation: bounce 1.2s ease-in-out infinite;
+}
+
+.dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.dots span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes bounce {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
 }
 
 .rows {
@@ -100,6 +172,11 @@
   .row[data-status="running"] .icon {
     animation: none;
   }
+
+  .dots span {
+    animation: none;
+    opacity: 0.6;
+  }
 }
 
 .srOnly {
@@ -118,6 +195,16 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* A line still being written reads as provisional, not as a conclusion. */
+.title[data-live="true"] {
+  color: #46585e;
+  direction: rtl;
+  text-align: left;
+  /* The newest words are at the end, so that is the end kept on screen. */
+  text-overflow: ellipsis;
+  unicode-bidi: plaintext;
 }
 
 .chevron {

@@ -51,12 +51,54 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
+/**
+ * Reasoning summaries are written as markdown, and the trail is one plain line.
+ *
+ * Left as-is, a row reads `**Reading the request** The user wants…`, which is
+ * the model's formatting leaking through a surface that cannot render it. The
+ * expanded detail keeps the original text; only the collapsed line is cleaned.
+ */
+function plainLine(value: string): string {
+  return value
+    .replace(/```+/g, "")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2")
+    .replace(/(?<![*\w])(\*|_)(?=\S)([^*_]*?\S)\1(?![*\w])/g, "$2")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Collapse any text to the single line the timeline shows. */
 export function summarize(value: string, fallback = ""): string {
-  const line = value.replace(/\s+/g, " ").trim();
+  const line = plainLine(value);
   if (!line) return fallback;
   if (line.length <= MAX_TITLE_LENGTH) return line;
   return `${line.slice(0, MAX_TITLE_LENGTH - 1)}…`;
+}
+
+/**
+ * The line to show for reasoning that is still arriving.
+ *
+ * `summarize` reads from the start, which is right for a finished thought and
+ * wrong for one in progress: the row would freeze on the first sentence and
+ * never move again, which reads as a console that has stopped. Reasoning
+ * summaries arrive as paragraphs, so the newest one is the live line, and it
+ * is trimmed from the front once it outgrows the row.
+ */
+export function liveSummary(detail: string, fallback = "Thinking…"): string {
+  const lines = detail.split(/\r?\n/);
+  let latest = "";
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = plainLine(lines[index]);
+    if (line) {
+      latest = line;
+      break;
+    }
+  }
+  if (!latest) return fallback;
+  if (latest.length <= MAX_TITLE_LENGTH) return latest;
+  return `…${latest.slice(latest.length - MAX_TITLE_LENGTH + 1)}`;
 }
 
 function toolTitle(name: string, detail: string): string {

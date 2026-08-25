@@ -4,16 +4,23 @@ The Hosted Agent image bakes in a default payload (``src/``). Administrators can
 override the model settings, remote MCP catalogue and agent profiles at runtime
 without rebuilding the image by pointing the runtime at a shared document store.
 
-Two backends are supported:
+Three backends are supported:
 
 ``DIGIBUDDY_CONFIG_URI``
     An Azure Blob container URL. Documents are blobs inside the container and
     are read with the agent's own Entra ID identity -- no account key.
 
+``DIGIBUDDY_CONFIG_API``
+    The console runtime API URL, for example
+    ``https://<console-host>/api/runtime``. The hosted agent authenticates with
+    ``DIGIBUDDY_CONFIG_API_SECRET`` when set, otherwise with its managed
+    identity, and asks the console to read and write the shared store from
+    inside the virtual network.
+
 ``DIGIBUDDY_CONFIG_DIR``
     A directory. Useful for local development and for mounted file shares.
 
-Both backends are optional. When neither is configured the packaged defaults are
+All backends are optional. When none is configured the packaged defaults are
 used unchanged.
 """
 
@@ -28,13 +35,36 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any, Protocol
-from urllib.parse import urlparse
+from urllib import error as urllib_error
+from urllib import request as urllib_request
+from urllib.parse import quote, urlparse
 
 logger = logging.getLogger(__name__)
 
+
+class _NoRedirects(urllib_request.HTTPRedirectHandler):
+    """Refuse redirects, because urllib would carry the token to the new host.
+
+    Unlike some clients, urllib forwards ``Authorization`` across a cross-host
+    redirect: only the content headers are dropped. The console is a fixed,
+    configured endpoint, so a redirect is never legitimate here, and following
+    one would hand a managed-identity token to whoever answered.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
 CONFIG_URI_ENV = "DIGIBUDDY_CONFIG_URI"
 CONFIG_DIR_ENV = "DIGIBUDDY_CONFIG_DIR"
+CONFIG_API_ENV = "DIGIBUDDY_CONFIG_API"
+CONFIG_API_SCOPE_ENV = "DIGIBUDDY_CONFIG_API_SCOPE"
+CONFIG_API_SECRET_ENV = "DIGIBUDDY_CONFIG_API_SECRET"
 CONFIG_TTL_ENV = "DIGIBUDDY_CONFIG_TTL_SECONDS"
+
+BLOB_ARTIFACT_UPLOAD_ATTEMPTS = 3
+BLOB_ARTIFACT_UPLOAD_INITIAL_BACKOFF_SECONDS = 0.5
+HTTP_CONFIG_TIMEOUT_SECONDS = 3.0
+HTTP_TOKEN_REFRESH_SKEW_SECONDS = 60.0
 
 #: The document shapes this build understands. A document written to a newer
 #: schema is refused rather than reinterpreted, because the fields this build
@@ -81,6 +111,13 @@ BUNDLE_PREFIX = "bundles/"
 _BUNDLE_PATH = re.compile(r"^bundles/[a-z0-9]+(?:[-_][a-z0-9]+)*/[0-9a-f]{64}\.zip$")
 ARTIFACT_PREFIX = "artifacts/"
 _ARTIFACT_ID = re.compile(r"^[0-9a-f]{32}$")
+_URL = re.compile(r"https?://[^\s'\"<>)]+")
+_SENSITIVE_PARAMETER = re.compile(
+    r"\b(sig|se|sp|spr|sv|sr|skoid|sktid|skt|ske|sks|skv|credential|"
+    r"authorization|access_token|token)=([^&\s'\"]+)",
+    re.IGNORECASE,
+)
+_SENSITIVE_BEARER = re.compile(r"\bBearer\s+[^,\s'\"]+", re.IGNORECASE)
 
 
 class ConfigStore(Protocol):
@@ -269,15 +306,233 @@ class BlobConfigStore:
         content_type: str,
         owner: str = "",
     ) -> bool:
+        from azure.core.exceptions import AzureError
         from azure.storage.blob import ContentSettings
 
-        self._container.upload_blob(
-            artifact_path(artifact_id, filename, owner),
-            payload,
-            overwrite=True,
-            content_settings=ContentSettings(content_type=content_type),
+        path = artifact_path(artifact_id, filename, owner)
+        settings = ContentSettings(content_type=content_type)
+        attempts = max(int(BLOB_ARTIFACT_UPLOAD_ATTEMPTS), 1)
+        backoff = max(float(BLOB_ARTIFACT_UPLOAD_INITIAL_BACKOFF_SECONDS), 0.0)
+        for attempt in range(1, attempts + 1):
+            try:
+                self._container.upload_blob(
+                    path,
+                    payload,
+                    overwrite=True,
+                    content_settings=settings,
+                )
+                return True
+            except AzureError as error:
+                logger.warning(
+                    "Artifact blob upload failed (attempt %s/%s): %s: %s",
+                    attempt,
+                    attempts,
+                    type(error).__name__,
+                    _safe_log_message(error),
+                )
+                if attempt == attempts:
+                    return False
+                if backoff:
+                    time.sleep(backoff)
+                backoff *= 2
+        return False
+
+
+class HttpConfigStore:
+    """Overlay documents reached through the console runtime API."""
+
+    def __init__(
+        self,
+        api_url: str,
+        scope: str,
+        *,
+        secret: str | None = None,
+        credential: Any | None = None,
+        opener: Any | None = None,
+        timeout_seconds: float = HTTP_CONFIG_TIMEOUT_SECONDS,
+    ):
+        if urlparse(api_url).scheme != "https":
+            raise RuntimeError(f"{CONFIG_API_ENV} must use HTTPS")
+        configured_secret = (secret or "").strip()
+        if not configured_secret and not scope.strip():
+            raise RuntimeError(f"{CONFIG_API_SCOPE_ENV} must be set")
+        self._api_url = api_url.rstrip("/")
+        self._scope = scope.strip()
+        self._secret = configured_secret
+        self._credential = credential
+        self._opener = opener or urllib_request.build_opener(_NoRedirects)
+        self._timeout = max(float(timeout_seconds), 0.1)
+        self._token = ""
+        self._token_expires_on = 0.0
+
+    def read(self, name: str) -> dict[str, Any] | None:
+        document = self.read_raw(name)
+        if document is None:
+            return None
+        if not readable_schema(document):
+            logger.warning(
+                "config overlay document %s declares an unsupported %s; ignoring",
+                name,
+                SCHEMA_FIELD,
+            )
+            return None
+        return document
+
+    def read_raw(self, name: str) -> dict[str, Any] | None:
+        document_name = _safe_document_name(name)
+        try:
+            payload = self._request("GET", "documents", document_name)
+        except urllib_error.HTTPError as error:
+            if error.code == 404:
+                return None
+            logger.warning(
+                "Config API read failed for %s: %s: %s",
+                document_name,
+                type(error).__name__,
+                _safe_log_message(error),
+            )
+            return None
+        except Exception as error:  # noqa: BLE001 - config overlays must degrade
+            logger.warning(
+                "Config API read failed for %s: %s: %s",
+                document_name,
+                type(error).__name__,
+                _safe_log_message(error),
+            )
+            return None
+        try:
+            document = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            logger.warning("config overlay document %s is not readable JSON", name)
+            return None
+        return document if isinstance(document, dict) else None
+
+    def write(self, name: str, document: dict[str, Any]) -> None:
+        document_name = _safe_document_name(name)
+        payload = json.dumps(document, ensure_ascii=False, sort_keys=True).encode(
+            "utf-8"
         )
-        return True
+        self._request(
+            "PUT",
+            "documents",
+            document_name,
+            body=payload,
+            content_type="application/json; charset=utf-8",
+        )
+
+    def read_bundle(self, path: str) -> bytes | None:
+        bundle_path = _safe_bundle_path(path)
+        _, name, filename = bundle_path.split("/", 2)
+        try:
+            return self._request("GET", "bundles", name, filename)
+        except urllib_error.HTTPError as error:
+            if error.code == 404:
+                return None
+            logger.warning(
+                "Config API bundle read failed for %s: %s: %s",
+                bundle_path,
+                type(error).__name__,
+                _safe_log_message(error),
+            )
+            return None
+        except Exception as error:  # noqa: BLE001 - config overlays must degrade
+            logger.warning(
+                "Config API bundle read failed for %s: %s: %s",
+                bundle_path,
+                type(error).__name__,
+                _safe_log_message(error),
+            )
+            return None
+
+    def write_artifact(
+        self,
+        artifact_id: str,
+        filename: str,
+        payload: bytes,
+        content_type: str,
+        owner: str = "",
+    ) -> bool:
+        path = artifact_path(artifact_id, filename, owner)
+        parts = path.split("/", 3)
+        if len(parts) != 4:
+            return False
+        _, owner_segment, artifact_segment, name_segment = parts
+        try:
+            self._request(
+                "PUT",
+                "artifacts",
+                owner_segment,
+                artifact_segment,
+                name_segment,
+                body=payload,
+                content_type=content_type or "application/octet-stream",
+            )
+            return True
+        except Exception as error:  # noqa: BLE001 - delivery reports failures out of band
+            logger.warning(
+                "Config API artifact upload failed: %s: %s",
+                type(error).__name__,
+                _safe_log_message(error),
+            )
+            return False
+
+    def _resolved_credential(self) -> Any:
+        """Build the credential on first use.
+
+        Deferred rather than constructed up front so the store can be created
+        anywhere the Azure SDK is absent -- including the test suite -- and so
+        a turn never pays for a credential it does not end up needing.
+        """
+        if self._credential is None:
+            from azure.identity import DefaultAzureCredential
+
+            self._credential = DefaultAzureCredential()
+        return self._credential
+
+    def _bearer_token(self) -> str:
+        if self._secret:
+            return self._secret
+        now = time.time()
+        if (
+            self._token
+            and now < self._token_expires_on - HTTP_TOKEN_REFRESH_SKEW_SECONDS
+        ):
+            return self._token
+        token = self._resolved_credential().get_token(self._scope)
+        self._token = str(token.token)
+        self._token_expires_on = float(token.expires_on)
+        return self._token
+
+    def _request(
+        self,
+        method: str,
+        *segments: str,
+        body: bytes | None = None,
+        content_type: str = "",
+    ) -> bytes:
+        url = "/".join(
+            [self._api_url, *(quote(segment, safe="") for segment in segments)]
+        )
+        headers = {
+            "Accept": "application/octet-stream, application/json",
+            "Authorization": f"Bearer {self._bearer_token()}",
+        }
+        if body is not None:
+            headers["Content-Length"] = str(len(body))
+            headers["Content-Type"] = content_type or "application/octet-stream"
+        request = urllib_request.Request(
+            url,
+            data=body,
+            headers=headers,
+            method=method,
+        )
+        response = self._opener.open(request, timeout=self._timeout)
+        try:
+            return response.read()
+        finally:
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
 
 
 class CachingConfigStore:
@@ -356,6 +611,18 @@ def _safe_document_name(name: str) -> str:
     return name
 
 
+def _safe_log_message(error: BaseException) -> str:
+    """Return an exception message without URL query strings or token values."""
+
+    def strip_url_query(match: re.Match[str]) -> str:
+        parsed = urlparse(match.group(0))
+        return parsed._replace(query="", fragment="").geturl()
+
+    text = _URL.sub(strip_url_query, str(error))
+    text = _SENSITIVE_BEARER.sub("Bearer <redacted>", text)
+    return _SENSITIVE_PARAMETER.sub(lambda match: f"{match.group(1)}=<redacted>", text)
+
+
 def _safe_bundle_path(path: str) -> str:
     """Only content-addressed bundle paths may be fetched from the store."""
     if not _BUNDLE_PATH.fullmatch(path):
@@ -400,8 +667,35 @@ def new_artifact_id() -> str:
 def build_config_store(
     environment: dict[str, str] | None = None,
 ) -> ConfigStore:
+    """Build the runtime configuration overlay.
+
+    Precedence is local directory first, then the console HTTPS runtime API,
+    then the legacy direct Blob container. Keeping ``DIGIBUDDY_CONFIG_DIR`` at
+    the top lets local development override deployed settings, while hosted
+    agents prefer the console proxy over direct storage because production
+    storage is reachable only from the Web UI's virtual network.
+    """
     env = environment if environment is not None else dict(os.environ)
     ttl = _ttl_seconds(env.get(CONFIG_TTL_ENV))
+
+    directory = (env.get(CONFIG_DIR_ENV) or "").strip()
+    if directory:
+        return CachingConfigStore(FileConfigStore(Path(directory).resolve()), ttl)
+
+    api_url = (env.get(CONFIG_API_ENV) or "").strip()
+    if api_url:
+        try:
+            return CachingConfigStore(
+                HttpConfigStore(
+                    api_url,
+                    env.get(CONFIG_API_SCOPE_ENV) or "",
+                    secret=env.get(CONFIG_API_SECRET_ENV) or "",
+                ),
+                ttl,
+            )
+        except Exception:  # noqa: BLE001 - never block startup on the overlay
+            logger.exception("Falling back to packaged config; %s unusable", CONFIG_API_ENV)
+            return NullConfigStore()
 
     container_url = (env.get(CONFIG_URI_ENV) or "").strip()
     if container_url:
@@ -412,10 +706,6 @@ def build_config_store(
         except Exception:  # noqa: BLE001 - never block startup on the overlay
             logger.exception("Falling back to packaged config; %s unusable", CONFIG_URI_ENV)
             return NullConfigStore()
-
-    directory = (env.get(CONFIG_DIR_ENV) or "").strip()
-    if directory:
-        return CachingConfigStore(FileConfigStore(Path(directory).resolve()), ttl)
 
     return NullConfigStore()
 

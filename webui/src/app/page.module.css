@@ -150,6 +150,42 @@
   white-space: pre-wrap;
 }
 
+/*
+ * A delivery that did not land.
+ *
+ * It sits under the answer it belongs to rather than inside it, because the
+ * answer is still valid: only the files are missing. The runtime used to write
+ * this into the message text, which meant one storage outage stayed in the
+ * transcript for good.
+ */
+.deliveryWarning {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  margin-top: 12px;
+  color: #7a5210;
+  background: #fdf7ec;
+  border: 1px solid #f0dfbe;
+  border-radius: 10px;
+  font-size: 12.5px;
+}
+
+.deliveryWarning p {
+  line-height: 1.55;
+}
+
+.deliveryWarning button {
+  padding: 0 6px;
+  color: #97701f;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+}
+
 .error {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -381,49 +417,4 @@
   .navSlot {
     transition: none;
   }
-}
-
-/* The agent picker that opens when a message begins with `@`. */
-.mentions {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 240px;
-  overflow-y: auto;
-  padding: 6px;
-  margin-bottom: 8px;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-  border-radius: 10px;
-  background: var(--surface, rgba(255, 255, 255, 0.04));
-}
-
-.mentions button {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.mentions button:hover,
-.mentions button[aria-selected="true"] {
-  background: var(--surface-strong, rgba(255, 255, 255, 0.08));
-}
-
-.mentions button span {
-  font-size: 0.82em;
-  opacity: 0.7;
-}
-
-.mentionNote {
-  margin: 0;
-  padding: 6px 10px;
-  font-size: 0.82em;
-  opacity: 0.75;
 }

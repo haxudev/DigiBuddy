@@ -83,6 +83,61 @@ test("no profiles document keeps the unrestricted built-in default", () => {
   assert.ok(commands.some((command) => command.name === "research"));
 });
 
+test("naming the built-in default means what omitting it means", () => {
+  // The console always names it: the picker offers the fallback profile and
+  // the runtime reports it back as the agent that ran, so `?profile=digibuddy`
+  // is the ordinary case rather than an unknown name.
+  const commands = resolveUserCommands(
+    WITH_ASSESSMENT,
+    null,
+    null,
+    null,
+    "digibuddy",
+  );
+
+  assert.ok(commands.some((command) => command.name === "pptx"));
+  assert.ok(commands.some((command) => command.name === "research"));
+});
+
+test("naming the deployment's configured default means what omitting it means", () => {
+  const commands = resolveUserCommands(
+    WITH_ASSESSMENT,
+    null,
+    null,
+    null,
+    "gtmbuddy",
+    "gtmbuddy",
+  );
+
+  assert.ok(commands.some((command) => command.name === "pptx"));
+});
+
+test("an unknown name gets nothing even before profiles are configured", () => {
+  const commands = resolveUserCommands(
+    WITH_ASSESSMENT,
+    null,
+    null,
+    null,
+    "somebody-else",
+  );
+
+  assert.deepEqual(commands, []);
+});
+
+test("a configured profile still wins over the deployment default name", () => {
+  // Once profiles exist, the default name is answered by the profile document,
+  // not by the unrestricted fallback.
+  const commands = resolveUserCommands(
+    WITH_ASSESSMENT,
+    null,
+    { profiles: [{ name: "digibuddy", skills: ["pptx"] }] },
+    null,
+    "digibuddy",
+  );
+
+  assert.deepEqual(commands.map((command) => command.name), ["pptx"]);
+});
+
 test("an unseeded command store still publishes reachable built-ins", () => {
   const commands = resolveUserCommands(WITH_ASSESSMENT, null, null, null, "");
   const assessment = commands.find(

@@ -138,11 +138,25 @@ Every endpoint must be HTTPS and must match `services.ai.azure.com`, `openai.azu
 
 ## Web UI (`GET /api/profiles`)
 
-Lists the profiles a chat user may pick. Public and unauthenticated: only `name`, `display_name`, and `description` are exposed, because personas and capability assembly are runtime concerns. An unconfigured or unreachable store returns an empty list, meaning "no profile choice".
+Lists the profiles a chat user may pick. Public and unauthenticated: profile personas and secrets are not exposed, but capability names are, so the `@` picker can explain what an agent can reach.
 
 ```json
-{ "profiles": [{ "name": "marketing", "display_name": "Marketing", "description": "…" }] }
+{
+  "status": "ready",
+  "profiles": [
+    {
+      "name": "marketing",
+      "display_name": "Marketing",
+      "description": "…",
+      "skills": ["pricing"],
+      "tools": ["cost_estimator"],
+      "mcp_servers": []
+    }
+  ]
+}
 ```
+
+`status` is `ready` or `unavailable`. If no profile document exists, the route returns the runtime default profile with the published catalogue. If the store cannot be reached, it returns `status: "unavailable"` with the default profile and empty capability lists, so `@` can still select the deployment default without pretending the catalogue loaded.
 
 ## Web UI (`/api/admin/config`)
 
@@ -201,6 +215,23 @@ Generated deliverables also use this store under the reserved
 `artifacts/<random-id>/<filename>` prefix. `GET /api/artifacts/<id>/<name>`
 validates both path segments and proxies the private bytes with a strict content
 type and sandbox policy. Append `?download=1` to request download disposition.
+
+The assistant message carries delivery metadata in an invisible HTML comment:
+
+```html
+<!-- digibuddy-artifacts:{"version":1,"artifacts":[{"id":"0123456789abcdef0123456789abcdef","name":"report.pdf","mimeType":"application/pdf","size":12345}],"failed":2} -->
+```
+
+| Field | Description |
+| --- | --- |
+| `version` | Manifest version, currently `1` |
+| `artifacts` | Successfully saved delivery cards; each item has `id`, `name`, `mimeType`, and byte `size` |
+| `failed` | Optional positive count of generated files that still could not be saved after retry |
+
+`failed` is omitted when nothing failed, so older consoles that only understand
+delivery cards see the same shape they already handled. Current consoles strip
+the comment from the answer and render the failure count as a dismissible notice
+below it.
 
 ## Web UI (`/api/admin/skills`)
 

@@ -291,6 +291,27 @@ class McpCatalogueTests(unittest.TestCase):
 
             self.assertEqual(list(load_mcp_servers(configured)), ["good"])
 
+    def test_remote_server_keeps_a_bounded_startup_timeout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory,
+                servers={
+                    "cold": {
+                        "url": "https://example.com/mcp",
+                        "startup_timeout_sec": 30,
+                    },
+                    "unbounded": {
+                        "url": "https://example.com/other",
+                        "startup_timeout_sec": 600,
+                    },
+                },
+            )
+
+            servers = load_mcp_servers(configured)
+
+            self.assertEqual(servers["cold"]["startup_timeout_sec"], 30)
+            self.assertNotIn("startup_timeout_sec", servers["unbounded"])
+
     def test_profile_restricts_the_catalogue(self):
         with tempfile.TemporaryDirectory() as directory:
             configured = payload(
@@ -681,6 +702,17 @@ class ChildEnvironmentTests(unittest.TestCase):
             self.assertIn("DIGIBUDDY_SKILLS_ROOT", child)
             self.assertIn("DIGIBUDDY_TOOLS_ROOT", child)
             self.assertIn("PYTHONPATH", child)
+
+    def test_packaged_mcp_bearer_token_reaches_codex(self):
+        with tempfile.TemporaryDirectory() as directory:
+            child = self._prepared(
+                directory,
+                extra_env={"DIGIBUDDY_MCP_BEARER_TOKEN": "mcp-secret"},
+            )
+
+            self.assertEqual(
+                child["DIGIBUDDY_MCP_BEARER_TOKEN"], "mcp-secret"
+            )
 
     def test_an_unrelated_variable_does_not_travel(self):
         with tempfile.TemporaryDirectory() as directory:

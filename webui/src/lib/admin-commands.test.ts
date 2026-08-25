@@ -45,10 +45,14 @@ class MemoryStore implements ConfigStore {
   }
 
   async writeBundle(): Promise<void> {}
+  async readBundle(): Promise<Buffer | null> {
+    return null;
+  }
   async deleteBundle(): Promise<void> {}
   async readArtifact(): Promise<Buffer | null> {
     return null;
   }
+  async writeArtifact(): Promise<void> {}
 }
 
 test("commands are written as a versioned document", async () => {

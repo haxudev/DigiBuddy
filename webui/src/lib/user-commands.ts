@@ -28,6 +28,7 @@ export function resolveUserCommands(
   profilesDocument: JsonDocument | null,
   mcpDocument: JsonDocument | null,
   requestedProfile: string,
+  defaultProfileName = DEFAULT_PROFILE_NAME,
 ): SkillCommand[] {
   const catalogue = normaliseCatalogue(catalogueDocument);
   const profiles = describeProfiles(
@@ -36,8 +37,9 @@ export function resolveUserCommands(
     normaliseMcp(mcpDocument),
   );
 
+  const fallbackName = defaultProfileName || DEFAULT_PROFILE_NAME;
   const configured = profiles.length > 0;
-  const effectiveName = requestedProfile || DEFAULT_PROFILE_NAME;
+  const effectiveName = requestedProfile || fallbackName;
   const active = profiles.find((profile) => profile.name === effectiveName);
   if (active) {
     return resolveCommands(
@@ -48,9 +50,16 @@ export function resolveUserCommands(
   }
 
   // Before a profiles document exists, the runtime uses its unrestricted
-  // built-in default. Once profiles are configured, omission is policy: a name
-  // no profile answers to must not widen back to the whole catalogue.
-  if (!configured && !requestedProfile) {
+  // built-in default, and `/api/profiles` says so by answering with that same
+  // default. Naming it explicitly has to mean what omitting it means, because
+  // the console always names it: the picker offers the fallback profile, and
+  // the runtime reports it back as the agent that ran. Treating the name as
+  // unknown here is what left `/` empty in a deployment that had never seeded
+  // a profiles document.
+  //
+  // Once profiles are configured, omission is policy: a name no profile
+  // answers to must not widen back to the whole catalogue.
+  if (!configured && (!requestedProfile || requestedProfile === fallbackName)) {
     return resolveCommands(
       catalogue,
       normaliseCommands(commandsDocument),

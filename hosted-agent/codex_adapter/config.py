@@ -132,6 +132,9 @@ _INHERITED_VARIABLES = frozenset(
         "DIGIBUDDY_GRAPH_CLIENT_ID",
         "DIGIBUDDY_GRAPH_AUTHORITY_HOST",
         "DIGIBUDDY_GRAPH_SCOPES",
+        # The MCP catalogue names this variable explicitly. Without forwarding
+        # it, Codex sees the server but cannot construct its authenticated client.
+        "DIGIBUDDY_MCP_BEARER_TOKEN",
         # Codex itself
         "CODEX_WORKSPACE",
     }
@@ -387,6 +390,13 @@ def load_mcp_servers(
                 entry["bearer_token_env_var"] = token_env
             if profile is not None and profile_credentials_enabled():
                 entry["bearer_token_env_var"] = SLOT_VARIABLES["mcp_bearer_token"]
+            startup_timeout = server.get("startup_timeout_sec")
+            if (
+                isinstance(startup_timeout, (int, float))
+                and not isinstance(startup_timeout, bool)
+                and 1 <= startup_timeout <= 120
+            ):
+                entry["startup_timeout_sec"] = startup_timeout
         elif command:
             entry = {"command": command}
             args = server.get("args")

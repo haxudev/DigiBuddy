@@ -6,6 +6,7 @@ import {
   buildConfigStore,
 } from "@/lib/admin-config";
 import { NotSignedInError, requirePrincipal } from "@/lib/identity";
+import { DEFAULT_PROFILE_NAME } from "@/lib/profile-capabilities";
 import { resolveUserCommands } from "@/lib/user-commands";
 
 export const runtime = "nodejs";
@@ -33,10 +34,12 @@ export async function GET(request: Request) {
     throw error;
   }
 
-  const requested =
-    new URL(request.url).searchParams.get("profile")?.trim() ||
-    process.env.DIGIBUDDY_PROFILE?.trim() ||
-    "";
+  const requested = new URL(request.url).searchParams.get("profile")?.trim() || "";
+  // The name this deployment answers to when nobody picks one. It is a
+  // default, not a restriction, and must not be read as one: the console names
+  // it on every request once the runtime reports which agent ran.
+  const defaultProfile =
+    process.env.DIGIBUDDY_PROFILE?.trim() || DEFAULT_PROFILE_NAME;
   try {
     const store = buildConfigStore();
     const [catalogueDocument, commandsDocument, profilesDocument, mcpDocument] =
@@ -49,22 +52,27 @@ export async function GET(request: Request) {
 
     return Response.json(
       {
+        status: "ready",
         commands: resolveUserCommands(
           catalogueDocument,
           commandsDocument,
           profilesDocument,
           mcpDocument,
           requested,
+          defaultProfile,
         ),
       },
       { headers: { "Cache-Control": "no-store" } },
     );
-  } catch {
-    // An unseeded or unreachable store is not something the composer can act
-    // on. An empty menu leaves `@`, attachments and plain messages working,
-    // which is better than failing the page over one missing document.
+  } catch (error) {
+    // A store that is missing, misconfigured or unreachable is not something
+    // the composer can act on, and failing the page over it would take `@`,
+    // attachments and plain messages down with it. Saying so is the point:
+    // reporting this as an ordinary empty menu is what made an unreachable
+    // storage account look like a deployment that ships no skills.
+    console.error("skill catalogue unavailable", error);
     return Response.json(
-      { commands: [] },
+      { status: "unavailable", commands: [] },
       { headers: { "Cache-Control": "no-store" } },
     );
   }
