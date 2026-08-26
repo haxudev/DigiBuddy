@@ -228,6 +228,12 @@ class SkillEntry:
     #: packaged skill cannot be withdrawn from the admin surface.
     source: str = "packaged"
     enabled: bool = True
+    #: ``builtin``, ``command`` or ``hidden`` -- how reachable the skill is, as
+    #: declared in ``skill-availability.json``. The console needs it to decide
+    #: what belongs in the chat menu, and the admin surface to say why a skill
+    #: it lists is not offered there. ``off`` never reaches here: such a skill
+    #: is absent from the catalogue entirely.
+    availability: str = "command"
 
     def as_document(self) -> dict[str, Any]:
         return {
@@ -235,6 +241,7 @@ class SkillEntry:
             "description": self.description,
             "source": self.source,
             "enabled": self.enabled,
+            "availability": self.availability,
         }
 
 

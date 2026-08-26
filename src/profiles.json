@@ -42,12 +42,10 @@
         "canvas-design",
         "competitive-ads-extractor",
         "content-creator",
-        "content-research-writer",
         "internal-comms",
         "marketing-demand-acquisition",
         "marketing-email",
         "marketing-strategy-pmm",
-        "seo-optimizer",
         "pptx",
         "docx"
       ],
@@ -68,7 +66,6 @@
       "description": "Answers from the internal knowledge base, with M365 follow-up.",
       "persona": "## Profile\n\nYou are working as an internal support desk agent. Answer from the internal knowledge base first and always cite the source. If the knowledge base does not cover the question, say so explicitly instead of guessing.",
       "skills": [
-        "faq-knowledge-base-agent",
         "m365-send-mail",
         "docx",
         "pdf"

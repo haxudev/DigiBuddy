@@ -30,6 +30,7 @@ type CatalogueSkill = {
   description: string;
   source: "packaged" | "deployed" | "";
   enabled: boolean;
+  availability?: "builtin" | "command" | "hidden" | "";
 };
 
 type Catalogue = {
@@ -1290,6 +1291,13 @@ export default function Admin() {
                 withdrawal action here; the switch only controls whether the
                 runtime installs them.
               </p>
+              <p className={styles.hint}>
+                A <strong>built-in</strong> skill loads itself when a request
+                matches it, and a <strong>hidden</strong> one is reached only
+                through a command that bundles it. Neither appears in the chat
+                menu, which is deliberate rather than a fault — both are still
+                installed and still work.
+              </p>
               {skillGroups.packaged.length === 0 ? (
                 <p className={styles.hint}>
                   No packaged skills are published yet. A runtime older than this
@@ -1303,6 +1311,12 @@ export default function Admin() {
                     <div className={styles.rowHeader}>
                       <strong>
                         {skill.name}
+                        {skill.availability === "builtin" && (
+                          <span className={styles.version}> · built-in</span>
+                        )}
+                        {skill.availability === "hidden" && (
+                          <span className={styles.version}> · hidden</span>
+                        )}
                         {!skill.enabled && (
                           <span className={styles.version}> · off</span>
                         )}

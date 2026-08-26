@@ -50,17 +50,36 @@ def settings(**overrides):
     return RuntimeSettings(**values)
 
 
-def payload(directory, *, skills=(), tools=(), servers=None, profiles=None):
+def payload(
+    directory,
+    *,
+    skills=(),
+    tools=(),
+    servers=None,
+    profiles=None,
+    availability=None,
+    descriptions=None,
+):
     """Build a miniature agent payload on disk and point settings at it."""
     base = Path(directory)
     root = base / "payload"
     (root / "skills").mkdir(parents=True)
     (root / "tools").mkdir(parents=True)
     (root / "AGENTS.md").write_text("payload persona", encoding="utf-8")
+    described = descriptions or {}
     for name in skills:
         skill = root / "skills" / name
         skill.mkdir()
-        (skill / "SKILL.md").write_text(f"# {name}", encoding="utf-8")
+        body = f"# {name}"
+        if name in described:
+            body = (
+                f"---\nname: {name}\ndescription: {described[name]}\n---\n\n{body}"
+            )
+        (skill / "SKILL.md").write_text(body, encoding="utf-8")
+    if availability is not None:
+        (root / "skill-availability.json").write_text(
+            json.dumps({"skills": availability}), encoding="utf-8"
+        )
     for name in tools:
         (root / "tools" / f"{name}.py").write_text("", encoding="utf-8")
     if servers is not None:
@@ -224,6 +243,33 @@ class GlobalSkillInstallTests(unittest.TestCase):
             current = settings(skills_source=source, codex_home=codex_home)
 
             self.assertEqual(install_global_skills(current, store=store), 1)
+            self.assertEqual(
+                [entry.name for entry in (codex_home / "skills").iterdir()],
+                ["keep"],
+            )
+
+    def test_an_off_skill_is_not_installed(self):
+        # The filter runs after the manifest assertion, so an `off` skill that
+        # never shipped does not read as a source that stopped publishing.
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / "pack"
+            for name in ("keep", "retired"):
+                skill = source / name
+                skill.mkdir(parents=True)
+                (skill / "SKILL.md").write_text("x", encoding="utf-8")
+            payload_root = Path(root) / "payload"
+            payload_root.mkdir()
+            (payload_root / "skill-availability.json").write_text(
+                json.dumps({"skills": {"retired": "off"}}), encoding="utf-8"
+            )
+            codex_home = Path(root) / "codex"
+            current = settings(
+                skills_source=source,
+                codex_home=codex_home,
+                payload_root=payload_root,
+            )
+
+            self.assertEqual(install_global_skills(current), 1)
             self.assertEqual(
                 [entry.name for entry in (codex_home / "skills").iterdir()],
                 ["keep"],
@@ -476,6 +522,83 @@ class InstructionsTests(unittest.TestCase):
             self.assertIn("- pptx", rendered)
             self.assertNotIn("- docx", rendered)
 
+    def test_built_in_skills_carry_the_trigger_that_selects_them(self):
+        # The agent is the one choosing a built-in skill, so it can only reach
+        # for the right one if the catalogue says what each is for.
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory,
+                skills=["pptx", "acr-analysis"],
+                descriptions={"pptx": "Use whenever a deck is involved."},
+                availability={"pptx": "builtin", "acr-analysis": "command"},
+            )
+
+            rendered = load_instructions(configured)
+
+            self.assertIn("## Built-in skills", rendered)
+            self.assertIn("- pptx — Use whenever a deck is involved.", rendered)
+            self.assertIn("## On-demand skills", rendered)
+            self.assertIn("- acr-analysis", rendered)
+            # An on-demand skill is named, not described: the user invoking it
+            # has already made the choice the description exists to inform.
+            self.assertNotIn("- acr-analysis —", rendered)
+
+    def test_a_hidden_skill_is_advertised_in_neither_section(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory,
+                skills=["pptx", "sub"],
+                availability={"pptx": "builtin", "sub": "hidden"},
+            )
+
+            rendered = load_instructions(configured)
+
+            self.assertIn("- pptx", rendered)
+            self.assertNotIn("- sub", rendered)
+
+    def test_an_off_skill_is_advertised_nowhere(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory,
+                skills=["pptx", "retired"],
+                availability={"retired": "off"},
+            )
+
+            rendered = load_instructions(configured)
+
+            self.assertNotIn("retired", rendered)
+
+    def test_an_undeclared_skill_stays_on_demand(self):
+        # The declaration names what the image ships; an uploaded skill is
+        # never in it, and must not become built-in by omission.
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory, skills=["uploaded"], availability={"pptx": "builtin"}
+            )
+
+            rendered = load_instructions(configured)
+
+            self.assertIn("## On-demand skills", rendered)
+            self.assertNotIn("## Built-in skills", rendered)
+            self.assertIn("- uploaded", rendered)
+
+    def test_a_long_description_is_cut_rather_than_carried_whole(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory,
+                skills=["pptx"],
+                descriptions={"pptx": "deck " * 200},
+                availability={"pptx": "builtin"},
+            )
+
+            rendered = load_instructions(configured)
+
+            line = next(
+                row for row in rendered.splitlines() if row.startswith("- pptx")
+            )
+            self.assertLess(len(line), 300)
+            self.assertTrue(line.endswith("…"))
+
 
 class RuntimeFingerprintTests(unittest.TestCase):
     def test_secret_profile_and_mcp_changes_restart_the_runtime(self):
@@ -527,6 +650,24 @@ class RuntimeFingerprintTests(unittest.TestCase):
 
             self.assertNotEqual(
                 original, runtime_fingerprint(configured, store, profile)
+            )
+
+    def test_hiding_a_skill_restarts_the_runtime(self):
+        # Moving a skill to `hidden` leaves the rendered instructions identical,
+        # so nothing else in the fingerprint would notice.
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory, skills=["pptx", "sub"], availability={"sub": "command"}
+            )
+            profile = AgentProfile(name="profile")
+            original = runtime_fingerprint(configured, None, profile)
+
+            (configured.payload_root / "skill-availability.json").write_text(
+                json.dumps({"skills": {"sub": "hidden"}}), encoding="utf-8"
+            )
+
+            self.assertNotEqual(
+                original, runtime_fingerprint(configured, None, profile)
             )
 
 
@@ -611,6 +752,73 @@ class CatalogueTests(unittest.TestCase):
             self.assertTrue({"docx", "pptx", "superclarity"} <= set(catalogue.skills))
             self.assertEqual(catalogue.tools, ("azure_blob",))
             self.assertEqual(catalogue.mcp_servers, ("learn",))
+
+    def test_an_off_skill_is_not_part_of_the_catalogue(self):
+        # Dropping it here rather than filtering later means it cannot be
+        # assigned to a profile, offered in the menu, or listed for an
+        # administrator to switch back on.
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory,
+                skills=["pptx", "retired"],
+                availability={"retired": "off"},
+            )
+
+            catalogue = build_catalogue(configured)
+
+            self.assertIn("pptx", catalogue.skills)
+            self.assertNotIn("retired", catalogue.skills)
+            self.assertNotIn(
+                "retired", {entry.name for entry in catalogue.skill_entries}
+            )
+
+    def test_entries_publish_the_availability_the_console_needs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory,
+                skills=["pptx", "acr-analysis", "sub"],
+                availability={"pptx": "builtin", "sub": "hidden"},
+            )
+
+            entries = {
+                entry.name: entry.availability
+                for entry in build_catalogue(configured).skill_entries
+            }
+
+            self.assertEqual(entries["pptx"], "builtin")
+            self.assertEqual(entries["sub"], "hidden")
+            # Undeclared, so it keeps the default rather than inheriting a
+            # neighbour's tier.
+            self.assertEqual(entries["acr-analysis"], "command")
+
+    def test_an_uploaded_skill_cannot_declare_itself_built_in(self):
+        digest = "c" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory, skills=["pptx"], availability={"pptx": "builtin"}
+            )
+            store = FileConfigStore(Path(directory) / "config")
+            store.write(
+                SKILLS_DOCUMENT,
+                {
+                    "schema_version": 1,
+                    "skills": [
+                        {
+                            "name": "uploaded",
+                            "description": "an upload",
+                            "sha256": digest,
+                            "bundle": f"bundles/uploaded/{digest}.zip",
+                        }
+                    ],
+                },
+            )
+
+            entries = {
+                entry.name: entry.availability
+                for entry in build_catalogue(configured, store).skill_entries
+            }
+
+            self.assertEqual(entries["uploaded"], "command")
 
     def test_catalogue_includes_packaged_global_skills(self):
         with tempfile.TemporaryDirectory() as directory:

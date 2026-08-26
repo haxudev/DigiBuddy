@@ -8,10 +8,15 @@
  * meaningful for the whole conversation and applies to one message at a time.
  *
  * What the menu offers is the catalogue the runtime published, filtered to what
- * the active profile can reach, with a curated layer over the top. Curation is
- * what makes the menu readable: the catalogue holds every skill the image
- * ships, including ones like `skill-creator` that exist to build other skills
- * and have no business in a chat menu.
+ * the active profile can reach and to what the runtime says belongs in a menu,
+ * with a curated layer over the top.
+ *
+ * Most skills do not belong here. `pptx` and `html-report` are things the agent
+ * reaches for the moment a request needs them, and asking a user to type
+ * `/pptx` before they may have a deck is asking them to know the
+ * implementation; the maturity sub-skills are implementation behind one curated
+ * command. The runtime says which is which through `availability`, and only
+ * `command` — or an older runtime's silence — becomes a menu row.
  */
 
 import type { Catalogue, CatalogueSkill } from "./admin-config.ts";
@@ -139,9 +144,12 @@ export function normaliseCommands(input: unknown): CommandOverride[] {
  * The commands a user may run, given what the runtime published and what the
  * profile allows.
  *
- * Every reachable skill becomes a command, so a newly deployed skill is usable
- * the moment it installs, without an administrator writing an entry for it.
- * Overrides then rename, redescribe, reorder, bundle or hide.
+ * Every reachable skill the runtime marks as belonging in a menu becomes a
+ * command, so a newly deployed skill is usable the moment it installs, without
+ * an administrator writing an entry for it. Overrides then rename, redescribe,
+ * reorder, bundle or hide — and an override may still name a `builtin` or
+ * `hidden` skill, because an administrator asking for a menu row knows better
+ * than the default.
  *
  * A command is dropped when the skills it names are not reachable, rather than
  * shown and then failing: the runtime enforces the profile independently, so an
@@ -160,10 +168,16 @@ export function resolveCommands(
   const commands = new Map<string, SkillCommand>();
   for (const name of catalogue.skills) {
     if (!allowed.has(name)) continue;
+    const entry = described.get(name);
+    // An empty availability is an older runtime that does not publish the
+    // field. Reading it as `command` keeps the menu it used to show, rather
+    // than emptying the menu the moment the console rolls out first.
+    const availability = entry?.availability ?? "";
+    if (availability !== "command" && availability !== "") continue;
     commands.set(name, {
       name,
       title: titleFromName(name),
-      description: described.get(name)?.description ?? "",
+      description: entry?.description ?? "",
       skills: [name],
       hint: "",
       enabled: true,

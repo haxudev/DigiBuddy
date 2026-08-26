@@ -3,6 +3,7 @@ export type AdminCatalogueSkill = {
   description: string;
   source: "packaged" | "deployed" | "";
   enabled: boolean;
+  availability?: "builtin" | "command" | "hidden" | "";
 };
 
 export type AdminDeployedSkill = {
@@ -18,6 +19,15 @@ export type PackagedSkillRow = {
   description: string;
   enabled: boolean;
   toggleRoute: "/api/admin/skill-policy";
+  /**
+   * How the skill is reached, so an administrator can tell an absent menu row
+   * from a broken one.
+   *
+   * A `builtin` skill is enabled and working while never appearing in the chat
+   * menu, and without this the console would show it as ordinary and leave the
+   * missing `/` command looking like a fault.
+   */
+  availability: "builtin" | "command" | "hidden" | "";
 };
 
 export type CustomSkillRow<T extends AdminDeployedSkill = AdminDeployedSkill> = T & {
@@ -93,6 +103,7 @@ export function buildAdminSkillGroups<T extends AdminDeployedSkill>(
       description: entry.description,
       enabled: !disabled.has(entry.name),
       toggleRoute: skillToggleRoute("packaged") as "/api/admin/skill-policy",
+      availability: entry.availability ?? "",
     }))
     .sort((left, right) => left.name.localeCompare(right.name));
   const custom = deployed

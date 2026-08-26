@@ -45,6 +45,7 @@ webui/                        # 独立的 Next.js + React + AG-UI 应用，含 /
 src/                          # Agent payload，构建时打入镜像 /opt/digibuddy
 ├── AGENTS.md                 # DigiBuddy 人设与能力目录
 ├── mcp.json                  # 远程与本地 MCP server 目录
+├── skill-availability.json   # 声明每个 skill 是内置 / 按需 / 隐藏 / 不部署
 ├── skills/                   # <name>/SKILL.md 定义，按需加载
 ├── tools/                    # Python 工具，每个都有 CLI 入口
 │   ├── azure_blob.py         # Blob 上传与 user-delegation SAS 链接
@@ -77,9 +78,22 @@ Codex 沙箱只暴露一个 shell —— 没有工具注册表。因此能力以
 
 一个 skill 是一个目录，包含 `SKILL.md` 以及它工作所需的一切 —— 参考资料、脚本、随包携带的库、CLI。skills 通过三个平面到达 agent。
 
-**用户**用斜杠命令加载。在输入框中键入 `/` 会打开一个菜单，列出当前 agent profile 可触达的 skills：方向键移动选中项，Enter 确认，Esc 关闭菜单且不会动到已经输入的文字。选中后即附加到下一条消息。选择是按消息生效，而非按会话：skill 是模型按需读取的 markdown，因此不同于 `@agent` 提及（Codex 在线程启动时就已固定），它可以在会话的任意时刻选择。运行时会依据已绑定的 profile 校验该请求，并在这一轮的提示词前加上指向该 skill `SKILL.md` 的指令。当目录读不到时，菜单会直接说明原因，而不是显示为空——"这个部署没有装 skill"和"配置存储不可达"是两个不同的问题，修法也不同。
+**skill 是怎么到场的。**多数 skill 并不是让用户去挑的。`pptx` 与 `html-report` 是 agent 在请求需要时就该主动伸手去拿的东西；要求用户在可能还没有 PPT 的时候先敲一个 `/pptx`，等于要求他了解实现细节。因此每个 skill 在 `src/skill-availability.json` 中声明一种可用性：
 
-profile 可触达的每个 skill 都会自动出现在菜单中。`commands.json` 文档在其上叠加一层策展能力，管理员可以重命名命令、撰写更好的描述、隐藏不适合出现在聊天菜单中的条目，或将多个 skills 归并到一个命令下。`/agent-adoption-assessment` 作为内置示例随附：它会加载 `agent-maturity-assess` 与 `agent-maturity-report`。
+| 可用性 | 安装 | 写进 instructions | 出现在 `/` 菜单 |
+| --- | --- | --- | --- |
+| `builtin` | 是 | 是，并附带自己的触发描述 | 否 |
+| `command`（默认） | 是 | 是，仅名字 | 是 |
+| `hidden` | 是 | 否 | 否 |
+| `off` | 否 | 否 | 否 |
+
+`builtin` 的 skill 自己加载自己：它的描述就在 instructions 里，agent 无需被告知就能认出该用它的时机。`hidden` 的 skill 装了也可达 —— 某个策展命令可以把它打包进来 —— 但既不向模型宣传也不向用户罗列；四个 `agent-maturity-*` 就隐藏在唯一的 `/agent-adoption-assessment` 命令背后。`off` 的 skill 留在仓库里，但根本不进镜像：它同时被 `.dockerignore` 排除，两者不一致时构建会失败。
+
+没有被声明的 skill 就是 `command`，也就是这个文件出现之前每个 skill 的样子。这个默认值对上传件很关键：bundle 是不受信输入，永远不会出现在声明文件中，因此它既不能把自己藏起来，也不能把自己塞进 instructions。
+
+**用户**用斜杠命令加载按需 skill。在输入框中键入 `/` 会打开一个菜单，列出当前 agent profile 可触达的 skills：方向键移动选中项，Enter 确认，Esc 关闭菜单且不会动到已经输入的文字。选中后即附加到下一条消息。选择是按消息生效，而非按会话：skill 是模型按需读取的 markdown，因此不同于 `@agent` 提及（Codex 在线程启动时就已固定），它可以在会话的任意时刻选择。运行时会依据已绑定的 profile 校验该请求，并在这一轮的提示词前加上指向该 skill `SKILL.md` 的指令。当目录读不到时，菜单会直接说明原因，而不是显示为空——"这个部署没有装 skill"和"配置存储不可达"是两个不同的问题，修法也不同。
+
+profile 可触达、且运行时标记为 `command` 的每个 skill 都会自动出现在菜单中。`commands.json` 文档在其上叠加一层策展能力，管理员可以重命名命令、撰写更好的描述、隐藏不适合出现在聊天菜单中的条目，或将多个 skills 归并到一个命令下 —— 包括 `builtin` 与 `hidden` 的 skill，因为主动要求一行菜单的管理员比默认值更清楚自己要什么。`/agent-adoption-assessment` 作为内置示例随附：它会加载 `agent-maturity-assess` 与 `agent-maturity-report`。
 
 **管理员**从控制台上传 skills，可以是 zip 或 HTTPS URL。bundle 以内容寻址方式存储在 `bundles/<name>/<sha256>.zip`；运行时先校验摘要再解包，并拒绝符号链接、路径穿越和超限压缩包。上传的**代码**（tools 与 MCP server）在管理员批准那一份确切字节之前保持惰性，因此替换一个已批准的产物会撤销授权，而不是继承它。
 

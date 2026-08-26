@@ -364,10 +364,23 @@ test("a capability name is still one safe path segment", () => {
 test("skill entries carry the description the runtime published", () => {
   const catalogue = normaliseCatalogue({
     skills: ["pptx"],
-    skill_entries: [{ name: "pptx", description: "Make decks.", source: "packaged" }],
+    skill_entries: [
+      {
+        name: "pptx",
+        description: "Make decks.",
+        source: "packaged",
+        availability: "builtin",
+      },
+    ],
   });
   assert.deepEqual(catalogue.skill_entries, [
-    { name: "pptx", description: "Make decks.", source: "packaged", enabled: true },
+    {
+      name: "pptx",
+      description: "Make decks.",
+      source: "packaged",
+      enabled: true,
+      availability: "builtin",
+    },
   ]);
 });
 
@@ -389,8 +402,26 @@ test("published entries are the inventory rather than decorations", () => {
     skill_entries: [{ name: "described", description: "Known.", source: "deployed" }],
   });
   assert.deepEqual(catalogue.skill_entries, [
-    { name: "described", description: "Known.", source: "deployed", enabled: true },
+    {
+      name: "described",
+      description: "Known.",
+      source: "deployed",
+      enabled: true,
+      availability: "",
+    },
   ]);
+});
+
+test("an unrecognised availability is read as the runtime saying nothing", () => {
+  // The field decides whether a skill reaches the chat menu. A value the
+  // console does not understand must not be carried through as if it did: the
+  // safe reading is silence, which behaves like every skill did before the
+  // field existed.
+  const catalogue = normaliseCatalogue({
+    skills: ["odd"],
+    skill_entries: [{ name: "odd", description: "", availability: "invisible" }],
+  });
+  assert.equal(catalogue.skill_entries[0].availability, "");
 });
 
 test("an unrecognised source is not taken at its word", () => {

@@ -134,3 +134,36 @@ test("unapproved or disabled executable capabilities are not assignable", () => 
 
   assert.deepEqual(assignable, { skills: [], tools: [], mcp_servers: [] });
 });
+
+test("a packaged row says why it is missing from the chat menu", () => {
+  // A built-in skill is enabled and working while never appearing as a `/`
+  // command. Without the marker the console would show it as ordinary and
+  // leave the absent menu row looking like a fault.
+  const groups = buildAdminSkillGroups(
+    [
+      {
+        name: "pptx",
+        description: "Make decks.",
+        source: "packaged",
+        enabled: true,
+        availability: "builtin",
+      },
+      {
+        name: "acr-analysis",
+        description: "Analyse revenue.",
+        source: "packaged",
+        enabled: true,
+      },
+    ],
+    [],
+    [],
+  );
+
+  assert.deepEqual(
+    groups.packaged.map((entry) => [entry.name, entry.availability]),
+    [
+      ["acr-analysis", ""],
+      ["pptx", "builtin"],
+    ],
+  );
+});

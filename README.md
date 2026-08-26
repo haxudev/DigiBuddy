@@ -45,6 +45,7 @@ webui/                        # Standalone Next.js + React + AG-UI application, 
 src/                          # Agent payload, baked into the image at /opt/digibuddy
 ├── AGENTS.md                 # DigiBuddy persona and capability catalogue
 ├── mcp.json                  # Remote and local MCP server catalogue
+├── skill-availability.json   # Which skills are built-in, on-demand, hidden or off
 ├── skills/                   # <name>/SKILL.md definitions loaded on demand
 ├── tools/                    # Python tools, each with a CLI entry point
 │   ├── azure_blob.py         # Blob upload and user-delegation SAS links
@@ -101,8 +102,35 @@ A skill is a directory holding `SKILL.md` and whatever it needs to do its job �
 references, scripts, a vendored library, a CLI. Skills reach the agent through
 three planes.
 
-**Users** load one with a slash command. Typing `/` in the composer opens a menu
-of the skills the current agent profile can reach; arrow keys move the
+**How a skill is meant to arrive.** Most skills are not things a user picks.
+`pptx` and `html-report` are things the agent should reach for the moment a
+request needs them, and asking someone to type `/pptx` before they may have a
+deck is asking them to know the implementation. So each skill declares one
+availability in `src/skill-availability.json`:
+
+| Availability | Installed | Named in the instructions | In the `/` menu |
+| --- | --- | --- | --- |
+| `builtin` | yes | yes, with its own trigger description | no |
+| `command` (default) | yes | yes, by name | yes |
+| `hidden` | yes | no | no |
+| `off` | no | no | no |
+
+A `builtin` skill loads itself: the instructions carry its description, so the
+agent recognises the moment it applies without being told. A `hidden` one is
+installed and reachable — a curated command may bundle it — but is neither
+advertised to the model nor listed for the user; the four `agent-maturity-*`
+skills are hidden behind the single `/agent-adoption-assessment` command. An
+`off` skill stays in the repository and never reaches the image at all: it is
+also excluded in `.dockerignore`, and the build fails if the two disagree.
+
+A skill nobody declares is a `command`, which is what every skill was before
+this file existed. That default matters for uploads: a bundle is untrusted
+input and is never named in the declaration, so it can neither hide itself nor
+promote itself into the instructions.
+
+**Users** load an on-demand skill with a slash command. Typing `/` in the
+composer opens a menu of the skills the current agent profile can reach; arrow
+keys move the
 selection, Enter picks it, and Escape dismisses the menu without disturbing what
 has been typed. Picking one attaches it to the next message. Selection is per
 message, not per conversation: a skill is markdown the model reads on demand, so
@@ -113,10 +141,13 @@ catalogue cannot be read, the menu says so rather than appearing empty, because
 "this deployment ships no skills" and "the configuration store is unreachable"
 are different problems with different fixes.
 
-Every skill a profile can reach is offered automatically. A `commands.json`
+Every skill a profile can reach and the runtime marks as a `command` is offered
+automatically. A `commands.json`
 document layers curation on top, so an administrator can rename a command, give
 it a better description, hide one that has no business in a chat menu, or bundle
-several skills under a single name. `/agent-adoption-assessment` ships as a
+several skills under a single name — including a `builtin` or `hidden` skill,
+because an administrator asking for a menu row knows better than the default.
+`/agent-adoption-assessment` ships as a
 built-in example: it loads `agent-maturity-assess` and `agent-maturity-report`.
 
 **Administrators** upload skills from the console, as a zip or an HTTPS URL.

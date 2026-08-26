@@ -54,6 +54,7 @@ webui/                         # Independent Next.js + React + AG-UI app
 src/                           # Agent payload: persona, skills, tools, mcp.json
 ├── AGENTS.md                  # Persona and capability catalogue
 ├── mcp.json                   # Remote/local MCP server catalogue
+├── skill-availability.json    # Per-skill availability: builtin, command, hidden, off
 ├── skills/                    # <name>/SKILL.md definitions
 └── tools/                     # Python tools with CLI entry points
 ```
@@ -192,5 +193,5 @@ The Codex sandbox has no tool registry — only a shell. Capabilities are theref
 
 - **Persona**: `src/AGENTS.md` is concatenated with the hosted-agent guardrails in `hosted-agent/AGENTS.md` to form the Codex base instructions.
 - **Tools**: each module under `src/tools/` exposes an `argparse` CLI and is invoked as `python -m <tool>`.
-- **Skills**: each `src/skills/<name>/SKILL.md` is read on demand by the agent.
+- **Skills**: each `src/skills/<name>/SKILL.md` is read on demand by the agent. `src/skill-availability.json` declares how each one arrives — `builtin` skills are named in the base instructions with their own trigger description so the agent selects them itself, `command` skills are offered in the console's `/` menu, `hidden` skills are installed but neither advertised nor listed, and `off` skills are not installed at all and are excluded from the image in `.dockerignore`. A skill the file does not name is a `command`, which is what every skill was before the file existed; an uploaded bundle is never named there, so it can neither hide itself nor promote itself into the instructions. The map feeds `runtime_fingerprint`, because moving a skill to `hidden` leaves the rendered instructions identical while changing what the console may offer.
 - **MCP**: `src/mcp.json` is rendered into `[mcp_servers.*]` blocks in the generated Codex `config.toml`.

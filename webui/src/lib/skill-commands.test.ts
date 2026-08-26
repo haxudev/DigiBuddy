@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { Catalogue } from "./admin-config.ts";
+import type { Catalogue, CatalogueSkill } from "./admin-config.ts";
 import {
   BUILTIN_COMMANDS,
   MAX_COMMANDS,
@@ -22,17 +22,18 @@ import {
 } from "./skill-commands.ts";
 
 function catalogue(
-  skills: Array<[name: string, description: string]>,
+  skills: Array<[name: string, description: string, availability?: string]>,
 ): Catalogue {
   return {
     skills: skills.map(([name]) => name),
     tools: [],
     mcp_servers: [],
-    skill_entries: skills.map(([name, description]) => ({
+    skill_entries: skills.map(([name, description, availability]) => ({
       name,
       description,
       source: "packaged" as const,
       enabled: true,
+      availability: (availability ?? "command") as CatalogueSkill["availability"],
     })),
   };
 }
@@ -206,8 +207,73 @@ test("an override can hide a skill that has no business in a chat menu", () => {
   );
 });
 
-test("an override can bundle several skills under one name", () => {
+// --- Availability ----------------------------------------------------------
+
+const TIERED = catalogue([
+  ["acr-analysis", "Analyse consumed revenue.", "command"],
+  ["agent-maturity-assess", "Run a maturity assessment.", "hidden"],
+  ["agent-maturity-report", "Re-render a scored assessment.", "hidden"],
+  ["legacy", "A runtime that says nothing.", ""],
+  ["pptx", "Make slide decks.", "builtin"],
+]);
+
+test("a built-in skill loads itself rather than filling the menu", () => {
+  const commands = resolveCommands(TIERED, [], TIERED.skills);
+  assert.equal(
+    commands.find((entry) => entry.name === "pptx"),
+    undefined,
+  );
+  assert.ok(commands.find((entry) => entry.name === "acr-analysis"));
+});
+
+test("a hidden skill stays reachable through the command that bundles it", () => {
+  const commands = resolveCommands(TIERED, [], TIERED.skills);
+  // Neither sub-skill is a menu row of its own...
+  for (const name of ["agent-maturity-assess", "agent-maturity-report"]) {
+    assert.equal(
+      commands.find((entry) => entry.name === name),
+      undefined,
+    );
+  }
+  // ...but the curated command they exist to serve still resolves to both.
+  const bundle = commands.find(
+    (entry) => entry.name === "agent-adoption-assessment",
+  );
+  assert.deepEqual(bundle?.skills, [
+    "agent-maturity-assess",
+    "agent-maturity-report",
+  ]);
+});
+
+test("a runtime that says nothing keeps the menu it used to publish", () => {
+  // The console and the runtime roll out independently. Reading silence as
+  // "not a command" would empty the menu for as long as the older runtime is
+  // still answering.
+  const commands = resolveCommands(TIERED, [], TIERED.skills);
+  assert.ok(commands.find((entry) => entry.name === "legacy"));
+});
+
+test("an administrator may put a built-in skill back in the menu", () => {
   const commands = resolveCommands(
+    TIERED,
+    [{ name: "pptx", title: "Slide Decks" }],
+    TIERED.skills,
+  );
+  assert.equal(
+    commands.find((entry) => entry.name === "pptx")?.title,
+    "Slide Decks",
+  );
+});
+
+test("an override cannot reach a built-in skill outside the profile", () => {
+  const commands = resolveCommands(TIERED, [{ name: "pptx" }], ["acr-analysis"]);
+  assert.equal(
+    commands.find((entry) => entry.name === "pptx"),
+    undefined,
+  );
+});
+
+test("an override can bundle several skills under one name", () => {  const commands = resolveCommands(
     CATALOGUE,
     [
       {

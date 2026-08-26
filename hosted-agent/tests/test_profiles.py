@@ -2,11 +2,38 @@ import unittest
 
 from codex_adapter.profiles import (
     DEFAULT_PROFILE,
+    SkillEntry,
     UnknownProfileError,
     parse_profiles,
     profile_fingerprint,
     resolve_profile,
 )
+
+
+class SkillEntryTests(unittest.TestCase):
+    def test_the_document_carries_everything_the_console_reads(self):
+        entry = SkillEntry(
+            name="pptx",
+            description="Make decks.",
+            source="packaged",
+            availability="builtin",
+        )
+
+        self.assertEqual(
+            entry.as_document(),
+            {
+                "name": "pptx",
+                "description": "Make decks.",
+                "source": "packaged",
+                "enabled": True,
+                "availability": "builtin",
+            },
+        )
+
+    def test_an_entry_that_says_nothing_is_an_ordinary_command(self):
+        # The default has to be the pre-existing behaviour: an uploaded skill
+        # never appears in the declaration, and must stay in the menu.
+        self.assertEqual(SkillEntry(name="uploaded").availability, "command")
 
 
 class ParseProfilesTests(unittest.TestCase):

@@ -36,6 +36,14 @@ from .skills import (
     registry_fingerprint,
     skill_policy_fingerprint,
 )
+from .availability import (
+    BUILTIN,
+    COMMAND,
+    OFF,
+    availability_fingerprint,
+    availability_of,
+    load_availability,
+)
 from .frontmatter import read_skill_frontmatter
 from .profiles import (
     DEFAULT_PROFILE,
@@ -674,12 +682,19 @@ def build_catalogue(
     described: dict[str, str] = {}
     skills = set()
     policy = load_skill_policy(store)
+    availability = load_availability(settings.payload_root)
     for skills_root in (settings.payload_root / "skills", settings.skills_source):
         if not skills_root.is_dir():
             continue
         for entry in skills_root.iterdir():
             skill_md = entry / "SKILL.md"
             if not entry.is_dir() or not skill_md.is_file():
+                continue
+            # An `off` skill is not part of this image as far as anything
+            # downstream is concerned. Dropping it here rather than filtering
+            # later means it cannot be assigned to a profile, offered in the
+            # menu, or listed in the admin console.
+            if availability_of(availability, entry.name) == OFF:
                 continue
             skills.add(entry.name)
             # First root wins: `payload_root` is the assembled payload and
@@ -737,6 +752,14 @@ def build_catalogue(
                     name not in policy.disabled
                     if name in described
                     else deployed_entries[name].active
+                ),
+                # Only a packaged skill may declare anything but the default:
+                # the declaration ships in the image, and an uploaded bundle is
+                # never named in it.
+                availability=(
+                    availability_of(availability, name)
+                    if name in described
+                    else COMMAND
                 ),
             )
             for name in sorted(set(described) | set(deployed_entries))
@@ -829,29 +852,80 @@ def render_codex_config(
     return "\n".join(lines) + "\n"
 
 
+#: How much of a skill's own description travels into the instructions.
+#: Enough to decide whether a request matches, not the skill itself -- `pptx`
+#: alone runs to nearly 700 characters, and twenty of those would put a small
+#: manual in front of every conversation.
+MAX_CATALOGUE_DESCRIPTION = 240
+
+
+def _summarise(description: str) -> str:
+    """One line about a skill, cut at a word boundary rather than mid-word."""
+    text = " ".join(description.split())
+    if len(text) <= MAX_CATALOGUE_DESCRIPTION:
+        return text
+    cut = text[:MAX_CATALOGUE_DESCRIPTION]
+    spaced = cut.rsplit(" ", 1)[0]
+    # CJK descriptions have no spaces to cut at, so a word boundary may not
+    # exist. Falling back to the hard cut keeps those readable rather than
+    # emptying them.
+    return (spaced if len(spaced) > MAX_CATALOGUE_DESCRIPTION // 2 else cut) + "…"
+
+
 def _skill_catalogue(
     settings: RuntimeSettings, profile: AgentProfile, store: ConfigStore | None = None
 ) -> str:
+    """The skills this profile can reach, split by how they are meant to arrive.
+
+    Built-in skills are named with their own trigger description because the
+    agent is the one choosing them: it can only reach for `pptx` at the right
+    moment if it knows what the right moment looks like. On-demand skills are
+    named only, since the user invoking `/name` has already made the choice.
+
+    Hidden skills appear in neither. They are installed and a curated command
+    may still bundle one, but advertising them here would put implementation
+    detail in front of the model with nothing for it to decide.
+    """
     root = settings.payload_root / "skills"
     if not root.is_dir():
         return ""
     disabled = load_skill_policy(store).disabled
-    names = sorted(
-        entry.name
-        for entry in root.iterdir()
-        if entry.is_dir()
-        and (entry / "SKILL.md").is_file()
-        and profile.allows_skill(entry.name)
-        and entry.name not in disabled
-    )
-    if not names:
-        return ""
-    listing = "\n".join(f"- {name}" for name in names)
-    return (
-        "## Assembled skills\n\n"
-        f"Only these skills are available for this agent profile. Read "
-        f"`$DIGIBUDDY_SKILLS_ROOT/<name>/SKILL.md` on demand.\n\n{listing}"
-    )
+    availability = load_availability(settings.payload_root)
+    builtin: list[str] = []
+    on_demand: list[str] = []
+    for entry in sorted(root.iterdir(), key=lambda path: path.name):
+        skill_md = entry / "SKILL.md"
+        if not entry.is_dir() or not skill_md.is_file():
+            continue
+        if not profile.allows_skill(entry.name) or entry.name in disabled:
+            continue
+        declared = availability_of(availability, entry.name)
+        if declared == BUILTIN:
+            summary = _summarise(read_skill_frontmatter(skill_md).description)
+            builtin.append(f"- {entry.name}{f' — {summary}' if summary else ''}")
+        elif declared == COMMAND:
+            on_demand.append(f"- {entry.name}")
+
+    sections: list[str] = []
+    if builtin:
+        listing = "\n".join(builtin)
+        sections.append(
+            "## Built-in skills\n\n"
+            "These load themselves. As soon as a request matches one, read "
+            "`$DIGIBUDDY_SKILLS_ROOT/<name>/SKILL.md` and follow it — do not "
+            "wait to be asked for it by name, and do not improvise a workflow "
+            "a skill already describes.\n\n"
+            f"{listing}"
+        )
+    if on_demand:
+        listing = "\n".join(on_demand)
+        sections.append(
+            "## On-demand skills\n\n"
+            "Available when the user asks for one. Read "
+            f"`$DIGIBUDDY_SKILLS_ROOT/<name>/SKILL.md` before acting on it.\n\n"
+            f"{listing}"
+        )
+    return "\n\n".join(sections)
 
 
 def load_instructions(
@@ -892,6 +966,7 @@ def runtime_fingerprint(
         render_codex_config(settings, store, profile, reasoning_effort),
         registry_fingerprint(load_registry(store)),
         skill_policy_fingerprint(load_skill_policy(store)),
+        availability_fingerprint(load_availability(settings.payload_root)),
         load_instructions(settings, profile, store),
         profile_fingerprint(profile),
         # The resolved values, not the bindings that name them: a rotation that
@@ -992,8 +1067,14 @@ def install_global_skills(
 
     active = profile or DEFAULT_PROFILE
     disabled = load_skill_policy(store).disabled
+    availability = load_availability(settings.payload_root)
     installed = 0
     for candidate in candidates:
+        # After the manifest assertion, deliberately: the manifest says what the
+        # image is supposed to carry, and an `off` skill that never shipped
+        # would otherwise read as a source that had silently stopped publishing.
+        if availability_of(availability, candidate.name) == OFF:
+            continue
         if candidate.name in disabled or not active.allows_skill(candidate.name):
             continue
         destination = target / candidate.name

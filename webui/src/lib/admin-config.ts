@@ -185,6 +185,18 @@ export type CatalogueSkill = {
    */
   source: "packaged" | "deployed" | "";
   enabled: boolean;
+  /**
+   * How the skill is meant to be reached: `builtin` loads itself, `command`
+   * belongs in the chat menu, `hidden` is installed but neither advertised nor
+   * offered.
+   *
+   * Empty means the runtime did not say, and is read as `command` — that is
+   * what every skill was before this field existed, so a console that has
+   * rolled out ahead of its runtime keeps offering the same menu instead of
+   * emptying it. `off` never appears: such a skill is absent from the
+   * catalogue entirely.
+   */
+  availability: "builtin" | "command" | "hidden" | "";
 };
 
 export type Catalogue = {
@@ -547,6 +559,7 @@ export function normaliseCatalogue(input: unknown): Catalogue {
       if (!name || seen.has(name)) continue;
       seen.add(name);
       const source = text(entry.source);
+      const availability = text(entry.availability);
       skill_entries.push({
         name,
         description: text(entry.description),
@@ -558,6 +571,12 @@ export function normaliseCatalogue(input: unknown): Catalogue {
         // the missing bit from the active set instead of pretending every
         // inventory row is enabled.
         enabled: typeof entry.enabled === "boolean" ? entry.enabled : active.has(name),
+        availability:
+          availability === "builtin" ||
+          availability === "command" ||
+          availability === "hidden"
+            ? (availability as CatalogueSkill["availability"])
+            : "",
       });
     }
   }
@@ -575,6 +594,7 @@ export function normaliseCatalogue(input: unknown): Catalogue {
           description: "",
           source: "" as const,
           enabled: true,
+          availability: "" as const,
         })),
   };
 }

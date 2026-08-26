@@ -24,6 +24,21 @@ The runtime concatenates the hosted-agent guardrails with the payload persona in
 
 `/workspace` is per-container scratch that is never committed anywhere, but a skill cannot tell that from the inside — each turn runs in `/workspace/conversations/<id>`, where the sandbox masks `.git` with an empty read-only directory that looks like a repository to anything probing for one. Superclarity refuses to create its `.superclarity/` state in a git workspace that would track it, and asks the caller to confirm first — a question that costs a turn and has no useful answer here. Both the root and each conversation directory therefore get the ignore rule the skill looks for, appended to any existing `.gitignore` rather than replacing it.
 
+### Skill availability
+
+Most skills are not things a user picks. `pptx` and `html-report` are things the agent should reach for the moment a request needs them, and a chat menu holding every skill in the image is a directory listing rather than a menu. `src/skill-availability.json` gives each skill one of four availabilities:
+
+| Availability | Installed | Named in the instructions | In the `/` menu |
+| --- | --- | --- | --- |
+| `builtin` | yes | yes, with its own trigger description | no |
+| `command` (default) | yes | yes, by name | yes |
+| `hidden` | yes | no | no |
+| `off` | no | no | no |
+
+A `builtin` skill is listed in the base instructions with a summary of its own frontmatter description, capped so twenty of them do not become a small manual — enough for the agent to recognise the moment it applies, not enough to replace reading the skill. A `command` skill is named only, since the user invoking `/name` has already made the choice. A `hidden` skill is installed and still reachable through a command that bundles it: the four `agent-maturity-*` skills sit behind the single `/agent-adoption-assessment` entry. An `off` skill never reaches the image at all — it is excluded in `.dockerignore` as well, and the build fails if the declaration and the exclusions disagree.
+
+The declaration lives in one file rather than in each `SKILL.md` because `hosted-agent/skills` is a vendored snapshot that `scripts/sync-agent-skills.sh --check` diffs against its locked upstream; a frontmatter key added there would fail CI and be erased by the next sync. An entry only describes a skill and never grants one — the profile's skill list and `skill-policy.json` still decide what a conversation may reach.
+
 ## Turn Inputs
 
 A turn may carry more than text. Responses `input_image` and `input_file` parts are written into `<workspace>/uploads` and their paths are appended to the prompt, so Codex opens attachments as ordinary files; a per-turn budget caps how much is materialised. A `reasoning.effort` of `minimal`, `low`, `medium`, or `high` overrides the configured thinking strength for that turn and restarts the Codex engine through its configuration fingerprint.
@@ -116,6 +131,8 @@ Chat authentication can be limited to company accounts. With `AUTH_REQUIRE_CORPO
 Production deployments can configure `ADMIN_USERNAME`, a scrypt `ADMIN_PASSWORD_HASH`, and `ADMIN_SESSION_SECRET` to show a dedicated login mask and issue an eight-hour HttpOnly, SameSite cookie. This mode takes precedence over Easy Auth. When it is not configured, `requireAdmin` reads the Easy Auth `x-ms-client-principal` header and checks the caller against `ADMIN_PRINCIPAL_IDS`; an empty allowlist denies everyone. Anonymous local access needs an explicit `ADMIN_ALLOW_ANONYMOUS=true` opt-in that is ignored when `NODE_ENV=production`.
 
 The model API key is write-only: reads return `api_key_set` instead of the value, and saving with the field blank preserves the stored secret. Every write is audited to the log with the document name and the caller, without values. `catalogue.json` is read-only from the console.
+
+The console lists every installed skill, including the `builtin` and `hidden` ones the chat menu leaves out, and marks which is which — an admin looking for a skill that is missing from `/` needs to see that it exists and why it is not offered, not an empty result. A command written by hand in `commands.json` still surfaces any of them, because an admin asking for a menu row means it.
 
 ## Artifact Delivery
 
