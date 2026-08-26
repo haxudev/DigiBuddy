@@ -57,6 +57,8 @@ A broad retrieval can answer with hundreds of kilobytes in a single tool result,
 
 Every remote server goes through the same bridge. Codex's built-in remote MCP client registered zero tools for `microsoft-learn` inside the Foundry sandbox even though the endpoint answers normally from that container, so the catalogue routes it through `mcp_http_proxy` with no `MCP_HTTP_PROXY_SCOPE`: an empty scope means the bridge sends no `Authorization` header, which is what a public endpoint expects. Plaintext URLs are still refused.
 
+Codex starts an MCP server once per session and drops it for good if the handshake fails, so a single timeout while the container is warming up costs the knowledge base for the rest of that conversation — which reads to the user as the agent ignoring it. The bridge therefore retries a transient failure (a connection fault, or 408/425/429/5xx) up to three times with growing backoff, while a rejected request is reported immediately. `startup_timeout_sec` and `tool_timeout_sec` in the catalogue apply to every server whatever its transport; an out-of-range value is ignored rather than clamped, because a timeout quietly changed to something else is worse than Codex's own default. When a server does fail to start, the adapter logs the server name and Codex's reason, so a missing tool is diagnosable instead of invisible.
+
 Every profile that restricts `mcp_servers` still lists `foundry-iq`, and `src/AGENTS.md` routes internal and field questions to it before the local `work_memory/` corpus and before Microsoft Learn.
 
 ## Runtime Configuration Store
@@ -145,6 +147,10 @@ The `sharepoint` tool resolves sharing links through Microsoft Graph using MSAL,
 ## Session Persistence
 
 Each Responses conversation maps to a Codex thread. Passing `previous_response_id` resumes the thread with `thread/resume`, preserving workspace state and conversation history across turns.
+
+Codex keeps that thread under `CODEX_HOME`, which does not outlive the session container, while the console keeps sending the response id that names it. When resuming fails the adapter opens a new thread in the conversation's existing workspace instead of failing the turn: losing the engine's memory of the conversation is recoverable, and the files it produced are still there, whereas the previous behaviour failed every later turn in that conversation the same way with no way back. A resume that fails because the engine itself died is not papered over — `_request` has already restarted it, and the next turn recovers against a live one.
+
+A turn that fails part-way through now says why. Codex reports the reason on `turn/completed` and in its `error` notification, and the adapter used to discard all of it, so a rate limit, a context overflow and a crashed engine were indistinguishable from each other and reached the user as a bare internal server error. The reason is logged and, when the turn produced no other output, returned as the assistant's answer. `additionalDetails` is excluded because it can carry whatever a tool printed. A turn that ends empty with no reason given is still an error, because that is a bug rather than an answer.
 
 ## Knowledge-Backed Responses
 

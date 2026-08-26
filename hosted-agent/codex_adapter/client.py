@@ -225,7 +225,9 @@ class CodexRuntime:
 
             thread_id = binding.thread_id if binding else None
             if thread_id:
-                await self._resume_thread(thread_id, model, active, workspace)
+                thread_id = await self._resume_thread(
+                    thread_id, model, active, workspace
+                )
             else:
                 thread_id = await self._start_thread(model, active, workspace)
             self._thread_map.bind(response_id, thread_id, active.name, workspace_id)
@@ -368,13 +370,37 @@ class CodexRuntime:
         model: str | None,
         profile: AgentProfile,
         workspace: Path,
-    ) -> None:
+    ) -> str:
+        """Continue the conversation's thread, or open a new one in its place.
+
+        Codex keeps thread state under `CODEX_HOME`, which does not outlive the
+        session container, while the console keeps sending the response id that
+        names the thread. Once resuming failed, every later turn in that
+        conversation failed the same way and the user saw an internal error
+        with no way back. Losing the engine's memory of the conversation is
+        recoverable; refusing to talk is not. The workspace is unchanged, so
+        the files the conversation produced are still there.
+        """
         if thread_id in self._loaded_threads:
-            return
+            return thread_id
         params = self._thread_params(model, profile, workspace)
         params["threadId"] = thread_id
-        await self._request("thread/resume", params)
+        try:
+            await self._request("thread/resume", params)
+        except CodexProtocolError:
+            if self._process is None or self._process.returncode is not None:
+                # The engine itself is gone -- `_request` already restarted it,
+                # and starting a thread now would write to a closed pipe. The
+                # next turn resumes against a live engine and recovers there.
+                raise
+            logger.warning(
+                "Could not resume Codex thread %s; continuing in a new thread",
+                thread_id,
+                exc_info=True,
+            )
+            return await self._start_thread(model, profile, workspace)
         self._loaded_threads.add(thread_id)
+        return thread_id
 
     async def _request(self, method: str, params: dict[str, Any]) -> Any:
         self._request_id += 1

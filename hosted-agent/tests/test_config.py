@@ -1210,3 +1210,56 @@ class WorkspaceScratchStateTests(unittest.TestCase):
 
             body = (configured.workspace / ".gitignore").read_text(encoding="utf-8")
             self.assertEqual(body.count(".superclarity/"), 1)
+
+
+class McpTimeoutTests(unittest.TestCase):
+    """The one lever an operator has over a slow MCP endpoint.
+
+    Every remote server now reaches Codex through the stdio bridge, so a
+    timeout configured against the HTTP shape used to be dropped on the floor.
+    """
+
+    def _servers(self, directory, server):
+        root = Path(directory) / "payload"
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "mcp.json").write_text(
+            json.dumps({"servers": {"probe": server}}), encoding="utf-8"
+        )
+        return load_mcp_servers(settings(payload_root=root))["probe"]
+
+    def _stdio(self, **extra):
+        return {"command": "python", "args": ["-m", "probe"], **extra}
+
+    def test_a_stdio_server_keeps_its_configured_timeouts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            entry = self._servers(
+                directory,
+                self._stdio(startup_timeout_sec=90, tool_timeout_sec=600),
+            )
+
+            self.assertEqual(entry["startup_timeout_sec"], 90)
+            self.assertEqual(entry["tool_timeout_sec"], 600)
+
+    def test_an_unconfigured_server_leaves_codex_its_own_defaults(self):
+        with tempfile.TemporaryDirectory() as directory:
+            entry = self._servers(directory, self._stdio())
+
+            self.assertNotIn("startup_timeout_sec", entry)
+            self.assertNotIn("tool_timeout_sec", entry)
+
+    def test_a_nonsense_timeout_is_ignored_rather_than_clamped(self):
+        # A timeout quietly changed to something else is worse than the default.
+        with tempfile.TemporaryDirectory() as directory:
+            entry = self._servers(
+                directory,
+                self._stdio(startup_timeout_sec=0, tool_timeout_sec="soon"),
+            )
+
+            self.assertNotIn("startup_timeout_sec", entry)
+            self.assertNotIn("tool_timeout_sec", entry)
+
+    def test_a_boolean_is_not_mistaken_for_a_number_of_seconds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            entry = self._servers(directory, self._stdio(startup_timeout_sec=True))
+
+            self.assertNotIn("startup_timeout_sec", entry)

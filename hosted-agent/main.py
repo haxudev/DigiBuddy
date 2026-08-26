@@ -162,6 +162,19 @@ def _unknown_profile_message(error: UnknownProfileError) -> str:
     )
 
 
+def _turn_failure_message(failure: str) -> str:
+    """Say why the turn produced nothing, in Codex's own words.
+
+    A turn that fails part-way through used to surface as a bare internal
+    server error, so a rate limit, a context overflow and a crashed engine were
+    indistinguishable to the user and to us.
+    """
+    return (
+        "I could not complete this turn. The agent runtime reported: "
+        f"{failure.strip()}"
+    )
+
+
 async def _turn_events(
     prompt: str,
     *,
@@ -245,6 +258,7 @@ async def handle_response(
     artifacts: list[dict[str, object]] = []
     artifact_failures = 0
     effective_profile: dict[str, object] | None = None
+    failure = ""
 
     def open_reasoning():
         nonlocal reasoning, reasoning_part, reasoning_text
@@ -282,6 +296,33 @@ async def handle_response(
 
         if event.type == PROFILE_EVENT:
             effective_profile = dict(event.data)
+
+        elif event.type == "mcp.startup":
+            # A server that fails to start is dropped silently by Codex and its
+            # tools simply never appear, which reads to the user as the agent
+            # ignoring its knowledge base. Record it so the cause is visible.
+            if str(event.data.get("status") or "").lower() == "failed":
+                logger.error(
+                    "MCP server %s failed to start: %s%s",
+                    event.data.get("server") or "unknown",
+                    event.data.get("message") or "no reason given",
+                    (
+                        f" [{event.data['reason']}]"
+                        if event.data.get("reason")
+                        else ""
+                    ),
+                )
+
+        elif event.type == "turn.error":
+            detail = str(event.data.get("message") or "")
+            if event.data.get("will_retry"):
+                logger.warning("Codex turn error (retrying): %s", detail)
+            else:
+                logger.error("Codex turn error: %s", detail)
+                failure = detail or failure
+
+        elif event.type == "task.failed":
+            failure = str(event.data.get("message") or "") or failure
 
         elif event.type == ARTIFACT_EVENT:
             values = event.data.get("artifacts")
@@ -390,7 +431,19 @@ async def handle_response(
         yield text.emit_delta(metadata)
 
     if not output:
-        raise RuntimeError("Codex turn completed without assistant output")
+        # Codex told us why it stopped, so tell the user. Raising here turned
+        # an explicable failure -- a rate limit, a context overflow -- into an
+        # internal server error that neither they nor we could act on.
+        if not failure:
+            raise RuntimeError("Codex turn completed without assistant output")
+        logger.error("Codex turn failed: %s", failure)
+        explanation = _turn_failure_message(failure)
+        message = stream.add_output_item_message()
+        yield message.emit_added()
+        text = message.add_text_content()
+        yield text.emit_added()
+        output = explanation
+        yield text.emit_delta(explanation)
     if text is None:
         message = stream.add_output_item_message()
         yield message.emit_added()

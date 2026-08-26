@@ -525,3 +525,124 @@ class ConversationScratchStateTests(unittest.TestCase):
                 self.assertTrue(self.GUARD.search(body), body)
 
         asyncio.run(exercise())
+
+
+class LostThreadTests(unittest.TestCase):
+    """Codex thread state does not outlive the session container.
+
+    The console keeps sending the response id that names the thread, so once
+    resuming failed every later turn in that conversation failed the same way
+    and the user saw an internal error with no way back.
+    """
+
+    def _runtime(self, directory, *, resume_error, alive=True):
+        current = settings(directory)
+        current.workspace.mkdir(parents=True, exist_ok=True)
+        current.instructions_path.write_text("persona", encoding="utf-8")
+        runtime = CodexRuntime(current, NullConfigStore())
+        started: list[str] = []
+
+        class Process:
+            returncode = None if alive else 1
+
+        runtime._process = Process()
+
+        async def ensure_started(_profile, _reasoning_effort=""):
+            return None
+
+        async def request(method, _params):
+            if method == "thread/resume":
+                if resume_error:
+                    raise CodexProtocolError(resume_error)
+                return {}
+            if method == "thread/start":
+                started.append("start")
+                return {"thread": {"id": f"thread-{len(started) + 1}"}}
+            return {"turn": {"id": "turn-1"}}
+
+        async def next_message(_cancellation):
+            return {
+                "method": "turn/completed",
+                "params": {"turn": {"id": "turn-1", "status": "completed"}},
+            }
+
+        runtime._ensure_started = ensure_started
+        runtime._request = request
+        runtime._next_turn_message = next_message
+        return runtime, started
+
+    async def _turn(self, runtime, *, previous, response_id):
+        return [
+            event
+            async for event in runtime.stream_turn(
+                "carry on",
+                previous_response_id=previous,
+                response_id=response_id,
+                cancellation_signal=asyncio.Event(),
+            )
+        ]
+
+    def test_a_conversation_survives_a_thread_the_engine_no_longer_has(self):
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                runtime, started = self._runtime(
+                    directory, resume_error="thread/resume failed: not found"
+                )
+                runtime._thread_map.bind("r1", "thread-gone", "digibuddy", "ws")
+
+                await self._turn(runtime, previous="r1", response_id="r2")
+
+                # A fresh thread took its place, and the conversation is now
+                # bound to that one rather than to the thread that is gone.
+                self.assertEqual(len(started), 1)
+                binding = runtime._thread_map.lookup("r2")
+                self.assertNotEqual(binding.thread_id, "thread-gone")
+
+        asyncio.run(exercise())
+
+    def test_the_conversation_keeps_the_workspace_it_already_owns(self):
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                runtime, _ = self._runtime(
+                    directory, resume_error="thread/resume failed: not found"
+                )
+                runtime._thread_map.bind("r1", "thread-gone", "digibuddy", "keepme")
+
+                await self._turn(runtime, previous="r1", response_id="r2")
+
+                self.assertEqual(runtime._thread_map.lookup("r2").workspace_id, "keepme")
+
+        asyncio.run(exercise())
+
+    def test_a_dead_engine_is_not_papered_over(self):
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                runtime, started = self._runtime(
+                    directory,
+                    resume_error="thread/resume timed out",
+                    alive=False,
+                )
+                runtime._thread_map.bind("r1", "thread-gone", "digibuddy", "ws")
+
+                # `_request` already restarted the engine, so starting a thread
+                # now would write to a closed pipe.
+                with self.assertRaises(CodexProtocolError):
+                    await self._turn(runtime, previous="r1", response_id="r2")
+                self.assertEqual(started, [])
+
+        asyncio.run(exercise())
+
+    def test_a_thread_that_resumes_is_left_alone(self):
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                runtime, started = self._runtime(directory, resume_error="")
+                runtime._thread_map.bind("r1", "thread-kept", "digibuddy", "ws")
+
+                await self._turn(runtime, previous="r1", response_id="r2")
+
+                self.assertEqual(started, [])
+                self.assertEqual(
+                    runtime._thread_map.lookup("r2").thread_id, "thread-kept"
+                )
+
+        asyncio.run(exercise())

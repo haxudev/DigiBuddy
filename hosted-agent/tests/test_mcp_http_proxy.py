@@ -1,6 +1,8 @@
 import importlib.util
+import io
 import json
 import unittest
+import urllib.error
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -245,3 +247,111 @@ class OversizedResultTests(unittest.TestCase):
         )
 
         self.assertEqual(len(response[0]["result"]["content"][0]["text"]), 500)
+
+
+class FlakyOpener:
+    """Fails the first `failures` attempts, then answers."""
+
+    def __init__(self, failures, response):
+        self._failures = list(failures)
+        self._response = response
+        self.attempts = 0
+
+    def open(self, request, timeout):
+        self.attempts += 1
+        if self._failures:
+            raise self._failures.pop(0)
+        return self._response
+
+
+def http_error(code, body=b"upstream is busy"):
+    return urllib.error.HTTPError(
+        "https://mcp.example/mcp", code, "boom", {}, io.BytesIO(body)
+    )
+
+
+class TransientFailureTests(unittest.TestCase):
+    """Codex starts an MCP server once and drops it for good if it fails.
+
+    A single timeout while the container is warming up therefore costs the
+    knowledge base for the rest of the session, which reads to the user as the
+    agent ignoring it.
+    """
+
+    def _proxy(self, opener, **overrides):
+        slept: list[float] = []
+        proxy = mcp_http_proxy.McpHttpProxy(
+            "https://mcp.example/mcp",
+            "api://mcp/.default",
+            credential=FakeCredential(),
+            opener=opener,
+            sleep=slept.append,
+            **overrides,
+        )
+        return proxy, slept
+
+    def _ok(self):
+        return FakeResponse(
+            json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}).encode(),
+            {"Content-Type": "application/json"},
+        )
+
+    def test_a_handshake_survives_a_server_that_is_still_warming_up(self):
+        opener = FlakyOpener([http_error(503)], self._ok())
+        proxy, slept = self._proxy(opener)
+
+        response = proxy.exchange({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+
+        self.assertEqual(response[0]["result"], {})
+        self.assertEqual(opener.attempts, 2)
+        self.assertEqual(len(slept), 1)
+
+    def test_a_network_fault_is_retried_too(self):
+        opener = FlakyOpener([urllib.error.URLError("connection reset")], self._ok())
+        proxy, _ = self._proxy(opener)
+
+        proxy.exchange({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+
+        self.assertEqual(opener.attempts, 2)
+
+    def test_a_rejected_request_is_not_retried(self):
+        # It would fail the same way every time, and the caller waits for it.
+        opener = FlakyOpener([http_error(400, b"bad arguments")] * 3, self._ok())
+        proxy, slept = self._proxy(opener)
+
+        with self.assertRaises(RuntimeError) as caught:
+            proxy.exchange({"jsonrpc": "2.0", "id": 1, "method": "tools/call"})
+
+        self.assertIn("400", str(caught.exception))
+        self.assertEqual(opener.attempts, 1)
+        self.assertEqual(slept, [])
+
+    def test_retrying_gives_up_and_reports_the_last_failure(self):
+        opener = FlakyOpener([http_error(503)] * 5, self._ok())
+        proxy, slept = self._proxy(opener)
+
+        with self.assertRaises(RuntimeError) as caught:
+            proxy.exchange({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+
+        self.assertIn("503", str(caught.exception))
+        self.assertEqual(opener.attempts, mcp_http_proxy.RETRY_ATTEMPTS)
+        self.assertEqual(len(slept), mcp_http_proxy.RETRY_ATTEMPTS - 1)
+
+    def test_the_wait_grows_between_attempts(self):
+        opener = FlakyOpener([http_error(503)] * 5, self._ok())
+        proxy, slept = self._proxy(opener)
+
+        with self.assertRaises(RuntimeError):
+            proxy.exchange({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+
+        self.assertEqual(slept, sorted(slept))
+        self.assertGreater(slept[-1], slept[0])
+
+    def test_a_healthy_server_is_called_once(self):
+        opener = FlakyOpener([], self._ok())
+        proxy, slept = self._proxy(opener)
+
+        proxy.exchange({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+
+        self.assertEqual(opener.attempts, 1)
+        self.assertEqual(slept, [])

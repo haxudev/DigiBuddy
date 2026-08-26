@@ -89,6 +89,28 @@ def completion_delta(streamed: str, completed: str) -> str:
     return completed if not streamed else ""
 
 
+def turn_error_message(error: Any) -> str:
+    """Read why Codex gave up, in the words it used.
+
+    A failed turn used to reach the caller as a bare internal server error:
+    Codex says what went wrong -- a rate limit, a context overflow, a sandbox
+    refusal -- and the adapter discarded all of it. `additionalDetails` is
+    excluded because it can carry whatever a tool printed.
+    """
+    if not isinstance(error, dict):
+        return ""
+    message = _first_text(error.get("message"))
+    info = error.get("codexErrorInfo")
+    code = ""
+    if isinstance(info, dict):
+        code = _first_text(info.get("type"), info.get("code"))
+    elif isinstance(info, str):
+        code = _first_text(info)
+    if message and code and code.lower() not in message.lower():
+        return f"{message} ({code})"
+    return message or code
+
+
 def translate_notification(message: dict[str, Any]) -> list[RuntimeEvent]:
     method = str(message.get("method") or "")
     params = message.get("params")
@@ -155,7 +177,48 @@ def translate_notification(message: dict[str, Any]) -> list[RuntimeEvent]:
     if method == "turn/completed":
         turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
         status = str(turn.get("status") or "completed")
-        event_type = "task.failed" if status == "failed" else "task.completed"
-        return [RuntimeEvent(event_type, {"status": status, "turn_id": turn.get("id")})]
+        if status != "failed":
+            return [
+                RuntimeEvent(
+                    "task.completed", {"status": status, "turn_id": turn.get("id")}
+                )
+            ]
+        return [
+            RuntimeEvent(
+                "task.failed",
+                {
+                    "status": status,
+                    "turn_id": turn.get("id"),
+                    "message": turn_error_message(turn.get("error")),
+                },
+            )
+        ]
+
+    if method == "error":
+        # Codex reports the reason here and repeats the failure on
+        # `turn/completed`. A retried error is not the end of the turn, so it
+        # is recorded rather than treated as the outcome.
+        return [
+            RuntimeEvent(
+                "turn.error",
+                {
+                    "message": turn_error_message(params.get("error")),
+                    "will_retry": bool(params.get("willRetry")),
+                },
+            )
+        ]
+
+    if method == "mcpServer/startupStatus/updated":
+        return [
+            RuntimeEvent(
+                "mcp.startup",
+                {
+                    "server": _first_text(params.get("name")),
+                    "status": _first_text(params.get("status")) or "unknown",
+                    "message": _first_text(params.get("error")),
+                    "reason": _first_text(params.get("failureReason")),
+                },
+            )
+        ]
 
     return []

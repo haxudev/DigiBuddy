@@ -383,3 +383,49 @@ class HandleResponseArtifactStreamTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FailedTurnStreamTests(HandleResponseArtifactStreamTests):
+    """An explicable failure is an answer, not an internal server error."""
+
+    def test_a_failed_turn_tells_the_user_what_the_runtime_reported(self):
+        events = self._run(
+            [
+                RuntimeEvent(
+                    "task.failed",
+                    {"status": "failed", "message": "context window exceeded"},
+                )
+            ]
+        )
+
+        text = self._assistant_text(events)
+        self.assertIn("context window exceeded", text)
+
+    def test_a_retried_error_is_not_treated_as_the_outcome(self):
+        events = self._run(
+            [
+                RuntimeEvent(
+                    "turn.error", {"message": "rate limited", "will_retry": True}
+                ),
+                RuntimeEvent("assistant.message.delta", {"delta": "here you go"}),
+            ]
+        )
+
+        self.assertIn("here you go", self._assistant_text(events))
+
+    def test_a_failure_after_real_output_does_not_replace_the_answer(self):
+        events = self._run(
+            [
+                RuntimeEvent("assistant.message.delta", {"delta": "partial answer"}),
+                RuntimeEvent("task.failed", {"status": "failed", "message": "boom"}),
+            ]
+        )
+
+        text = self._assistant_text(events)
+        self.assertIn("partial answer", text)
+        self.assertNotIn("could not complete", text)
+
+    def test_an_unexplained_empty_turn_is_still_an_error(self):
+        # Nothing to tell the user, and silence would look like a valid answer.
+        with self.assertRaises(RuntimeError):
+            self._run([RuntimeEvent("task.completed", {"status": "completed"})])

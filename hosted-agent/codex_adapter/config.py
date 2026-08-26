@@ -434,6 +434,26 @@ def _mcp_approval_mode(name: str, server: dict[str, Any]) -> str:
     return requested
 
 
+def _mcp_timeouts(server: dict[str, Any]) -> dict[str, float]:
+    """Carry the configured startup and tool timeouts, whatever the transport.
+
+    Codex starts a server once and drops it for the rest of the session if the
+    handshake times out, so this is the only lever an operator has over a slow
+    endpoint. Out-of-range values are ignored rather than clamped: a timeout
+    quietly changed to something else is worse than Codex's own default.
+    """
+    timeouts: dict[str, float] = {}
+    for key, ceiling in (("startup_timeout_sec", 300), ("tool_timeout_sec", 3600)):
+        value = server.get(key)
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and 1 <= value <= ceiling
+        ):
+            timeouts[key] = value
+    return timeouts
+
+
 def load_mcp_servers(
     settings: RuntimeSettings,
     store: ConfigStore | None = None,
@@ -478,13 +498,6 @@ def load_mcp_servers(
                 entry["bearer_token_env_var"] = token_env
             if profile is not None and profile_credentials_enabled():
                 entry["bearer_token_env_var"] = SLOT_VARIABLES["mcp_bearer_token"]
-            startup_timeout = server.get("startup_timeout_sec")
-            if (
-                isinstance(startup_timeout, (int, float))
-                and not isinstance(startup_timeout, bool)
-                and 1 <= startup_timeout <= 120
-            ):
-                entry["startup_timeout_sec"] = startup_timeout
         elif command:
             entry = {"command": command}
             args = server.get("args")
@@ -499,6 +512,10 @@ def load_mcp_servers(
             entry["env"] = _stdio_server_environment(settings, resolved_env)
         else:
             continue
+        # Every remote server now reaches Codex through the stdio bridge, so a
+        # timeout configured against the HTTP shape used to be silently
+        # dropped -- the one knob for a slow endpoint did nothing.
+        entry.update(_mcp_timeouts(server))
         entry["default_tools_approval_mode"] = _mcp_approval_mode(name, server)
         resolved[name] = entry
     return resolved
@@ -565,6 +582,8 @@ def pack_mcp_servers(
         entry["default_tools_approval_mode"] = _mcp_approval_mode(
             skill.name, declaration if isinstance(declaration, dict) else {}
         )
+        if isinstance(declaration, dict):
+            entry.update(_mcp_timeouts(declaration))
         servers[skill.name] = entry
     return servers
 

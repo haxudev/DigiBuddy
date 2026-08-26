@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -23,6 +24,12 @@ MAX_TEXT_ENV = "MCP_HTTP_PROXY_MAX_TEXT_CHARS"
 #: on.
 DEFAULT_MAX_TEXT_CHARS = 60_000
 
+#: Codex starts an MCP server once per session and drops it for good if the
+#: handshake fails, so a transient fault is worth a second and third try.
+RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 0.5
+RETRYABLE_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
+
 
 class McpHttpProxy:
     def __init__(
@@ -34,6 +41,7 @@ class McpHttpProxy:
         opener: Any | None = None,
         timeout_seconds: float = 60,
         max_text_chars: int = DEFAULT_MAX_TEXT_CHARS,
+        sleep: Any | None = None,
     ):
         if not url.startswith("https://"):
             raise ValueError(f"{URL_ENV} must use HTTPS")
@@ -43,6 +51,7 @@ class McpHttpProxy:
         self._opener = opener or urllib.request.build_opener()
         self._timeout = max(float(timeout_seconds), 1)
         self._max_text_chars = max(int(max_text_chars), 0)
+        self._sleep = sleep or time.sleep
         self._session_id = ""
         self._protocol_version = ""
 
@@ -52,6 +61,37 @@ class McpHttpProxy:
 
             self._credential = DefaultAzureCredential()
         return self._credential
+
+    def _open(self, request: Any) -> Any:
+        """Send the request, retrying the failures that are worth retrying.
+
+        Codex starts an MCP server once. A single timeout or 503 while the
+        container is still warming up makes the handshake fail, Codex drops the
+        server, and its tools are missing for the rest of the session -- which
+        reads to the user as the agent ignoring its knowledge base. Retrying a
+        transient failure here is far cheaper than losing the server.
+
+        Retrying a POST is only safe because every catalogued server answers
+        read-only queries; a server with side effects would need an idempotency
+        key before it could be admitted.
+        """
+        last: Exception | None = None
+        for attempt in range(RETRY_ATTEMPTS):
+            try:
+                return self._opener.open(request, timeout=self._timeout)
+            except urllib.error.HTTPError as error:
+                detail = error.read().decode("utf-8", errors="replace")[:500]
+                failure = RuntimeError(f"HTTP {error.code}: {detail}")
+                # A refused or malformed request fails the same way every time;
+                # only overload and server faults are worth another attempt.
+                if error.code not in RETRYABLE_STATUS:
+                    raise failure from error
+                last = failure
+            except (urllib.error.URLError, TimeoutError, OSError) as error:
+                last = RuntimeError(f"{type(error).__name__}: {error}")
+            if attempt + 1 < RETRY_ATTEMPTS:
+                self._sleep(RETRY_BACKOFF_SECONDS * (2**attempt))
+        raise last or RuntimeError("MCP request failed without a reason")
 
     def _request(self, message: dict[str, Any]) -> list[dict[str, Any]]:
         payload = json.dumps(message, separators=(",", ":")).encode("utf-8")
@@ -73,11 +113,7 @@ class McpHttpProxy:
             headers=headers,
             method="POST",
         )
-        try:
-            response = self._opener.open(request, timeout=self._timeout)
-        except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")[:500]
-            raise RuntimeError(f"HTTP {error.code}: {detail}") from error
+        response = self._open(request)
         try:
             self._session_id = response.headers.get("Mcp-Session-Id", self._session_id)
             body = response.read().decode("utf-8")
