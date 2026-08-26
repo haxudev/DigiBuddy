@@ -60,29 +60,7 @@ COPY hosted-agent /app/hosted-agent
 # skill declared `off` whose bytes still shipped is deployed after all, and one
 # declared `builtin` that was excluded is advertised but missing. Both are
 # silent at runtime, so they fail the build instead.
-RUN python - <<'PY'
-import json
-import sys
-from pathlib import Path
-
-declared = json.loads(
-    Path("/opt/digibuddy/skill-availability.json").read_text(encoding="utf-8")
-)["skills"]
-present = {
-    path.parent.name
-    for root in ("/opt/digibuddy/skills", "/app/hosted-agent/skills")
-    for path in Path(root).glob("*/SKILL.md")
-}
-
-problems = []
-for name, value in sorted(declared.items()):
-    if value == "off":
-        if name in present:
-            problems.append(f"{name} is declared off but shipped; exclude it in .dockerignore")
-    elif name not in present:
-        problems.append(f"{name} is declared {value} but is not in the image")
-sys.exit("skill availability does not match the image: " + "; ".join(problems) if problems else 0)
-PY
+RUN cd /app/hosted-agent && python -m codex_adapter.availability /opt/digibuddy /app/hosted-agent/skills
 
 RUN useradd --create-home --shell /bin/bash agent \
     && mkdir -p /workspace /home/agent/.codex \

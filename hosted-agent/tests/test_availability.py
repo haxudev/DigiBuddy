@@ -11,8 +11,10 @@ from codex_adapter.availability import (
     OFF,
     availability_fingerprint,
     availability_of,
+    check_image,
     is_off,
     load_availability,
+    main,
     parse_availability,
 )
 
@@ -129,6 +131,62 @@ class RepositoryDeclarationTest(unittest.TestCase):
         }
         for name in sorted(self.declared):
             self.assertIn(name, present, name)
+
+
+class CheckImageTest(unittest.TestCase):
+    """The build-time gate, which has no runtime symptom to catch it later."""
+
+    def _image(self, declared, payload_skills, packaged_skills=()):
+        root = Path(tempfile.mkdtemp())
+        (root / "payload").mkdir()
+        (root / "payload" / "skill-availability.json").write_text(
+            json.dumps({"skills": declared}), encoding="utf-8"
+        )
+        for name in payload_skills:
+            (root / "payload" / "skills" / name).mkdir(parents=True)
+            (root / "payload" / "skills" / name / "SKILL.md").write_text("x", encoding="utf-8")
+        for name in packaged_skills:
+            (root / "packaged" / name).mkdir(parents=True)
+            (root / "packaged" / name / "SKILL.md").write_text("x", encoding="utf-8")
+        (root / "packaged").mkdir(exist_ok=True)
+        return root / "payload", root / "packaged"
+
+    def test_a_matching_image_has_no_problems(self):
+        payload, packaged = self._image(
+            {"pptx": BUILTIN, "seo": OFF, "superclarity": HIDDEN}, ["pptx"], ["superclarity"]
+        )
+        self.assertEqual(check_image(payload, packaged), [])
+
+    def test_an_off_skill_that_shipped_anyway_is_a_problem(self):
+        payload, packaged = self._image({"seo": OFF}, ["seo"])
+        self.assertEqual(len(check_image(payload, packaged)), 1)
+        self.assertIn(".dockerignore", check_image(payload, packaged)[0])
+
+    def test_a_deployed_skill_that_is_missing_is_a_problem(self):
+        payload, packaged = self._image({"pptx": BUILTIN}, [])
+        self.assertIn("not in the image", check_image(payload, packaged)[0])
+
+    def test_an_undeclared_skill_in_the_image_is_fine(self):
+        payload, packaged = self._image({"pptx": BUILTIN}, ["pptx", "uploaded"])
+        self.assertEqual(check_image(payload, packaged), [])
+
+    def test_the_entry_point_reports_failure_through_its_exit_code(self):
+        payload, packaged = self._image({"seo": OFF}, ["seo"])
+        self.assertEqual(main([str(payload), str(packaged)]), 1)
+
+    def test_the_entry_point_succeeds_on_a_matching_image(self):
+        payload, packaged = self._image({"pptx": BUILTIN}, ["pptx"])
+        self.assertEqual(main([str(payload), str(packaged)]), 0)
+
+
+class DockerfileTest(unittest.TestCase):
+    def test_the_check_runs_without_a_heredoc(self):
+        """ACR's remote builder scans the Dockerfile with a parser that does
+        not understand `RUN <<EOF` and fails before running anything, so the
+        check has to be a module rather than an inline script."""
+        dockerfile = (REPOSITORY / "hosted-agent" / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("python -m codex_adapter.availability", dockerfile)
+        self.assertNotIn("<<'", dockerfile)
 
 
 if __name__ == "__main__":

@@ -41,6 +41,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -137,6 +139,51 @@ def availability_fingerprint(availability: dict[str, str]) -> str:
     ).hexdigest()
 
 
+def check_image(payload_root: Path, packaged_skills: Path) -> list[str]:
+    """Reasons the built image and the declaration disagree.
+
+    ``skill-availability.json`` decides what the runtime deploys and
+    ``.dockerignore`` decides what reaches the image. They are two files, so
+    they can disagree: a skill declared ``off`` whose bytes still shipped is
+    deployed after all, and one declared ``builtin`` that was excluded is
+    advertised but missing. Both are silent at runtime, so the build asks this
+    question instead.
+    """
+    declared = parse_availability(
+        json.loads((payload_root / AVAILABILITY_DOCUMENT).read_text(encoding="utf-8"))
+    )
+    present = {
+        path.parent.name
+        for root in (payload_root / "skills", packaged_skills)
+        for path in root.glob("*/SKILL.md")
+    }
+    problems = []
+    for name, value in sorted(declared.items()):
+        if value == OFF:
+            if name in present:
+                problems.append(f"{name} is declared off but shipped; exclude it in .dockerignore")
+        elif name not in present:
+            problems.append(f"{name} is declared {value} but is not in the image")
+    return problems
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Build-time entry point: ``python -m codex_adapter.availability``.
+
+    A script rather than an inline heredoc because ACR's remote builder scans
+    the Dockerfile with a parser that does not understand ``RUN <<EOF`` and
+    fails the build before running anything.
+    """
+    args = list(sys.argv[1:] if argv is None else argv)
+    payload_root = Path(args[0]) if args else Path("/opt/digibuddy")
+    packaged = Path(args[1]) if len(args) > 1 else Path("/app/hosted-agent/skills")
+    problems = check_image(payload_root, packaged)
+    if problems:
+        print("skill availability does not match the image: " + "; ".join(problems), file=sys.stderr)
+        return 1
+    return 0
+
+
 __all__ = [
     "AVAILABILITIES",
     "AVAILABILITY_DOCUMENT",
@@ -148,7 +195,13 @@ __all__ = [
     "OFF",
     "availability_fingerprint",
     "availability_of",
+    "check_image",
     "is_off",
     "load_availability",
+    "main",
     "parse_availability",
 ]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
