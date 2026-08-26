@@ -99,7 +99,7 @@ class RepositoryDeclarationTest(unittest.TestCase):
             (REPOSITORY / "src" / "skill-availability.json").read_text(encoding="utf-8")
         )["skills"]
         self.ignored = {
-            line.strip().rstrip("/")
+            line.strip().rstrip("/").removesuffix("/**")
             for line in (REPOSITORY / ".dockerignore")
             .read_text(encoding="utf-8")
             .splitlines()
@@ -115,6 +115,19 @@ class RepositoryDeclarationTest(unittest.TestCase):
             if value != OFF:
                 continue
             self.assertIn(f"src/skills/{name}", self.ignored, name)
+
+    def test_every_off_skill_is_excluded_by_contents_too(self):
+        """The classic build engine ACR uses re-includes the files inside an
+        excluded directory through the earlier `!src/**`, so the directory line
+        alone ships the skill anyway."""
+        lines = {
+            line.strip()
+            for line in (REPOSITORY / ".dockerignore").read_text(encoding="utf-8").splitlines()
+        }
+        for name, value in sorted(self.declared.items()):
+            if value != OFF:
+                continue
+            self.assertIn(f"src/skills/{name}/**", lines, name)
 
     def test_nothing_still_deployed_is_excluded_from_the_image(self):
         for line in sorted(self.ignored):

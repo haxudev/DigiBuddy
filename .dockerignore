@@ -8,8 +8,19 @@ src/node_modules/
 # Skills the runtime does not deploy. These stay in the repository but must not
 # reach the image, so they are also declared `off` in src/skill-availability.json
 # and the Dockerfile asserts the two agree. Keep both lists in step.
-src/skills/content-research-writer/
-src/skills/faq-knowledge-base-agent/
-src/skills/mcp-builder/
-src/skills/ppt-outline/
-src/skills/seo-optimizer/
+#
+# Each one is listed twice. The directory line alone is enough for BuildKit,
+# which stops walking an excluded directory; ACR's remote builder uses the
+# classic engine, where the earlier `!src/**` re-includes every file inside it
+# again and the skill ships anyway. The `/**` line excludes the contents by
+# name, so both engines agree.
+src/skills/content-research-writer
+src/skills/content-research-writer/**
+src/skills/faq-knowledge-base-agent
+src/skills/faq-knowledge-base-agent/**
+src/skills/mcp-builder
+src/skills/mcp-builder/**
+src/skills/ppt-outline
+src/skills/ppt-outline/**
+src/skills/seo-optimizer
+src/skills/seo-optimizer/**
