@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from asyncio.subprocess import Process
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -51,6 +52,42 @@ PROFILE_EVENT = "assistant.profile"
 #: stops accidental cross-reads. It is containment, not isolation: two Codex
 #: processes run as the same user and can still read each other's directories.
 CONVERSATIONS_DIRECTORY = "conversations"
+
+#: Events that mean the user has already seen part of an answer. A turn that
+#: got this far can never be retried, because the retry would repeat what was
+#: streamed. Reasoning counts: the console shows it, and a payload the endpoint
+#: refuses outright produces none of it anyway.
+_ASSISTANT_EVENTS = frozenset(
+    {
+        "assistant.message.delta",
+        "assistant.message.completed",
+        "assistant.reasoning.delta",
+        "assistant.reasoning.completed",
+    }
+)
+
+#: The model endpoint names the offending item as `input[7].content`; some
+#: report it in JSON-pointer form instead.
+_REJECTED_HISTORY_ITEM = re.compile(r"input(?:\[\d+\]\.|/\d+/)content")
+
+
+def poisoned_history(error: str) -> bool:
+    """Say whether the endpoint rejected the replayed conversation itself.
+
+    Codex serialises a reasoning item it reloaded from disk with
+    `"content": null`, which the Azure model endpoint rejects outright while
+    api.openai.com accepts it (openai/codex#15584, unfixed as of v0.149). The
+    item is part of the stored thread, so once it appears every later turn in
+    that conversation fails identically -- this is the "it worked for a while
+    and then only returns errors" report, and no amount of retrying the same
+    thread can clear it.
+
+    Matched on the endpoint's own description of the payload rather than on an
+    error code, because the code is the generic `invalid_payload` that a
+    genuinely malformed turn would also produce. Recovering from the wrong
+    error would silently discard a conversation's memory for nothing.
+    """
+    return bool(_REJECTED_HISTORY_ITEM.search(error))
 
 
 def _workspace_id(response_id: str) -> str:
@@ -233,41 +270,29 @@ class CodexRuntime:
             self._thread_map.bind(response_id, thread_id, active.name, workspace_id)
             workspace_before = snapshot_workspace(workspace)
 
-            result = await self._request(
-                "turn/start",
-                {
-                    "threadId": thread_id,
-                    "input": [{"type": "text", "text": prompt}],
-                },
-            )
-            turn = result.get("turn") if isinstance(result, dict) else None
-            turn_id = turn.get("id") if isinstance(turn, dict) else None
-
-            while self._pending_notifications:
-                notification = self._pending_notifications.pop(0)
-                for event in translate_notification(notification):
-                    yield event
-
+            retried = False
             while True:
-                message = await self._next_turn_message(cancellation_signal)
-                if message is None:
-                    return
-                if "method" in message and "id" in message:
-                    await self._decline_server_request(message)
+                spoke = False
+                try:
+                    async for event in self._drive_turn(thread_id, prompt, cancellation_signal):
+                        if event.type in _ASSISTANT_EVENTS:
+                            spoke = True
+                        yield event
+                except CodexProtocolError as error:
+                    if spoke or retried or not poisoned_history(str(error)):
+                        raise
+                    retried = True
+                    logger.warning(
+                        "Conversation history was rejected by the model endpoint; "
+                        "continuing in a new thread without it: %s",
+                        error,
+                    )
+                    thread_id = await self._start_thread(model, active, workspace)
+                    self._thread_map.bind(
+                        response_id, thread_id, active.name, workspace_id
+                    )
                     continue
-                if "method" not in message:
-                    continue
-                for event in translate_notification(message):
-                    yield event
-                if message.get("method") == "turn/completed":
-                    params = message.get("params")
-                    completed = params.get("turn") if isinstance(params, dict) else None
-                    completed_id = completed.get("id") if isinstance(completed, dict) else None
-                    if not turn_id or not completed_id or completed_id == turn_id:
-                        if isinstance(completed, dict) and completed.get("status") == "failed":
-                            error = completed.get("error") or "Codex turn failed"
-                            raise CodexProtocolError(str(error))
-                        break
+                break
 
             paths = changed_artifacts(workspace, workspace_before)
             if paths:
@@ -275,6 +300,44 @@ class CodexRuntime:
                     artifact_event_data, paths, self._store, owner
                 )
                 yield RuntimeEvent(ARTIFACT_EVENT, data)
+
+    async def _drive_turn(self, thread_id, prompt, cancellation_signal):
+        """Run one turn on `thread_id` and translate everything it reports."""
+        result = await self._request(
+            "turn/start",
+            {
+                "threadId": thread_id,
+                "input": [{"type": "text", "text": prompt}],
+            },
+        )
+        turn = result.get("turn") if isinstance(result, dict) else None
+        turn_id = turn.get("id") if isinstance(turn, dict) else None
+
+        while self._pending_notifications:
+            notification = self._pending_notifications.pop(0)
+            for event in translate_notification(notification):
+                yield event
+
+        while True:
+            message = await self._next_turn_message(cancellation_signal)
+            if message is None:
+                return
+            if "method" in message and "id" in message:
+                await self._decline_server_request(message)
+                continue
+            if "method" not in message:
+                continue
+            for event in translate_notification(message):
+                yield event
+            if message.get("method") == "turn/completed":
+                params = message.get("params")
+                completed = params.get("turn") if isinstance(params, dict) else None
+                completed_id = completed.get("id") if isinstance(completed, dict) else None
+                if not turn_id or not completed_id or completed_id == turn_id:
+                    if isinstance(completed, dict) and completed.get("status") == "failed":
+                        error = completed.get("error") or "Codex turn failed"
+                        raise CodexProtocolError(str(error))
+                    break
 
     async def _ensure_started(
         self, profile: AgentProfile, reasoning_effort: str = ""

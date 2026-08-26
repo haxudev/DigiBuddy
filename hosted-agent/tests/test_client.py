@@ -9,6 +9,7 @@ from codex_adapter.client import (
     CodexProtocolError,
     CodexRuntime,
     _server_request_result,
+    poisoned_history,
 )
 from codex_adapter.artifacts import ARTIFACT_EVENT
 from codex_adapter.config import RuntimeSettings
@@ -646,3 +647,175 @@ class LostThreadTests(unittest.TestCase):
                 )
 
         asyncio.run(exercise())
+
+
+REJECTED = (
+    '{"error": {"code": "invalid_payload", "message": '
+    '"Expected array, got Null", "param": "input[7].content"}}'
+)
+
+
+class PoisonedHistoryTests(unittest.TestCase):
+    """A stored conversation the model endpoint will not accept.
+
+    Codex replays a reasoning item it reloaded from disk with
+    `"content": null`; Azure rejects it, so every turn in that conversation
+    fails identically and forever. The conversation has to be able to continue
+    without the history that cannot be sent.
+    """
+
+    def _runtime(self, directory, *, failures, deltas=0):
+        current = settings(directory)
+        current.workspace.mkdir(parents=True, exist_ok=True)
+        current.instructions_path.write_text("persona", encoding="utf-8")
+        runtime = CodexRuntime(current, NullConfigStore())
+        started: list[str] = []
+        turns: list[str] = []
+
+        class Process:
+            returncode = None
+
+        runtime._process = Process()
+
+        async def ensure_started(_profile, _reasoning_effort=""):
+            return None
+
+        async def request(method, params):
+            if method == "thread/resume":
+                return {}
+            if method == "thread/start":
+                started.append("start")
+                return {"thread": {"id": f"thread-{len(started) + 1}"}}
+            turns.append(params["threadId"])
+            return {"turn": {"id": f"turn-{len(turns)}"}}
+
+        queue: list[dict] = []
+
+        async def next_message(_cancellation):
+            if not queue:
+                attempt = len(turns)
+                turn_id = f"turn-{attempt}"
+                for index in range(deltas if attempt <= failures else 0):
+                    queue.append(
+                        {
+                            "method": "item/agentMessage/delta",
+                            "params": {"delta": f"chunk{index}"},
+                        }
+                    )
+                failed = attempt <= failures
+                queue.append(
+                    {
+                        "method": "turn/completed",
+                        "params": {
+                            "turn": {
+                                "id": turn_id,
+                                "status": "failed" if failed else "completed",
+                                "error": {"message": REJECTED} if failed else None,
+                            }
+                        },
+                    }
+                )
+            return queue.pop(0)
+
+        runtime._ensure_started = ensure_started
+        runtime._request = request
+        runtime._next_turn_message = next_message
+        return runtime, started, turns
+
+    async def _turn(self, runtime, *, previous, response_id):
+        return [
+            event
+            async for event in runtime.stream_turn(
+                "carry on",
+                previous_response_id=previous,
+                response_id=response_id,
+                cancellation_signal=asyncio.Event(),
+            )
+        ]
+
+    def test_a_conversation_continues_without_the_history_it_cannot_send(self):
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                runtime, started, turns = self._runtime(directory, failures=1)
+                runtime._thread_map.bind("r1", "thread-old", "digibuddy", "ws")
+
+                await self._turn(runtime, previous="r1", response_id="r2")
+
+                # The turn ran again on a thread that carries no history.
+                self.assertEqual(len(turns), 2)
+                self.assertEqual(turns[0], "thread-old")
+                self.assertNotEqual(turns[1], "thread-old")
+                self.assertEqual(len(started), 1)
+
+        asyncio.run(exercise())
+
+    def test_the_conversation_is_rebound_so_the_next_turn_works_too(self):
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                runtime, _, turns = self._runtime(directory, failures=1)
+                runtime._thread_map.bind("r1", "thread-old", "digibuddy", "keepme")
+
+                await self._turn(runtime, previous="r1", response_id="r2")
+
+                binding = runtime._thread_map.lookup("r2")
+                self.assertEqual(binding.thread_id, turns[1])
+                self.assertEqual(binding.workspace_id, "keepme")
+
+        asyncio.run(exercise())
+
+    def test_a_fresh_thread_that_still_fails_is_reported(self):
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                runtime, _, turns = self._runtime(directory, failures=2)
+                runtime._thread_map.bind("r1", "thread-old", "digibuddy", "ws")
+
+                # Retrying forever would hide a real fault behind a hang.
+                with self.assertRaises(CodexProtocolError):
+                    await self._turn(runtime, previous="r1", response_id="r2")
+                self.assertEqual(len(turns), 2)
+
+        asyncio.run(exercise())
+
+    def test_an_answer_already_streamed_is_never_repeated(self):
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                runtime, _, turns = self._runtime(directory, failures=1, deltas=2)
+                runtime._thread_map.bind("r1", "thread-old", "digibuddy", "ws")
+
+                with self.assertRaises(CodexProtocolError):
+                    await self._turn(runtime, previous="r1", response_id="r2")
+                self.assertEqual(len(turns), 1)
+
+        asyncio.run(exercise())
+
+    def test_an_ordinary_failure_keeps_the_conversation_history(self):
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                runtime, started, turns = self._runtime(directory, failures=0)
+                runtime._thread_map.bind("r1", "thread-old", "digibuddy", "ws")
+                await self._turn(runtime, previous="r1", response_id="r2")
+                self.assertEqual(turns, ["thread-old"])
+                self.assertEqual(started, [])
+
+        asyncio.run(exercise())
+
+
+class RejectedHistoryDetectionTests(unittest.TestCase):
+    def test_the_endpoints_own_description_of_the_payload_is_matched(self):
+        for message in (
+            'param": "input[7].content"',
+            "instance path /input/5/content",
+        ):
+            with self.subTest(message=message):
+                self.assertTrue(poisoned_history(message))
+
+    def test_an_unrelated_failure_is_not_mistaken_for_it(self):
+        # Discarding a conversation's memory for a rate limit would be worse
+        # than the error it is meant to recover from.
+        for message in (
+            "rate limit exceeded",
+            "invalid_payload: input is required",
+            "context window exceeded",
+        ):
+            with self.subTest(message=message):
+                self.assertFalse(poisoned_history(message))
