@@ -40,6 +40,14 @@ services:
       DIGIBUDDY_CONFIG_API: https://digibuddy-webui.gentlemeadow-add1d43f.eastus2.azurecontainerapps.io/api/runtime
       DIGIBUDDY_CONFIG_API_SECRET: ${DIGIBUDDY_CONFIG_API_SECRET}
       DIGIBUDDY_ENABLE_PROFILE_CREDENTIALS: "true"
+      # Foundry injects APPLICATIONINSIGHTS_CONNECTION_STRING itself from the
+      # project's Application Insights connection -- setting it here is
+      # rejected as reserved. The agent server then exports its own logs and
+      # traces, and captures prompts and completions along with them unless
+      # told not to. This is an internal Microsoft GTM assistant, so that
+      # telemetry would carry what the user asked and what the knowledge base
+      # answered. Diagnostics need the runtime's logs, not the conversation.
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "false"
     container:
       resources:
         cpu: "2"

@@ -189,3 +189,40 @@ Verify after each step:
 curl -fsS "$AGENT_ENDPOINT/readiness"
 python3 scripts/probe_runtime_isolation.py   # run as an agent turn, not locally
 ```
+
+## Reading production logs
+
+Both planes report into one Log Analytics workspace, `digibuddy-logs` in
+`digibuddy-prod`. Before it existed, a production failure left no trace at all:
+the container app environment had no workspace, and the hosted agent could only
+be read live, session by session, through `azd ai agent monitor`. A fault that
+had already happened was simply unrecoverable.
+
+| Source | Table | Wired through |
+| --- | --- | --- |
+| Web UI container | `ContainerAppConsoleLogs_CL` | `digibuddy-env` app logs destination |
+| Hosted agent runtime | `AppTraces`, `AppExceptions` | `digibuddy-insights`, connected to the Foundry project |
+| Foundry account and project | `AzureDiagnostics` | Diagnostic settings, `Audit` and `Trace` |
+
+The agent's own diagnostics — `codex_event type=mcp.startup`, `turn.error`,
+`task.failed` — arrive in `AppTraces` tagged with `gen_ai.agent.version` and
+`microsoft.session.id`, so a report can be traced to the agent version and
+session that produced it.
+
+```kusto
+AppTraces
+| where TimeGenerated > ago(1d)
+| where Message has "codex_event type=turn.error" or Message has "task.failed"
+| project TimeGenerated, Message, Properties
+```
+
+`APPLICATIONINSIGHTS_CONNECTION_STRING` cannot be set on the agent: Foundry
+reserves it and injects it from the project's Application Insights connection.
+Attach the connection to the project instead.
+
+**The agent server captures prompts and completions by default.** That
+telemetry would carry what a user asked and what the knowledge base answered,
+so `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` is set to `false` in
+`azure.yaml`. Diagnostics need the runtime's own logs, not the conversation.
+`RequestResponse` is left out of the Foundry diagnostic settings for the same
+reason. Removing either would start recording user content.
