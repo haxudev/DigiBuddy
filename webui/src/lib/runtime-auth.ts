@@ -14,6 +14,7 @@ type Environment = Record<string, string | undefined>;
 export const RUNTIME_PRINCIPAL_IDS_ENV = "DIGIBUDDY_RUNTIME_PRINCIPAL_IDS";
 export const RUNTIME_AUDIENCE_ENV = "DIGIBUDDY_CONFIG_API_SCOPE";
 export const RUNTIME_SHARED_SECRET_ENV = "DIGIBUDDY_RUNTIME_SHARED_SECRET";
+export const RUNTIME_SHARED_SECRET_HEADER = "x-digibuddy-runtime-secret";
 
 const CLOCK_SKEW_SECONDS = 60;
 const JWKS_TIMEOUT_MS = 2000;
@@ -102,6 +103,10 @@ function bearer(headers: Headers): string {
   const match = /^Bearer\s+(.+)$/i.exec(header);
   if (!match) throw new RuntimeAuthError("Bearer token required.");
   return match[1].trim();
+}
+
+function runtimeToken(headers: Headers): string {
+  return text(headers.get(RUNTIME_SHARED_SECRET_HEADER)) || bearer(headers);
 }
 
 function jsonPart<T>(value: string): T {
@@ -285,7 +290,7 @@ export async function requireRuntimePrincipal(
   environment: Environment = process.env,
   options: RuntimeAuthOptions = {},
 ): Promise<RuntimePrincipal> {
-  const token = bearer(headers);
+  const token = runtimeToken(headers);
   const sharedSecretPrincipal = principalFromSharedSecret(token, environment);
   if (sharedSecretPrincipal) return sharedSecretPrincipal;
 

@@ -8,6 +8,7 @@ import {
   RUNTIME_AUDIENCE_ENV,
   RUNTIME_PRINCIPAL_IDS_ENV,
   RUNTIME_SHARED_SECRET_ENV,
+  RUNTIME_SHARED_SECRET_HEADER,
   RuntimeAuthError,
   readBoundedBody,
   requireRuntimePrincipal,
@@ -125,6 +126,24 @@ test("runtime auth admits a matching shared secret", async (t) => {
 
   assert.deepEqual(principal, { oid: "shared-secret", tenantId: "" });
   assert.equal(timing.mock.callCount(), 1);
+});
+
+test("runtime auth admits a shared secret from the runtime header", async () => {
+  const principal = await requireRuntimePrincipal(
+    new Headers({ [RUNTIME_SHARED_SECRET_HEADER]: SHARED_SECRET }),
+    environment({
+      [RUNTIME_PRINCIPAL_IDS_ENV]: "",
+      [RUNTIME_SHARED_SECRET_ENV]: SHARED_SECRET,
+    }),
+    {
+      now: () => NOW,
+      verifyToken: () => {
+        throw new Error("JWT path should not run for a shared secret.");
+      },
+    },
+  );
+
+  assert.deepEqual(principal, { oid: "shared-secret", tenantId: "" });
 });
 
 test("runtime auth refuses a wrong shared secret of the same length", async () => {

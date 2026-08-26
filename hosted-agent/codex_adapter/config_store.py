@@ -65,6 +65,7 @@ BLOB_ARTIFACT_UPLOAD_ATTEMPTS = 3
 BLOB_ARTIFACT_UPLOAD_INITIAL_BACKOFF_SECONDS = 0.5
 HTTP_CONFIG_TIMEOUT_SECONDS = 3.0
 HTTP_TOKEN_REFRESH_SKEW_SECONDS = 60.0
+RUNTIME_SECRET_HEADER = "X-DigiBuddy-Runtime-Secret"
 
 #: The document shapes this build understands. A document written to a newer
 #: schema is refused rather than reinterpreted, because the fields this build
@@ -513,10 +514,13 @@ class HttpConfigStore:
         url = "/".join(
             [self._api_url, *(quote(segment, safe="") for segment in segments)]
         )
-        headers = {
-            "Accept": "application/octet-stream, application/json",
-            "Authorization": f"Bearer {self._bearer_token()}",
-        }
+        headers = {"Accept": "application/octet-stream, application/json"}
+        if self._secret:
+            # Container Apps Easy Auth consumes Authorization before Next.js
+            # sees the request, even when anonymous requests are allowed.
+            headers[RUNTIME_SECRET_HEADER] = self._secret
+        else:
+            headers["Authorization"] = f"Bearer {self._bearer_token()}"
         if body is not None:
             headers["Content-Length"] = str(len(body))
             headers["Content-Type"] = content_type or "application/octet-stream"

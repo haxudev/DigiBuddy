@@ -247,7 +247,7 @@ class HttpConfigStoreTests(unittest.TestCase):
         self.assertEqual(timeout, 1.25)
         self.assertEqual(credential.calls, ["api://digibuddy/.default"])
 
-    def test_secret_auth_sends_bearer_header_without_credential(self):
+    def test_secret_auth_sends_runtime_header_without_credential(self):
         secret = "s" * 32
         credential = FakeCredential()
         opener = FakeOpener([b'{"model":"gpt-5.6"}'])
@@ -263,7 +263,11 @@ class HttpConfigStoreTests(unittest.TestCase):
         self.assertEqual(store.read("models.json"), {"model": "gpt-5.6"})
 
         request, _ = opener.calls[0]
-        self.assertEqual(request.get_header("Authorization"), f"Bearer {secret}")
+        self.assertEqual(
+            request.get_header("X-digibuddy-runtime-secret"),
+            secret,
+        )
+        self.assertIsNone(request.get_header("Authorization"))
         self.assertEqual(credential.calls, [])
 
     def test_unset_secret_keeps_managed_identity_path(self):

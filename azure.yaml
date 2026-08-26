@@ -36,6 +36,9 @@ services:
       CODEX_SANDBOX: workspace-write
       CODEX_NETWORK_ACCESS: "true"
       DIGIBUDDY_CONFIG_URI: https://digibuddyprodeus2.blob.core.windows.net/digibuddy-config
+      DIGIBUDDY_CONFIG_API: https://digibuddy-webui.gentlemeadow-add1d43f.eastus2.azurecontainerapps.io/api/runtime
+      DIGIBUDDY_CONFIG_API_SECRET: ${DIGIBUDDY_CONFIG_API_SECRET}
+      DIGIBUDDY_ENABLE_PROFILE_CREDENTIALS: "true"
     container:
       resources:
         cpu: "2"
