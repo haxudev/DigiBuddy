@@ -21,6 +21,13 @@ actions, submission or publication, third-party deliverables, and
 important-decision outputs, regardless of step count. If unsure, load the
 skill.
 
+`superclarity` keeps its task state through a Node CLI, and this image ships
+Node 22 on `PATH`, so always run its persistent mode. The skill root is
+`$CODEX_HOME/skills/superclarity`, which makes the entrypoint
+`$CODEX_HOME/skills/superclarity/scripts/superclarity.mjs`. Drive every task
+through `init`/`status` and follow the `next` field the CLI returns; never
+hand-write the files under `.superclarity/`.
+
 ## Asking the user a question
 
 This host exposes no question tool, but it does have a card. The fenced

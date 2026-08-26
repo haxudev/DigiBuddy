@@ -37,7 +37,7 @@ curl -N -X POST "https://<foundry-endpoint>/responses" \
   -H "Accept: text/event-stream" \
   -H "api-key: <key>" \
   -d '{
-    "model": "gpt-5.2-codex",
+    "model": "gpt-5.6-sol",
     "input": "What is the price of a Standard_D4s_v5 VM in East US?",
     "stream": true,
     "store": true,
@@ -75,7 +75,7 @@ curl -N -X POST "https://<foundry-endpoint>/responses" \
   -H "Content-Type: application/json" \
   -H "api-key: <key>" \
   -d '{
-    "model": "gpt-5.2-codex",
+    "model": "gpt-5.6-sol",
     "input": "If I run that VM 24/7 for a month, what would it cost?",
     "stream": true,
     "store": true,

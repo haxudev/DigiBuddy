@@ -77,7 +77,10 @@ At startup the adapter concatenates `hosted-agent/AGENTS.md` with `src/AGENTS.md
 
 The image contains immutable snapshots of Superclarity and Agent Maturity.
 Superclarity is the default entry for multi-step, ambiguous, or consequential
-work. Agent Maturity includes its zero-dependency Python runtime and is
+work. It ships a Node CLI at
+`skills/superclarity/scripts/superclarity.mjs` that owns task state, so the
+image also carries a Node 22 runtime and the build fails if that CLI cannot be
+loaded. Agent Maturity includes its zero-dependency Python runtime and is
 registered as the local `agent-maturity` stdio MCP server.
 
 Azure startup does not clone repositories or install these tools. To update the
@@ -212,7 +215,8 @@ Chat sign-in can be restricted to company accounts with `AUTH_REQUIRE_CORPORATE_
 azd auth login
 azd env set CODEX_MODEL_ENDPOINT "https://your-resource.openai.azure.com/openai/v1"
 azd env set CODEX_MODEL_API_KEY "<model-key>"
-azd env set CODEX_MODEL_NAME "gpt-5.2-codex"
+azd env set CODEX_MODEL_NAME "gpt-5.6-sol"
+azd env set CODEX_REASONING_EFFORT "medium"
 azd up
 ```
 
@@ -245,7 +249,7 @@ curl -N -X POST "https://<foundry-endpoint>/responses" \
   -H "Accept: text/event-stream" \
   -H "api-key: <key>" \
   -d '{
-    "model": "gpt-5.2-codex",
+    "model": "gpt-5.6-sol",
     "input": "What is the price of a Standard_D4s_v5 VM in East US?",
     "stream": true,
     "store": true,

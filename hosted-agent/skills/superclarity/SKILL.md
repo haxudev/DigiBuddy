@@ -1,139 +1,149 @@
 ---
 name: superclarity
-description: Routes multi-step, long-running, or consequential work through clarification, local capability resolution, planning, authorized execution, and evidence-based verification. Use first for planning requests (规划 / 计划 / 做个方案 / 拆解一下 / 怎么做), resumed work (继续 / 接着做 / 上次做到哪了), and tasks involving money, sensitive data, irreversible or external actions, submission or publication, third-party deliverables, or important-decision outputs, regardless of step count. If any activation signal is unknown, route here. Selects Compact for bounded low-risk work and Full otherwise; neither acts before approval. Explicit invocation always routes through these gates. Do NOT use for automatic invocation on plain factual questions, coding-specific methodology, or reversible local requests that are neither multi-step nor long-running and have no consequential signal.
+description: Clarifies intent, surveys what this machine can actually do, plans against real capabilities, executes under explicit authorization, and verifies with evidence before claiming done. Use for planning requests (规划 / 计划 / 做个方案 / 拆解一下 / 怎么做), resumed work (继续 / 接着做 / 上次做到哪了), and any task involving money, sensitive data, irreversible or external actions, submission or publication, third-party deliverables, or important-decision outputs, regardless of step count. If any of that is true or unknown, load this skill first. Low-risk, reversible, single-session work with ready providers uses one combined Compact review; everything else uses Full's two-gate review, with an immediate action gate before every payment, publish, send, infrastructure, or destructive step. Do NOT use for plain factual questions, coding-specific methodology, or reversible local requests that are neither multi-step nor consequential.
 license: MIT
+compatibility: Persistent mode requires Node.js 20 or newer to run scripts/superclarity.mjs. Without it, use the session-only protocol in references/cli.md instead of skipping gates.
 metadata:
   pack: superclarity
-  phase: router
+  phase: all
 ---
 
 # Route the work, preserve the order
 
-Long tasks fail at seams: work starts before intent is agreed, plans assume a
-missing tool, or later files make unplanned work look authorized. This skill
-guards both gates and chronology.
+A long task fails at its seams: work starts before intent is agreed, a plan
+assumes a tool this machine does not have, or a claim of "done" outruns the
+evidence for it. This skill closes those seams with one task state built from
+three files, not a promise to remember.
 
 ## Enter here
 
-When loaded, route here before discovery or action. Lesson review or promotion
-routes directly to `distilling-lessons`, outside task phases. Otherwise inspect
-`.superclarity/` and follow task state. Invocation style never weakens a gate.
-
-Read only `.superclarity/` and the request, then announce:
+Read only `.superclarity/<task>/` and the current request, then run:
 
 ```text
-Task:  <slug>
-Mode:  <Compact candidate | Compact | Full | recovery>
-Phase: <preflight | clarify | survey | plan | run | verify | recover>
-Gate:  <observable condition required next>
+node <skill-root>/scripts/superclarity.mjs status --workspace <path> --task <slug>
 ```
 
-Do this before any other task-directed tool call. Reading, research, analysis,
-and drafting count as execution when they advance the requested task.
+`<skill-root>` is the directory containing this file; resolve it via the
+host's own skill path, never a hard-coded install location. Its JSON reply
+carries exactly one `state` and one `next` — follow `next`, do not re-derive
+state by reading the files yourself.
 
-## Recommend, then let the user select
-
-Compact reduces review turns, never artifacts or prior approval. At entry,
-select Full for a known disqualifier and recovery for invalid prior state.
-Otherwise a new task may start as a Compact candidate while its necessarily
-later clarification, provider, and plan facts are assembled. Candidate is not a
-fourth persisted mode. It becomes Compact only when all of these are proven:
-
-1. New low-risk task, fully reversible, one session, no conflicting state.
-2. No money, sensitive data, external effect, submission, or consequential
-   decision deliverable.
-3. A bounded single-session plan that can run continuously after approval, with
-   no mid-execution user gate, known replanning branch, or independent workstream.
-   Step count is not a mode threshold.
-4. Every provider already confirmed ready; no login, install, permission, quota,
-   or capability-gap decision.
-5. Every universal brief dimension is confirmed from the request or a recorded
-   answer; no assumption or deferred gate can change the plan.
-
-If an item is known false, recommend `full`. Otherwise recommend trying
-`compact`. At brief closure explain both flows, in the user's own language —
-the confirmed Chinese labels are `完整模式` and `尝试精简模式` — and ask the
-user to select: `full` approves the displayed brief and surveys before a
-separate plan review; `compact` assembles a no-probe bundle for one later
-atomic review. This card is non-authorizing, so it may carry the
-recommendation. `full` is always available. `compact` is a constrained
-preference, not a waiver: if assembly needs an active probe or cannot prove an
-item, record the reason, upgrade to `full`, and continue at its next gate
-without asking for another mode choice. Never downgrade a selected `full` or a
-running task.
-
-It writes matching proposal `brief.md`, `capabilities.md`, and `plan.md`, shows
-one bundle, and offers, in conservative-first order: approve plan only,
-approve and execute, revise, or Full review. This bundle grants authority the
-task did not already have, so it carries no recommendation, exactly like the
-Full plan-approval card. Before approval use only visible provider evidence.
-`Approve and execute` records brief approval, plan approval, and authorization
-together, then runs without another confirmation. A request for Compact asks
-to try this path; it never waives eligibility.
-
-## Route by state
-
-| State | Route |
-| --- | --- |
-| no valid mode decision or approved brief | `clarifying-intent` |
-| approved brief, capabilities missing/stale | `surveying-capabilities` |
-| capabilities resolved, plan missing/draft | `drafting-plans` |
-| plan approved, execution unauthorized | ask for execution authorization |
-| execution authorized, work outstanding | `running-plans` |
-| every step validly terminal | `verifying-outcomes` |
-| invalid order, stale revisions, prior unauthorized work | recovery protocol |
-
-See [the state model](references/state-model.md) for lifecycle and chronology,
-and [the entry protocol](references/entry-protocol.md) for gates and recovery.
-
-## Gates that do not bend
-
-- Preflight reads your own skill, tool, and subagent lists, and the names of
-  the available domain profiles — free, already in context — because a question
-  offering what this machine cannot deliver wastes an approval round. It writes
-  nothing: that list is re-read every session and outranks any cache. Visibility
-  is not readiness: auth, permission, and quota belong to survey, after the brief.
-- Before the first state write, warn when `.superclarity/` is not ignored.
-  Unignore only `profiles/` for deliberate sharing, never adjacent task state.
-- Full survey needs an approved brief; Compact may only assemble a no-probe
-  proposal bundle before its atomic review.
-- No plan proposal without capabilities resolved against the same brief revision.
-- No task action without an approved plan and explicit execution authorization.
-- No completion claim without current evidence and a finalized report.
-- Approval is prospective; it cannot authorize work already performed.
-
-An incomplete artifact or filename opens nothing. Risk changes review depth,
-not ordering; use [risk tiers](references/risk-tiers.md).
-
-## Ask efficiently
-
-Use a native card for two to four choices when available; otherwise ask in plain
-text and stop. Never hardcode a host tool. Ask only when the answer changes
-scope, provider, risk, dependencies, or success. `clarifying-intent` owns detail.
+For a task that does not exist yet, create it with `init`, never by writing
+the artifacts by hand:
 
 ```text
-.superclarity/
-  environment.md
-  profiles/
-  <task>/ — profile snapshot, brief, capabilities, plan, ledger, report + manifest, data/
+node <skill-root>/scripts/superclarity.mjs init --workspace <path> --task <slug> --mode compact|full
 ```
 
-Files are evidence: revisions, ledger events, and timestamps order approvals,
-and a later artifact without valid predecessors needs recovery, not backfilling.
+Hand-written artifacts are rejected as `unsupported`, because only `init` can
+lay down the three files and the opening ledger event together. Fill in the
+templates it creates; do not invent the ledger.
+
+Run the CLI with no arguments (or `--help`) for the full command surface. It
+is self-describing on purpose: never read `scripts/*.mjs` to work out how to
+drive it, and never edit those scripts to make a task pass. If a reply is
+unclear, the answer is in [the CLI reference](references/cli.md) or
+[the artifact format](references/artifact-format.md), never in the source.
+Reading, researching, analyzing, and drafting count as task execution once
+they advance the request; do them only after the gates below allow it.
+
+## The three files
+
+```text
+.superclarity/<task-slug>/
+  contract.md     objective, scope, constraints, success criteria, capability
+                   bindings, and the execution plan — one file, one document
+  ledger.jsonl     append-only events: gates, approvals, step attempts,
+                   evidence, recovery, acceptance
+  acceptance.md    the acceptance record: outcome summary, where each
+                   deliverable lives, per-criterion evidence, coverage gaps
+  data/            optional working material; never read for state
+```
+
+`acceptance.md` is not the deliverable. Deliverables are ordinary files in the
+workspace; the record's `Deliverables` table names each one's `Location`.
+Writing the deliverable into it leaves nothing to hand over.
+
+Acceptance is not the final user handoff. When the CLI reports `accepted`,
+`next: none` means only that no ledger transition remains. Open every file in
+the response's `deliverables[]`, then finish the same turn by presenting what
+the user asked for: include the substantive result inline when they asked for
+content, and always provide each accessible path or attachment. Do not hand
+over `contract.md`, `ledger.jsonl`, `acceptance.md`, evidence, or working notes
+as substitutes. Use `display.delivery` for the verified summary and gaps.
+
+No other file carries state. A task directory holding any pre-vNext artifact
+(`brief.md`, `plan.md`, `report.md`, ...) is `unsupported`: start a new task
+rather than trying to migrate or reuse it.
+
+## Clarify only what changes the plan
+
+Before the first review, read this session's own visible tools/skills/
+subagents — never probe, install, or touch task data yet — then ask only
+about decisions that would change scope, a capability, an `effect`,
+dependencies, or success criteria. Zero questions is a normal outcome for a
+fully specified request; there is no minimum or maximum count. Everything
+else you decided without asking goes into the contract's `Assumptions`
+table with its basis and consequence. See
+[clarifying](references/clarifying.md) for the stop rule, question design,
+and portable choice-card handling — never hard-code a host tool's name.
+
+## Resolve capabilities against this machine, not a wishlist
+
+Name whatever the task actually needs as a free-form capability row; there is
+no fixed vocabulary. `ready` means confirmed in this session, including
+login/permission/quota — visible is not the same as ready. A gap closes only
+by the user installing and letting you recheck, supplying material manually,
+accepting a named weaker substitute, or dropping that scope; record which,
+and its effect on the result. See [capabilities](references/capabilities.md).
+
+## Two review shapes, one set of gates
+
+**Compact** (`node ... check --gate compact ...`): every step's `effect` is
+`none` or `read-external`, every capability is `ready`, and the task is
+single-session, private, reversible, and not consequential. One card offers,
+conservative option first: approve only, approve and execute, revise, or use
+Full. **Full**: `check --gate terms` then `check --gate execution`, each its
+own approval — plan-only leaves it ready to run, approve-and-execute runs
+straight through. Before either card, the CLI validates structure and issues
+a one-time approval token; hold it until the user answers, then pass it to
+`approve` — never show it to the user.
+
+The card itself comes from `check`: show `display.summary` as the review,
+translated into the user's language, and do not compose your own from the
+contract. It is a requirements confirmation — it asks whether the job was
+understood, so its `DECIDED FOR YOU` section is the part most likely to be
+overturned and must never be dropped or summarized away. `display.review`
+carries the same content structured, if you need to re-lay it out. See
+[the protocol](references/protocol.md) for the full state table and every
+`next` value, and [risk tiers reasoning](references/protocol.md#risk).
+
+## Action gates never get folded into a plan review
+
+Any step whose `effect` is `send`, `publish`, `payment`, `infra-change`, or
+`destructive` needs its own `check --gate action` — with the exact runtime
+target, content, cost, irreversible impact, and alternatives — immediately
+before that one call, every attempt, fallback included. Approving a plan
+never authorizes the action inside it.
+
+## Execute, verify, recover
+
+Start only the step `next` names. Record completion only after opening the
+named evidence — a tool returning success is not evidence. A step that fails
+twice the same way stops for a decision rather than looping; a step may be
+skipped only on an explicit user decision. `acceptance.md` claims nothing
+that lacks current, re-hashed evidence for each success criterion, and "not
+observed" is a coverage gap, never a claim that something does not exist.
+Recovery is for two things only: work found predating its authorization, or
+an external effect whose outcome is unknown — not for an unapproved draft,
+which you simply fix. See
+[running/verifying](references/protocol.md#execution) and
+[recovery](references/recovery.md).
 
 ## Resume
 
-Read brief, capabilities, plan, and the ledger's latest events. Summarize what
-was agreed, done, and next. Ask whether assumptions still hold. With several
-unfinished tasks, or a request that may be new, include "start a new task"
-rather than guessing. Reconcile a started-but-unfinished step against its
-evidence before retrying, especially when an effect may be irreversible.
-
-Load a matching domain profile during clarification. Precedence is project
-`.superclarity/profiles/`, then user-global, then packaged; the first id that
-matches wins and the others are not merged in. It supplies domain dimensions,
-acceptance criteria, a step skeleton, and pitfalls — never generic workflow.
-With no clear match, work generic rather than stretching an unrelated profile.
-See [profile resolution](references/profile-resolution.md). Lesson candidates
-reach a profile only through `distilling-lessons`, maintenance that never runs
-as a step inside a task.
+`status` on an existing task reports where it stands; if several tasks look
+open, or the request might be new, ask, and always offer "start a new task."
+For a step whose last event is an unmatched start, reconcile its named
+evidence before deciding to retry — repeating an uncertain irreversible call
+can perform it twice.

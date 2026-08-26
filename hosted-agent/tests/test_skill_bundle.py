@@ -16,11 +16,15 @@ EXPECTED_SKILLS = {
     "agent-maturity-author",
     "agent-maturity-deploy",
     "agent-maturity-report",
+    "superclarity",
+}
+# Superclarity folded its six workflow skills back into one; the retired names
+# must stay out of the image so a stale copy can never shadow the new entry.
+RETIRED_SKILLS = {
     "clarifying-intent",
     "distilling-lessons",
     "drafting-plans",
     "running-plans",
-    "superclarity",
     "surveying-capabilities",
     "verifying-outcomes",
 }
@@ -51,22 +55,42 @@ class SkillBundleTests(unittest.TestCase):
         }
 
         self.assertEqual(installed, EXPECTED_SKILLS)
+        self.assertFalse(installed & RETIRED_SKILLS)
+        for name in RETIRED_SKILLS:
+            self.assertFalse((SKILLS / name).exists(), name)
         self.assertTrue(
-            (
-                SKILLS
-                / "distilling-lessons"
-                / "scripts"
-                / "profile-transaction-cli.mjs"
-            ).is_file()
+            (SKILLS / "agent-maturity-assess" / "references" / "question-bank.json")
+            .is_file()
         )
-        self.assertTrue(
-            (
-                SKILLS
-                / "agent-maturity-assess"
-                / "references"
-                / "question-bank.json"
-            ).is_file()
-        )
+
+    def test_superclarity_ships_its_cli_and_every_module_it_imports(self):
+        scripts = SKILLS / "superclarity" / "scripts"
+        entrypoint = scripts / "superclarity.mjs"
+
+        self.assertTrue(entrypoint.is_file())
+        source = entrypoint.read_text(encoding="utf-8")
+        # A relative import that did not survive the sync would only surface at
+        # runtime inside the sandbox, so resolve the whole graph up front.
+        seen = {entrypoint}
+        pending = [entrypoint]
+        while pending:
+            module = pending.pop()
+            for target in re.findall(
+                r"""^\s*(?:import|export)[^'"]*from\s+['"](\./[^'"]+)['"]""",
+                module.read_text(encoding="utf-8"),
+                re.MULTILINE,
+            ):
+                resolved = (module.parent / target).resolve()
+                self.assertTrue(resolved.is_file(), f"{module.name} -> {target}")
+                if resolved not in seen:
+                    seen.add(resolved)
+                    pending.append(resolved)
+
+        self.assertGreater(len(seen), 1)
+        # Codex runs the CLI with `node`; CRLF or a BOM from the upstream
+        # checkout would break the shebang line inside the Linux image.
+        self.assertFalse(source.startswith("\ufeff"))
+        self.assertNotIn("\r\n", source)
 
     def test_provenance_records_both_sources(self):
         provenance = (VENDOR / "PROVENANCE.txt").read_text(encoding="utf-8")
@@ -116,6 +140,43 @@ class SkillBundleTests(unittest.TestCase):
             environment["AGENT_MATURITY_REFERENCES"],
             "/app/hosted-agent/skills/agent-maturity-assess/references",
         )
+
+    def test_foundry_iq_is_the_default_knowledge_base(self):
+        config = json.loads((ROOT / "src" / "mcp.json").read_text(encoding="utf-8"))
+        server = config["servers"]["foundry-iq"]
+        environment = server["env"]
+
+        # Entra-protected, so it has to go through the token-minting stdio
+        # bridge rather than a bare HTTPS entry with a static bearer token.
+        self.assertEqual(server["args"], ["-m", "mcp_http_proxy"])
+        self.assertNotIn("enabled", server)
+        self.assertTrue(
+            environment["MCP_HTTP_PROXY_URL"].startswith("https://"),
+            environment["MCP_HTTP_PROXY_URL"],
+        )
+        self.assertIn("/knowledgebases/", environment["MCP_HTTP_PROXY_URL"])
+        self.assertIn("/mcp?", environment["MCP_HTTP_PROXY_URL"])
+        self.assertEqual(
+            environment["MCP_HTTP_PROXY_SCOPE"], "https://search.azure.com/.default"
+        )
+
+    def test_every_profile_can_reach_the_default_knowledge_base(self):
+        profiles = json.loads(
+            (ROOT / "src" / "profiles.json").read_text(encoding="utf-8")
+        )["profiles"]
+
+        for profile in profiles:
+            allowed = profile.get("mcp_servers")
+            # `None` means unrestricted, which already includes foundry-iq.
+            if allowed is None:
+                continue
+            self.assertIn("foundry-iq", allowed, profile["name"])
+
+    def test_persona_routes_internal_questions_to_the_knowledge_base(self):
+        persona = " ".join((ROOT / "src" / "AGENTS.md").read_text(encoding="utf-8").split())
+
+        self.assertIn("knowledge_base_retrieve", persona)
+        self.assertIn("This is the default knowledge base", persona)
 
 
 if __name__ == "__main__":

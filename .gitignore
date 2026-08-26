@@ -118,5 +118,7 @@ la-diag.txt
 la-m365.txt
 la-ppt-window.txt
 
-# Global Codex skill pack staged by scripts/sync-agent-skills.sh
-hosted-agent/skills/
+# Global Codex skill pack staged by scripts/sync-agent-skills.sh. It is
+# committed on purpose: it is the Docker build context the image is built from,
+# and `sync-agent-skills.sh --check` diffs the tracked tree against the lock.
+!hosted-agent/skills/

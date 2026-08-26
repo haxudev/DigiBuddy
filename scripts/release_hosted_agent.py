@@ -44,7 +44,7 @@ class ReleaseConfig:
     source_status: str = "active"
     api_version: str = "v1"
     ai_resource: str = "https://ai.azure.com"
-    default_model_name: str = "gpt-5.2-codex"
+    default_model_name: str = "gpt-5.6-sol"
     local_agent_image: str = "digibuddy-skills:verify"
     local_agent_port: int = 18088
     local_agent_container_prefix: str = "release-hosted-agent"

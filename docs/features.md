@@ -45,6 +45,14 @@ Codex exposes only a shell, so every payload tool is a Python module with a CLI 
 
 `src/mcp.json` is the packaged MCP catalogue. At startup the adapter renders each entry into `[mcp_servers.*]` blocks in the Codex `config.toml`, enabling `experimental_use_rmcp_client` when any remote HTTPS server is present. Plaintext and placeholder URLs are skipped rather than shipped into the configuration. An `mcp.json` written by the admin console replaces the packaged catalogue entirely.
 
+### Default Knowledge Base
+
+The `foundry-iq` entry is the agent's default knowledge base: a Foundry IQ knowledge base on Azure AI Search, exposed over MCP as the single `knowledge_base_retrieve` tool. It plans and decomposes the query itself, runs hybrid retrieval across its knowledge sources, and returns cited passages.
+
+The endpoint is protected by Microsoft Entra rather than an API key, so it is reached through the `mcp_http_proxy` stdio bridge instead of a bare HTTPS entry — the bridge mints a token for `https://search.azure.com/.default` from the container's managed identity on every call, which a static `bearer_token_env_var` could not do. The identity needs the **Search Index Data Reader** role on the search service.
+
+Every profile that restricts `mcp_servers` still lists `foundry-iq`, and `src/AGENTS.md` routes internal and field questions to it before the local `work_memory/` corpus and before Microsoft Learn.
+
 ## Runtime Configuration Store
 
 Model access, the MCP catalogue, and agent profiles are data, not image contents. They live in a shared store that both the Web UI admin console and the hosted agent read.

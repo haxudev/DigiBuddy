@@ -148,7 +148,8 @@ Web UI 提供 `/admin`，一个面向该存储的三页签控制台：
 azd auth login
 azd env set CODEX_MODEL_ENDPOINT "https://your-resource.openai.azure.com/openai/v1"
 azd env set CODEX_MODEL_API_KEY "<model-key>"
-azd env set CODEX_MODEL_NAME "gpt-5.2-codex"
+azd env set CODEX_MODEL_NAME "gpt-5.6-sol"
+azd env set CODEX_REASONING_EFFORT "medium"
 azd up
 ```
 
@@ -175,7 +176,7 @@ curl -N -X POST "https://<foundry-endpoint>/responses" \
   -H "Accept: text/event-stream" \
   -H "api-key: <key>" \
   -d '{
-    "model": "gpt-5.2-codex",
+    "model": "gpt-5.6-sol",
     "input": "What is the price of a Standard_D4s_v5 VM in East US?",
     "stream": true,
     "store": true,

@@ -102,7 +102,7 @@ docker build -t digibuddy-webui .
 docker run --rm -p 3000:3000 \
   -e FOUNDRY_AGENT_ENDPOINT=https://your-foundry-endpoint/responses \
   -e FOUNDRY_AGENT_API_KEY=replace-at-runtime \
-  -e CODEX_MODEL_NAME=gpt-5.2-codex \
+  -e CODEX_MODEL_NAME=gpt-5.6-sol \
   digibuddy-webui
 ```
 

@@ -28,7 +28,8 @@
       ],
       "mcp_servers": [
         "microsoft-learn",
-        "cloud-pricing"
+        "cloud-pricing",
+        "foundry-iq"
       ]
     },
     {
@@ -57,7 +58,8 @@
         "m365_cli"
       ],
       "mcp_servers": [
-        "microsoft-learn"
+        "microsoft-learn",
+        "foundry-iq"
       ]
     },
     {
@@ -78,7 +80,8 @@
         "azure_blob"
       ],
       "mcp_servers": [
-        "microsoft-learn"
+        "microsoft-learn",
+        "foundry-iq"
       ]
     },
     {
@@ -101,7 +104,8 @@
       ],
       "mcp_servers": [
         "microsoft-learn",
-        "agent-maturity"
+        "agent-maturity",
+        "foundry-iq"
       ]
     }
   ]

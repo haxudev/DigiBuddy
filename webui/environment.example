@@ -3,7 +3,7 @@ FOUNDRY_AGENT_API_KEY=
 FOUNDRY_AUTH_MODE=bearer
 FOUNDRY_AGENT_NAME=digibuddy-codex
 FOUNDRY_AGENT_VERSION=2
-CODEX_MODEL_NAME=gpt-5.6-luna
+CODEX_MODEL_NAME=gpt-5.6-sol
 AGENT_ENDPOINT_ALLOWLIST=services.ai.azure.com,openai.azure.com
 
 # Optional: accept native members of one Entra tenant plus explicitly trusted

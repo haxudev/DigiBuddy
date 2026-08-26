@@ -43,6 +43,7 @@ RUN useradd --create-home --shell /bin/bash agent \
     && mkdir -p /workspace /home/agent/.codex \
     && python -c "import sys; from pathlib import Path; s = Path('/app/hosted-agent/skills'); m = {l.strip() for l in (s / '.manifest').read_text().splitlines() if l.strip() and not l.startswith('#')}; f = {p.parent.name for p in s.glob('*/SKILL.md')}; sys.exit(f'packaged skills do not match the manifest: {sorted(m ^ f)}' if m != f else 0)" \
     && PYTHONPATH=/app/hosted-agent/vendor/agent-maturity python -c "import agent_maturity.mcp" \
+    && node /app/hosted-agent/skills/superclarity/scripts/superclarity.mjs --help > /dev/null \
     && chown -R agent:agent /workspace /home/agent /app/hosted-agent /opt/digibuddy
 
 ENV HOME=/home/agent

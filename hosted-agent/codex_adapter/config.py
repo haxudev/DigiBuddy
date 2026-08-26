@@ -197,7 +197,7 @@ class RuntimeSettings:
     instructions_path: Path
     payload_root: Path
     skills_source: Path
-    reasoning_effort: str = "high"
+    reasoning_effort: str = "medium"
     protocol_timeout_seconds: float = 60.0
     turn_idle_timeout_seconds: float = 300.0
 
@@ -230,7 +230,7 @@ def _env_positive_seconds(name: str, default: float) -> float:
 def load_settings() -> RuntimeSettings:
     root = Path(__file__).resolve().parent.parent
     settings = RuntimeSettings(
-        model_name=os.environ.get("CODEX_MODEL_NAME", "gpt-5.2-codex").strip(),
+        model_name=os.environ.get("CODEX_MODEL_NAME", "gpt-5.6-sol").strip(),
         model_endpoint=os.environ.get("CODEX_MODEL_ENDPOINT", "").strip().rstrip("/"),
         model_api_key=os.environ.get("CODEX_MODEL_API_KEY", "").strip(),
         model_provider=os.environ.get("CODEX_MODEL_PROVIDER", "digibuddy").strip(),
@@ -250,7 +250,7 @@ def load_settings() -> RuntimeSettings:
         skills_source=Path(
             os.environ.get("CODEX_SKILLS_SOURCE", str(root / "skills"))
         ).resolve(),
-        reasoning_effort=os.environ.get("CODEX_REASONING_EFFORT", "high").strip(),
+        reasoning_effort=os.environ.get("CODEX_REASONING_EFFORT", "medium").strip(),
         protocol_timeout_seconds=_env_positive_seconds(
             "CODEX_PROTOCOL_TIMEOUT_SECONDS", 60.0
         ),

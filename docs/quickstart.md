@@ -13,7 +13,8 @@
 azd auth login
 azd env set CODEX_MODEL_ENDPOINT "https://your-resource.openai.azure.com/openai/v1"
 azd env set CODEX_MODEL_API_KEY "<model-key>"
-azd env set CODEX_MODEL_NAME "gpt-5.2-codex"
+azd env set CODEX_MODEL_NAME "gpt-5.6-sol"
+azd env set CODEX_REASONING_EFFORT "medium"
 azd up
 ```
 
@@ -72,7 +73,7 @@ docker build -t digibuddy-webui .
 docker run --rm -p 3000:3000 \
   -e FOUNDRY_AGENT_ENDPOINT="https://your-foundry-endpoint/responses" \
   -e FOUNDRY_AGENT_API_KEY="<agent-key>" \
-  -e CODEX_MODEL_NAME="gpt-5.2-codex" \
+  -e CODEX_MODEL_NAME="gpt-5.6-sol" \
   digibuddy-webui
 ```
 

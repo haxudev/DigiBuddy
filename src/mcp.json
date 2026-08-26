@@ -24,6 +24,14 @@
 				"AGENT_MATURITY_REFERENCES": "/app/hosted-agent/skills/agent-maturity-assess/references",
 				"PYTHONPATH": "/app/hosted-agent/vendor/agent-maturity"
 			}
+		},
+		"foundry-iq": {
+			"command": "python",
+			"args": ["-m", "mcp_http_proxy"],
+			"env": {
+				"MCP_HTTP_PROXY_URL": "https://haxuinternalproj-gtmiq.search.windows.net/knowledgebases/fy-27-program-faq-kb/mcp?api-version=2026-05-01-preview",
+				"MCP_HTTP_PROXY_SCOPE": "https://search.azure.com/.default"
+			}
 		}
 	},
 	"inputs": []
