@@ -146,3 +146,102 @@ class AnonymousEndpointTests(unittest.TestCase):
     def test_plaintext_is_still_refused(self):
         with self.assertRaises(ValueError):
             mcp_http_proxy.McpHttpProxy("http://learn.microsoft.com/api/mcp", "")
+
+
+class OversizedResultTests(unittest.TestCase):
+    """The runtime fails the whole turn on a tool result it cannot carry.
+
+    A broad retrieval against a real corpus returns hundreds of kilobytes, and
+    the caller then gets `server_error` instead of an answer. Truncated
+    grounding beats no answer.
+    """
+
+    def _call(self, content, **overrides):
+        opener = FakeOpener(
+            [
+                FakeResponse(
+                    json.dumps(
+                        {"jsonrpc": "2.0", "id": 1, "result": {"content": content}}
+                    ).encode(),
+                    {"Content-Type": "application/json"},
+                )
+            ]
+        )
+        proxy = mcp_http_proxy.McpHttpProxy(
+            "https://mcp.example/mcp",
+            "api://mcp/.default",
+            credential=FakeCredential(),
+            opener=opener,
+            **overrides,
+        )
+        response = proxy.exchange(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call"}
+        )
+        return response[0]["result"]["content"]
+
+    def test_a_result_within_budget_is_untouched(self):
+        content = [{"type": "text", "text": "x" * 100}]
+
+        self.assertEqual(self._call(content, max_text_chars=100), content)
+
+    def test_an_oversized_result_is_cut_and_says_so(self):
+        blocks = self._call(
+            [
+                {"type": "text", "text": "a" * 60},
+                {"type": "text", "text": "b" * 40},
+            ],
+            max_text_chars=50,
+        )
+
+        self.assertEqual(blocks[0]["text"], "a" * 50)
+        # The second block is dropped rather than emptied, and both its
+        # characters and the first block's overflow are accounted for.
+        self.assertIn("truncated 50 characters", blocks[-1]["text"])
+        self.assertEqual(len(blocks), 2)
+
+    def test_non_text_blocks_survive_the_cut(self):
+        blocks = self._call(
+            [
+                {"type": "text", "text": "a" * 60},
+                {"type": "resource", "resource": {"uri": "x://y"}},
+            ],
+            max_text_chars=10,
+        )
+
+        self.assertIn({"type": "resource", "resource": {"uri": "x://y"}}, blocks)
+
+    def test_a_disabled_budget_carries_everything(self):
+        content = [{"type": "text", "text": "a" * 5000}]
+
+        self.assertEqual(self._call(content, max_text_chars=0), content)
+
+    def test_other_methods_are_never_rewritten(self):
+        opener = FakeOpener(
+            [
+                FakeResponse(
+                    json.dumps(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "result": {
+                                "content": [{"type": "text", "text": "a" * 500}]
+                            },
+                        }
+                    ).encode(),
+                    {"Content-Type": "application/json"},
+                )
+            ]
+        )
+        proxy = mcp_http_proxy.McpHttpProxy(
+            "https://mcp.example/mcp",
+            "api://mcp/.default",
+            credential=FakeCredential(),
+            opener=opener,
+            max_text_chars=10,
+        )
+
+        response = proxy.exchange(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        )
+
+        self.assertEqual(len(response[0]["result"]["content"][0]["text"]), 500)

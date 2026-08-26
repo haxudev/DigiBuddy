@@ -12,6 +12,16 @@ from typing import Any
 URL_ENV = "MCP_HTTP_PROXY_URL"
 SCOPE_ENV = "MCP_HTTP_PROXY_SCOPE"
 TIMEOUT_ENV = "MCP_HTTP_PROXY_TIMEOUT_SECONDS"
+MAX_TEXT_ENV = "MCP_HTTP_PROXY_MAX_TEXT_CHARS"
+
+#: A retrieval server answers with as much grounding as it found, and a broad
+#: query against a real corpus can return hundreds of kilobytes in one result.
+#: The hosted runtime fails the whole turn on a tool result that large -- the
+#: caller gets `server_error` and no answer at all -- so an oversized result is
+#: cut down to something the model can still read. Roughly 15k tokens of
+#: grounding, which is far more than a turn needs and far less than it breaks
+#: on.
+DEFAULT_MAX_TEXT_CHARS = 60_000
 
 
 class McpHttpProxy:
@@ -23,6 +33,7 @@ class McpHttpProxy:
         credential: Any | None = None,
         opener: Any | None = None,
         timeout_seconds: float = 60,
+        max_text_chars: int = DEFAULT_MAX_TEXT_CHARS,
     ):
         if not url.startswith("https://"):
             raise ValueError(f"{URL_ENV} must use HTTPS")
@@ -31,6 +42,7 @@ class McpHttpProxy:
         self._credential = credential
         self._opener = opener or urllib.request.build_opener()
         self._timeout = max(float(timeout_seconds), 1)
+        self._max_text_chars = max(int(max_text_chars), 0)
         self._session_id = ""
         self._protocol_version = ""
 
@@ -91,6 +103,55 @@ class McpHttpProxy:
         value = json.loads(body)
         return [value] if isinstance(value, dict) else []
 
+    def _clamp(self, response: dict[str, Any]) -> None:
+        """Cut an oversized tool result down to a readable budget.
+
+        Only `text` blocks are touched, and only past the budget, so a result
+        that already fits is returned byte for byte. The marker tells the model
+        the passage list was cut rather than exhausted, which is the difference
+        between "no more matches" and "ask a narrower question".
+        """
+        if not self._max_text_chars:
+            return
+        result = response.get("result")
+        if not isinstance(result, dict):
+            return
+        content = result.get("content")
+        if not isinstance(content, list):
+            return
+        remaining = self._max_text_chars
+        dropped = 0
+        kept: list[Any] = []
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "text":
+                kept.append(block)
+                continue
+            text = block.get("text")
+            if not isinstance(text, str):
+                kept.append(block)
+                continue
+            if remaining <= 0:
+                dropped += len(text)
+                continue
+            if len(text) > remaining:
+                dropped += len(text) - remaining
+                block["text"] = text[:remaining]
+            remaining -= min(len(text), remaining)
+            kept.append(block)
+        if not dropped:
+            return
+        kept.append(
+            {
+                "type": "text",
+                "text": (
+                    f"[mcp_http_proxy truncated {dropped} characters: the "
+                    "result exceeded what one turn can carry. Ask a narrower "
+                    "question to see the rest.]"
+                ),
+            }
+        )
+        result["content"] = kept
+
     def exchange(self, message: dict[str, Any]) -> list[dict[str, Any]]:
         responses = self._request(message)
         if message.get("method") == "initialize":
@@ -100,6 +161,9 @@ class McpHttpProxy:
                     version = result.get("protocolVersion")
                     if isinstance(version, str):
                         self._protocol_version = version
+        elif message.get("method") == "tools/call":
+            for response in responses:
+                self._clamp(response)
         return responses
 
 
@@ -119,6 +183,9 @@ def main() -> int:
         os.environ.get(URL_ENV, "").strip(),
         os.environ.get(SCOPE_ENV, "").strip(),
         timeout_seconds=float(os.environ.get(TIMEOUT_ENV, "60")),
+        max_text_chars=int(
+            os.environ.get(MAX_TEXT_ENV, "") or DEFAULT_MAX_TEXT_CHARS
+        ),
     )
     for line in sys.stdin:
         message: dict[str, Any] = {}
