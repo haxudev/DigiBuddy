@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import tempfile
 import tomllib
 import unittest
@@ -1159,3 +1160,53 @@ class ToolLauncherTests(unittest.TestCase):
         # The package's own relative import has to resolve too, or only the
         # simplest possible tool would work.
         self.assertIn("PACK-TOOL-OK v1", result.stdout)
+
+
+class WorkspaceScratchStateTests(unittest.TestCase):
+    """Superclarity asks the user before writing state a repo would track.
+
+    The hosted workspace is a per-container scratch directory that is never
+    committed, so that question costs a turn and has no useful answer. The
+    rule the skill looks for is written up front instead.
+    """
+
+    #: Copied from the skill's own guard so a change upstream fails here
+    #: rather than silently reintroducing the prompt in production.
+    GUARD = re.compile(r"(^|\n)\.superclarity/?\s*$", re.M)
+
+    def _workspace(self, directory):
+        configured = payload(directory)
+        with mock.patch.dict(os.environ, {"PATH": "/usr/bin"}, clear=True):
+            prepare_codex_environment(configured)
+        return configured.workspace / ".gitignore"
+
+    def test_the_skill_guard_is_satisfied(self):
+        with tempfile.TemporaryDirectory() as directory:
+            gitignore = self._workspace(directory)
+
+            self.assertTrue(self.GUARD.search(gitignore.read_text(encoding="utf-8")))
+
+    def test_an_existing_gitignore_is_not_replaced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(directory)
+            configured.workspace.mkdir(parents=True, exist_ok=True)
+            # No trailing newline: appending naively would corrupt this line.
+            (configured.workspace / ".gitignore").write_text(
+                "node_modules", encoding="utf-8"
+            )
+            with mock.patch.dict(os.environ, {"PATH": "/usr/bin"}, clear=True):
+                prepare_codex_environment(configured)
+
+            body = (configured.workspace / ".gitignore").read_text(encoding="utf-8")
+            self.assertIn("node_modules\n", body)
+            self.assertTrue(self.GUARD.search(body))
+
+    def test_preparing_twice_does_not_repeat_the_rule(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(directory)
+            with mock.patch.dict(os.environ, {"PATH": "/usr/bin"}, clear=True):
+                prepare_codex_environment(configured)
+                prepare_codex_environment(configured)
+
+            body = (configured.workspace / ".gitignore").read_text(encoding="utf-8")
+            self.assertEqual(body.count(".superclarity/"), 1)

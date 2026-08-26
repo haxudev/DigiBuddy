@@ -74,6 +74,11 @@ _FINGERPRINT_KEY = secrets.token_bytes(32)
 _MCP_APPROVAL_MODES = frozenset({"auto", "prompt", "writes", "approve"})
 _DEFAULT_MCP_APPROVAL_MODE = "approve"
 
+#: Scratch state a skill keeps in the workspace. Rules are matched literally
+#: against whole lines, so they must stay in the exact form the skill checks
+#: for — Superclarity accepts `.superclarity` or `.superclarity/`.
+_SCRATCH_STATE_IGNORES = (".superclarity/",)
+
 
 def _feature_flag(name: str) -> bool:
     """A feature switch is off unless it is explicitly and legibly on."""
@@ -1025,6 +1030,37 @@ def load_credentials(
     }
 
 
+def _ignore_scratch_state(workspace: Path) -> None:
+    """Declare the workspace's scratch state directories untracked.
+
+    Superclarity refuses to create `.superclarity/` in a git workspace that
+    does not ignore it, and tells the caller to confirm with the user first.
+    That guard protects someone's real repository; here the workspace is a
+    per-container scratch directory that is never committed anywhere, so the
+    question has no answer worth a turn. Writing the rule the guard looks for
+    settles it honestly rather than passing the override flag.
+    """
+    gitignore = workspace / ".gitignore"
+    try:
+        existing = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
+    except OSError:
+        logger.warning("Could not read the workspace .gitignore", exc_info=True)
+        return
+    missing = [
+        rule
+        for rule in _SCRATCH_STATE_IGNORES
+        if not any(line.strip() == rule for line in existing.splitlines())
+    ]
+    if not missing:
+        return
+    prefix = "" if not existing or existing.endswith("\n") else "\n"
+    try:
+        with gitignore.open("a", encoding="utf-8") as handle:
+            handle.write(prefix + "".join(f"{rule}\n" for rule in missing))
+    except OSError:
+        logger.warning("Could not write the workspace .gitignore", exc_info=True)
+
+
 def prepare_codex_environment(
     settings: RuntimeSettings,
     store: ConfigStore | None = None,
@@ -1033,6 +1069,7 @@ def prepare_codex_environment(
 ) -> dict[str, str]:
     active = profile or DEFAULT_PROFILE
     settings.workspace.mkdir(parents=True, exist_ok=True)
+    _ignore_scratch_state(settings.workspace)
     settings.codex_home.mkdir(parents=True, exist_ok=True)
     install_global_skills(settings, active, store)
     config_path = settings.codex_home / "config.toml"

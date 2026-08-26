@@ -22,6 +22,8 @@ Everything that gives the agent its personality and capabilities lives in `src/`
 
 The runtime concatenates the hosted-agent guardrails with the payload persona into the Codex base instructions at startup.
 
+`/workspace` is per-container scratch that is never committed anywhere, but a skill cannot tell that from the inside. Superclarity refuses to create its `.superclarity/` state in a git workspace that would track it, and asks the caller to confirm first — a question that costs a turn and has no useful answer here. Startup therefore writes the ignore rule the skill looks for into `/workspace/.gitignore`, appending to any existing file rather than replacing it.
+
 ## Turn Inputs
 
 A turn may carry more than text. Responses `input_image` and `input_file` parts are written into `<workspace>/uploads` and their paths are appended to the prompt, so Codex opens attachments as ordinary files; a per-turn budget caps how much is materialised. A `reasoning.effort` of `minimal`, `low`, `medium`, or `high` overrides the configured thinking strength for that turn and restarts the Codex engine through its configuration fingerprint.

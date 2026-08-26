@@ -122,3 +122,7 @@ la-ppt-window.txt
 # committed on purpose: it is the Docker build context the image is built from,
 # and `sync-agent-skills.sh --check` diffs the tracked tree against the lock.
 !hosted-agent/skills/
+
+# Superclarity keeps per-task scratch state here. The skill refuses to run
+# in a git workspace that would track it.
+.superclarity/
