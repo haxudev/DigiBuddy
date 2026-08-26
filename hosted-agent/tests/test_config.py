@@ -403,8 +403,12 @@ class McpCatalogueTests(unittest.TestCase):
 
             servers = load_mcp_servers(configured)
 
-            self.assertEqual(servers["remote"]["default_tools_approval_mode"], "auto")
-            self.assertEqual(servers["local"]["default_tools_approval_mode"], "auto")
+            self.assertEqual(
+                servers["remote"]["default_tools_approval_mode"], "approve"
+            )
+            self.assertEqual(
+                servers["local"]["default_tools_approval_mode"], "approve"
+            )
 
     def test_a_server_may_ask_for_a_stricter_approval_mode(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -440,7 +444,7 @@ class McpCatalogueTests(unittest.TestCase):
 
             self.assertEqual(
                 load_mcp_servers(configured)["typo"]["default_tools_approval_mode"],
-                "auto",
+                "approve",
             )
 
 
@@ -974,7 +978,7 @@ class PackActivationTests(unittest.TestCase):
             self.assertEqual(block["command"], "python")
             self.assertTrue(block["args"][0].endswith("pack-mcp/server.py"))
             self.assertEqual(block["env"]["PACK_MODE"], "safe")
-            self.assertEqual(block["default_tools_approval_mode"], "auto")
+            self.assertEqual(block["default_tools_approval_mode"], "approve")
 
     def test_an_unapproved_mcp_server_renders_nothing(self):
         digest = "c" * 64

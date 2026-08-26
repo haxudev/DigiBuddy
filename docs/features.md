@@ -43,7 +43,7 @@ Codex exposes only a shell, so every payload tool is a Python module with a CLI 
 
 ## Remote MCP Servers
 
-`src/mcp.json` is the packaged MCP catalogue. At startup the adapter renders each entry into `[mcp_servers.*]` blocks in the Codex `config.toml`. Plaintext and placeholder URLs are skipped rather than shipped into the configuration. Every server is rendered with `default_tools_approval_mode = "auto"`: the runtime answers a Foundry request with no interactive channel, so a tool that asks for approval can only ever be declined — admitting a server to the catalogue *is* the authorization decision. A server may opt into a stricter Codex mode with `"tools_approval_mode"`, at the cost of its tools becoming unusable. An `mcp.json` written by the admin console replaces the packaged catalogue entirely.
+`src/mcp.json` is the packaged MCP catalogue. At startup the adapter renders each entry into `[mcp_servers.*]` blocks in the Codex `config.toml`. Plaintext and placeholder URLs are skipped rather than shipped into the configuration. Every server is rendered with `default_tools_approval_mode = "approve"`: the runtime answers a Foundry request with no interactive channel, so a tool that asks for approval can only ever be declined — admitting a server to the catalogue *is* the authorization decision. Codex's own default, `auto`, presumes an unannotated tool is destructive, which leaves most servers unusable here. A server may opt into a stricter Codex mode with `"tools_approval_mode"`, at the cost of its tools becoming unreachable. An `mcp.json` written by the admin console replaces the packaged catalogue entirely.
 
 ### Default Knowledge Base
 

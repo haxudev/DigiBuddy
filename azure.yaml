@@ -19,7 +19,7 @@ services:
     docker:
       path: hosted-agent/Dockerfile
       remoteBuild: true
-    image: haxuinternalfoundryacr.azurecr.io/digibuddy-codex@sha256:40995bf2a2fe265d6eeefe6545b05193b10c30e5370715478a0fb689555921b5
+    image: haxuinternalfoundryacr.azurecr.io/digibuddy-codex@sha256:2385c78f22f3bd9bbb72b286721a1fd21ab84ab24fe24ee89d0c1b77d2e14927
     kind: hosted
     name: digibuddy-codex
     displayName: GTMBuddy Codex

@@ -65,11 +65,14 @@ _FINGERPRINT_KEY = secrets.token_bytes(32)
 #: Codex refuses an MCP tool that needs approval when `approval_policy` is
 #: `never`, and this runtime has nobody to ask: every approval request the
 #: adapter receives is declined because a Responses turn has no interactive
-#: channel. A curated server whose tools are left at the default is therefore
-#: not "guarded", it is unreachable, so the catalogue's own admission decision
-#: is the authorization and its tools run unattended.
+#: channel. A curated server whose tools are left at Codex's default is
+#: therefore not "guarded", it is unreachable — under `auto` an unannotated
+#: tool is presumed destructive and open-world, and most servers ship no
+#: annotations at all. `approve` is the only mode that never asks, so the
+#: catalogue's own admission decision becomes the authorization and its tools
+#: run unattended.
 _MCP_APPROVAL_MODES = frozenset({"auto", "prompt", "writes", "approve"})
-_DEFAULT_MCP_APPROVAL_MODE = "auto"
+_DEFAULT_MCP_APPROVAL_MODE = "approve"
 
 
 def _feature_flag(name: str) -> bool:
