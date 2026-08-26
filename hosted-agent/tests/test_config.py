@@ -714,6 +714,22 @@ class ChildEnvironmentTests(unittest.TestCase):
                 child["DIGIBUDDY_MCP_BEARER_TOKEN"], "mcp-secret"
             )
 
+    def test_foundry_identity_endpoint_reaches_mcp_processes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            child = self._prepared(
+                directory,
+                extra_env={
+                    "IDENTITY_ENDPOINT": "http://127.0.0.1:40342/metadata/identity",
+                    "IDENTITY_HEADER": "identity-secret",
+                },
+            )
+
+            self.assertEqual(
+                child["IDENTITY_ENDPOINT"],
+                "http://127.0.0.1:40342/metadata/identity",
+            )
+            self.assertEqual(child["IDENTITY_HEADER"], "identity-secret")
+
     def test_an_unrelated_variable_does_not_travel(self):
         with tempfile.TemporaryDirectory() as directory:
             self.assertNotIn("UNRELATED_BUILD_TOKEN", self._prepared(directory))

@@ -123,8 +123,15 @@ _INHERITED_VARIABLES = frozenset(
         "http_proxy",
         "https_proxy",
         "no_proxy",
-        # Payload settings that are addresses, not secrets
+        # Managed identity transport. The header is scoped to the local
+        # identity endpoint; it is not an access token for any Azure resource.
         "AZURE_CLIENT_ID",
+        "IDENTITY_ENDPOINT",
+        "IDENTITY_HEADER",
+        "IDENTITY_SERVER_THUMBPRINT",
+        "MSI_ENDPOINT",
+        "MSI_SECRET",
+        # Payload settings that are addresses, not secrets
         "DIGIBUDDY_BLOB_SERVICE_URI",
         "DIGIBUDDY_BLOB_CONTAINER",
         "DIGIBUDDY_BLOB_LINK_TTL_HOURS",
