@@ -49,7 +49,9 @@ Codex exposes only a shell, so every payload tool is a Python module with a CLI 
 
 The `foundry-iq` entry is the agent's default knowledge base: a Foundry IQ knowledge base on Azure AI Search, exposed over MCP as the single `knowledge_base_retrieve` tool. It plans and decomposes the query itself, runs hybrid retrieval across its knowledge sources, and returns cited passages.
 
-The endpoint is protected by Microsoft Entra rather than an API key, so it is reached through the `mcp_http_proxy` stdio bridge instead of a bare HTTPS entry — the bridge mints a token for `https://search.azure.com/.default` from the container's managed identity on every call, which a static `bearer_token_env_var` could not do. The identity needs the **Search Index Data Reader** role on the search service.
+The endpoint is protected by Microsoft Entra rather than an API key, so it is reached through the `mcp_http_proxy` stdio bridge instead of a bare HTTPS entry — the bridge mints a token for `https://search.azure.com/.default` from the container's managed identity on every call, which a static `bearer_token_env_var` could not do. The identity needs the **Search Index Data Reader** role on the search service, and the *search service's own* identity needs **Cognitive Services OpenAI User** on the Azure OpenAI resource its knowledge base names, otherwise retrieval fails with a `BadGateway` about authenticating to the model endpoint.
+
+Every remote server goes through the same bridge. Codex's built-in remote MCP client registered zero tools for `microsoft-learn` inside the Foundry sandbox even though the endpoint answers normally from that container, so the catalogue routes it through `mcp_http_proxy` with no `MCP_HTTP_PROXY_SCOPE`: an empty scope means the bridge sends no `Authorization` header, which is what a public endpoint expects. Plaintext URLs are still refused.
 
 Every profile that restricts `mcp_servers` still lists `foundry-iq`, and `src/AGENTS.md` routes internal and field questions to it before the local `work_memory/` corpus and before Microsoft Learn.
 

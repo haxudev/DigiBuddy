@@ -160,6 +160,19 @@ class SkillBundleTests(unittest.TestCase):
             environment["MCP_HTTP_PROXY_SCOPE"], "https://search.azure.com/.default"
         )
 
+    def test_microsoft_learn_uses_the_transport_that_works(self):
+        """Codex's remote client registered none of Learn's tools in Foundry."""
+        config = json.loads((ROOT / "src" / "mcp.json").read_text(encoding="utf-8"))
+        server = config["servers"]["microsoft-learn"]
+
+        self.assertEqual(server["args"], ["-m", "mcp_http_proxy"])
+        self.assertEqual(
+            server["env"]["MCP_HTTP_PROXY_URL"],
+            "https://learn.microsoft.com/api/mcp",
+        )
+        # Learn's endpoint is public; a scope would mint a token nobody wants.
+        self.assertNotIn("MCP_HTTP_PROXY_SCOPE", server["env"])
+
     def test_every_profile_can_reach_the_default_knowledge_base(self):
         profiles = json.loads(
             (ROOT / "src" / "profiles.json").read_text(encoding="utf-8")

@@ -111,3 +111,38 @@ class McpHttpProxyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AnonymousEndpointTests(unittest.TestCase):
+    """A public MCP server has no audience to mint a token for."""
+
+    def _proxy(self, opener, credential):
+        return mcp_http_proxy.McpHttpProxy(
+            "https://learn.microsoft.com/api/mcp",
+            "",
+            credential=credential,
+            opener=opener,
+        )
+
+    def test_an_empty_scope_sends_no_authorization_header(self):
+        opener = FakeOpener(
+            [
+                FakeResponse(
+                    b'{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}',
+                    {"Content-Type": "application/json"},
+                )
+            ]
+        )
+        credential = FakeCredential()
+
+        self._proxy(opener, credential).exchange(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        )
+
+        request = opener.requests[0][0]
+        self.assertIsNone(request.get_header("Authorization"))
+        self.assertEqual(credential.scopes, [])
+
+    def test_plaintext_is_still_refused(self):
+        with self.assertRaises(ValueError):
+            mcp_http_proxy.McpHttpProxy("http://learn.microsoft.com/api/mcp", "")

@@ -1,8 +1,11 @@
 {
 	"servers": {
 		"microsoft-learn": {
-			"url": "https://learn.microsoft.com/api/mcp",
-			"type": "http"
+			"command": "python",
+			"args": ["-m", "mcp_http_proxy"],
+			"env": {
+				"MCP_HTTP_PROXY_URL": "https://learn.microsoft.com/api/mcp"
+			}
 		},
 		"cloud-pricing": {
 			"url": "https://<your-cloud-pricing-service>.azurewebsites.net/mcp",

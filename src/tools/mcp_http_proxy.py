@@ -26,8 +26,6 @@ class McpHttpProxy:
     ):
         if not url.startswith("https://"):
             raise ValueError(f"{URL_ENV} must use HTTPS")
-        if not scope:
-            raise ValueError(f"{SCOPE_ENV} is required")
         self._url = url
         self._scope = scope
         self._credential = credential
@@ -47,11 +45,12 @@ class McpHttpProxy:
         payload = json.dumps(message, separators=(",", ":")).encode("utf-8")
         headers = {
             "Accept": "application/json, text/event-stream",
-            "Authorization": (
-                f"Bearer {self._resolved_credential().get_token(self._scope).token}"
-            ),
             "Content-Type": "application/json",
         }
+        if self._scope:
+            headers["Authorization"] = (
+                f"Bearer {self._resolved_credential().get_token(self._scope).token}"
+            )
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
         if self._protocol_version:
