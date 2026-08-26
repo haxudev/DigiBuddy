@@ -22,7 +22,7 @@ Everything that gives the agent its personality and capabilities lives in `src/`
 
 The runtime concatenates the hosted-agent guardrails with the payload persona into the Codex base instructions at startup.
 
-`/workspace` is per-container scratch that is never committed anywhere, but a skill cannot tell that from the inside. Superclarity refuses to create its `.superclarity/` state in a git workspace that would track it, and asks the caller to confirm first — a question that costs a turn and has no useful answer here. Startup therefore writes the ignore rule the skill looks for into `/workspace/.gitignore`, appending to any existing file rather than replacing it.
+`/workspace` is per-container scratch that is never committed anywhere, but a skill cannot tell that from the inside — each turn runs in `/workspace/conversations/<id>`, where the sandbox masks `.git` with an empty read-only directory that looks like a repository to anything probing for one. Superclarity refuses to create its `.superclarity/` state in a git workspace that would track it, and asks the caller to confirm first — a question that costs a turn and has no useful answer here. Both the root and each conversation directory therefore get the ignore rule the skill looks for, appended to any existing `.gitignore` rather than replacing it.
 
 ## Turn Inputs
 

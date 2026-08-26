@@ -20,6 +20,7 @@ from .config import (
     apply_model_overrides,
     build_catalogue,
     effective_model,
+    ignore_scratch_state,
     load_instructions,
     load_profiles,
     prepare_codex_environment,
@@ -214,6 +215,10 @@ class CodexRuntime:
 
             workspace = self.conversation_workspace(previous_response_id, response_id)
             workspace.mkdir(parents=True, exist_ok=True)
+            # Skills run here, not at the workspace root, and the sandbox masks
+            # `.git` with an empty read-only directory that looks like a
+            # repository to anything checking for one.
+            ignore_scratch_state(workspace)
             workspace_id = (
                 "" if workspace == self._base_settings.workspace else workspace.name
             )

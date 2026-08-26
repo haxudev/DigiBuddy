@@ -1030,7 +1030,7 @@ def load_credentials(
     }
 
 
-def _ignore_scratch_state(workspace: Path) -> None:
+def ignore_scratch_state(workspace: Path) -> None:
     """Declare the workspace's scratch state directories untracked.
 
     Superclarity refuses to create `.superclarity/` in a git workspace that
@@ -1069,7 +1069,7 @@ def prepare_codex_environment(
 ) -> dict[str, str]:
     active = profile or DEFAULT_PROFILE
     settings.workspace.mkdir(parents=True, exist_ok=True)
-    _ignore_scratch_state(settings.workspace)
+    ignore_scratch_state(settings.workspace)
     settings.codex_home.mkdir(parents=True, exist_ok=True)
     install_global_skills(settings, active, store)
     config_path = settings.codex_home / "config.toml"

@@ -1,4 +1,5 @@
 import asyncio
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -472,3 +473,55 @@ class ArtifactOwnershipTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConversationScratchStateTests(unittest.TestCase):
+    """Skills run in the conversation directory, not the workspace root.
+
+    The sandbox masks `.git` there with an empty read-only directory, so
+    anything probing for a repository finds one. Superclarity does, and stops
+    to ask whether it may write `.superclarity/` into it.
+    """
+
+    GUARD = re.compile(r"(^|\n)\.superclarity/?\s*$", re.M)
+
+    def test_the_conversation_workspace_declares_its_state_untracked(self):
+        async def exercise():
+            with tempfile.TemporaryDirectory() as directory:
+                current = settings(directory)
+                current.workspace.mkdir()
+                runtime = CodexRuntime(current, NullConfigStore())
+                conversation = runtime.conversation_workspace(None, "response-1")
+
+                async def ensure_started(_profile, _reasoning_effort=""):
+                    return None
+
+                async def start_thread(_model, _profile, _workspace=None):
+                    return "thread-1"
+
+                async def request(_method, _params):
+                    return {"turn": {"id": "turn-1"}}
+
+                async def next_message(_cancellation):
+                    return {
+                        "method": "turn/completed",
+                        "params": {"turn": {"id": "turn-1", "status": "completed"}},
+                    }
+
+                runtime._ensure_started = ensure_started
+                runtime._start_thread = start_thread
+                runtime._request = request
+                runtime._next_turn_message = next_message
+
+                async for _ in runtime.stream_turn(
+                    "build it",
+                    previous_response_id=None,
+                    response_id="response-1",
+                    cancellation_signal=asyncio.Event(),
+                ):
+                    pass
+
+                body = (conversation / ".gitignore").read_text(encoding="utf-8")
+                self.assertTrue(self.GUARD.search(body), body)
+
+        asyncio.run(exercise())
