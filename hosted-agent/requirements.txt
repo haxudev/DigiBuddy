@@ -1,1 +1,9 @@
 azure-ai-agentserver-responses==2.0.0
+# Pinned deliberately, not transitively. `responses` only asks for
+# `core>=2.0.0`, so an unrelated rebuild picked up core 2.1.0, which refuses
+# every request in a hosted environment unless resilient tasks are enabled --
+# production started answering `server_error` to even a trivial prompt with no
+# change of our own. Moving to 2.1.0 means adopting the durable task
+# subsystem, which is its own upgrade; until then the runtime we ship is the
+# runtime we tested.
+azure-ai-agentserver-core==2.0.0
