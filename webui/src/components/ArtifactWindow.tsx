@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Artifact } from "@/lib/artifacts";
+import { withScriptErrorReporter } from "@/lib/artifact-preview";
 import { artifactPreviewKind } from "@/lib/artifacts";
 import Markdown from "./Markdown";
 import styles from "./artifact-panel.module.css";
@@ -90,6 +91,12 @@ export default function ArtifactWindow({ artifacts, onClose }: Props) {
   const selectedArtifactUrl = selected?.url ?? "";
   const previewContent =
     selected?.kind === "link" ? remotePreview?.content ?? "" : selected?.content ?? "";
+  // Only the rendered preview carries the reporter; the source view has to show
+  // the file the agent actually wrote.
+  const previewDocument = useMemo(
+    () => (previewKind === "html" ? withScriptErrorReporter(previewContent) : previewContent),
+    [previewContent, previewKind],
+  );
   const downloadUrl = selected?.managed
     ? `${selected.url}?download=1`
     : selected?.url ?? "";
@@ -258,7 +265,7 @@ export default function ArtifactWindow({ artifacts, onClose }: Props) {
                     // cookies and storage nor its API. Granting both together
                     // would be the same as not sandboxing at all.
                     sandbox="allow-scripts"
-                    srcDoc={previewContent}
+                    srcDoc={previewDocument}
                   />
                 ) : previewKind === "markdown" && !showSource ? (
                   <div className={styles.document}>

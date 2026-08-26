@@ -69,7 +69,44 @@ Path("deliverables/gcr_fy27_july_acr.html").write_text(html, encoding="utf-8")
 - 交付前**自己检查一遍**：`grep` 页面里有没有 `TODO`、`占位`、`示例`、`lorem`、
   `NaN`、`undefined`；确认数据对象非空；确认每个 `setOption` 都拿到了非空数组。
 
-## 4. 骨架
+## 4. 脚本必须能跑起来
+
+页面的骨架是 HTML，内容是脚本注入的。所以脚本一旦没跑起来，用户看到的正是本节
+要防的那种交付物：标题、卡片边框、表头都在，里面全是空的 —— 而且**控制台之外
+没有任何提示**。
+
+**把整段渲染脚本包进 IIFE。**
+
+```html
+<script>/*ECHARTS*/</script>
+<script>
+(function () {
+  const DATA = /*DATA*/;
+  // ... 所有渲染代码写在这里
+})();
+</script>
+```
+
+这一条不是风格问题。脚本的顶层就是全局作用域，`window` 上已经有一批同名属性，
+顶层的 `const`/`let` 撞上它们会直接抛 `SyntaxError: Identifier 'x' has already
+been declared`。这个错误发生在**整块脚本执行之前**，所以撞名那行之前的代码也
+一行都不会跑，页面完全空白。真实事故：一份 43 行数据齐备的报告，因为写了
+`const top = rows.slice(0, 15)` 而整页空白 —— `top` 是 `window.top`。
+
+同类地雷（顶层不可用作 `const`/`let`/`function` 名）：
+
+```
+top  name  status  length  self  parent  frames  closed  origin  location
+history  navigator  screen  event  external  menubar  toolbar  personalbar
+```
+
+包进 IIFE 后这些名字在函数作用域内都是安全的，无需逐个记忆；这正是要用 IIFE 而
+不是靠改名的原因。
+
+交付前用 `node --check` 之类的语法检查是**不够的**：`top` 冲突只在浏览器全局
+作用域才出现，函数作用域里的同一段代码完全合法。所以靠的是 IIFE，不是检查。
+
+## 5. 骨架
 
 ```html
 <!doctype html>
@@ -103,6 +140,8 @@ Path("deliverables/gcr_fy27_july_acr.html").write_text(html, encoding="utf-8")
 
 <script>/*ECHARTS*/</script>
 <script>
+(function () {
+
 const DATA = /*DATA*/;
 
 document.getElementById('cards').innerHTML = DATA.kpis
@@ -122,6 +161,8 @@ document.getElementById('detail').innerHTML =
   '<tr>' + DATA.columns.map(c => `<th class="${c.num ? 'num' : ''}">${c.label}</th>`).join('') + '</tr>' +
   DATA.rows.map(r => '<tr>' + r.map((v, i) =>
     `<td class="${DATA.columns[i].num ? 'num' : ''}">${v}</td>`).join('') + '</tr>').join('');
+
+})();
 </script>
 </body>
 </html>
@@ -145,21 +186,21 @@ document.getElementById('detail').innerHTML =
 }
 ```
 
-## 5. 中文与货币
+## 6. 中文与货币
 
 - 字体栈里必须有 `'Microsoft YaHei'`，否则中文在部分环境下会退回默认衬线字体。
 - ECharts 的 `textStyle.fontFamily` 同样设为 `'Segoe UI','Microsoft YaHei',sans-serif`。
 - 金额统一单位并在口径行写明（如"单位：$M"），不要在同一张表里混用 `$487.4M`
   和 `487400000`。
 
-## 6. 交付
+## 7. 交付
 
 - 写到 `deliverables/`，文件名可读（`gcr_fy27_july_acr.html`，不要 UUID）。
 - 一次交付一个文件。图表、数据、样式全在里面 —— 不要产出配套的 `.js`、`.css`
   或数据文件，它们不会随预览一起加载。
 - 在回复中说明文件名、口径和关键结论；不要只丢一个文件名。
 
-## 7. 不适用的东西
+## 8. 不适用的东西
 
 - **Express、Vite、Next 等服务端或构建框架用不上。** 交付物是一个静态文件，在无
   网络的沙箱里打开，没有进程为它服务。不要生成 `package.json`、`server.js`，也

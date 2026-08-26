@@ -14,7 +14,7 @@ const source = (path: string) =>
 test("a delivered report may run its own scripts", () => {
   assert.match(
     source("components/ArtifactWindow.tsx"),
-    /sandbox="allow-scripts"\s*\n\s*srcDoc=\{previewContent\}/,
+    /sandbox="allow-scripts"\s*\n\s*srcDoc=\{previewDocument\}/,
   );
 });
 
