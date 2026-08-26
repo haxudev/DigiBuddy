@@ -271,9 +271,60 @@ class McpCatalogueTests(unittest.TestCase):
             self.assertEqual(server["command"], "python")
             self.assertEqual(server["args"], ["-m", "agent_maturity.mcp"])
             self.assertEqual(
-                server["env"]["PYTHONPATH"],
+                server["env"]["PYTHONPATH"].split(os.pathsep)[0],
                 "/app/hosted-agent/vendor/agent-maturity",
             )
+
+    def test_a_stdio_server_can_import_the_payload_tools_it_runs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory,
+                servers={
+                    "msxi-lake": {
+                        "command": "python",
+                        "args": ["-m", "mcp_http_proxy"],
+                        "env": {"MCP_HTTP_PROXY_SCOPE": "api://lake/.default"},
+                    }
+                },
+            )
+
+            server = load_mcp_servers(configured)["msxi-lake"]
+            self.assertIn(
+                str(configured.payload_root / "tools"),
+                server["env"]["PYTHONPATH"].split(os.pathsep),
+            )
+            self.assertEqual(
+                server["env"]["MCP_HTTP_PROXY_SCOPE"], "api://lake/.default"
+            )
+
+    def test_a_stdio_server_inherits_the_managed_identity_transport(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory,
+                servers={
+                    "msxi-lake": {
+                        "command": "python",
+                        "args": ["-m", "mcp_http_proxy"],
+                    }
+                },
+            )
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "IDENTITY_ENDPOINT": "http://127.0.0.1:42/token",
+                    "IDENTITY_HEADER": "identity-secret",
+                    "AZURE_CLIENT_ID": "client-id",
+                },
+                clear=False,
+            ):
+                server = load_mcp_servers(configured)["msxi-lake"]
+
+            self.assertEqual(
+                server["env"]["IDENTITY_ENDPOINT"], "http://127.0.0.1:42/token"
+            )
+            self.assertEqual(server["env"]["IDENTITY_HEADER"], "identity-secret")
+            self.assertEqual(server["env"]["AZURE_CLIENT_ID"], "client-id")
 
     def test_disabled_and_plaintext_servers_are_skipped(self):
         with tempfile.TemporaryDirectory() as directory:

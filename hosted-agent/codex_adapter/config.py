@@ -353,6 +353,54 @@ def _read_mcp_document(
     return parsed if isinstance(parsed, dict) else {}
 
 
+#: Names a stdio MCP server inherits from the runtime.
+#:
+#: Codex starts a stdio server with the environment declared in the catalogue,
+#: not the adapter's own. Without this, a packaged server that authenticates
+#: with the deployment identity has no transport to authenticate through, and
+#: a packaged server written in Python cannot import the module it runs.
+_STDIO_SERVER_VARIABLES = frozenset(
+    {
+        "AZURE_CLIENT_ID",
+        "IDENTITY_ENDPOINT",
+        "IDENTITY_HEADER",
+        "IDENTITY_SERVER_THUMBPRINT",
+        "MSI_ENDPOINT",
+        "MSI_SECRET",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+    }
+)
+
+
+def _stdio_server_environment(
+    settings: RuntimeSettings, declared: dict[str, str]
+) -> dict[str, str]:
+    """Give a packaged stdio server the runtime it was written against."""
+    environment = {
+        name: value
+        for name in _STDIO_SERVER_VARIABLES
+        if (value := os.environ.get(name)) is not None
+    }
+    environment.update(declared)
+    # The catalogue declares where a server's own code lives; the payload tools
+    # directory is where the runtime's own bridges live. Both have to resolve.
+    tools_root = str(settings.payload_root / "tools")
+    declared_path = declared.get("PYTHONPATH", "")
+    parts = [part for part in declared_path.split(os.pathsep) if part]
+    if tools_root not in parts:
+        parts.append(tools_root)
+    environment["PYTHONPATH"] = os.pathsep.join(parts)
+    return environment
+
+
 def load_mcp_servers(
     settings: RuntimeSettings,
     store: ConfigStore | None = None,
@@ -410,8 +458,12 @@ def load_mcp_servers(
             if isinstance(args, list):
                 entry["args"] = [str(arg) for arg in args]
             env = server.get("env")
-            if isinstance(env, dict):
-                entry["env"] = {str(key): str(value) for key, value in env.items()}
+            resolved_env = (
+                {str(key): str(value) for key, value in env.items()}
+                if isinstance(env, dict)
+                else {}
+            )
+            entry["env"] = _stdio_server_environment(settings, resolved_env)
         else:
             continue
         resolved[name] = entry
