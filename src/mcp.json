@@ -10,11 +10,12 @@
 			"enabled": false
 		},
 		"msxi-lake": {
-			"url": "https://ifacr-mcp-aca-d2kcgr7r.ambitiousriver-db9f64e9.eastus2.azurecontainerapps.io/mcp",
-			"type": "http",
-			"enabled": true,
-			"bearer_token_env_var": "DIGIBUDDY_MCP_BEARER_TOKEN",
-			"startup_timeout_sec": 30
+			"command": "python",
+			"args": ["-m", "mcp_http_proxy"],
+			"env": {
+				"MCP_HTTP_PROXY_URL": "https://ifacr-mcp-aca-d2kcgr7r.ambitiousriver-db9f64e9.eastus2.azurecontainerapps.io/mcp",
+				"MCP_HTTP_PROXY_SCOPE": "api://1cb26eb9-cba1-4498-b7af-35cdf8944955/.default"
+			}
 		},
 		"agent-maturity": {
 			"command": "python",
