@@ -125,6 +125,14 @@ The `azure_blob` tool still provides **user-delegation SAS** links for explicit 
 
 A file that cannot be written is retried before it is given up on, and a turn that still ends with unsaved files reports how many in the same invisible manifest that carries the delivery cards. The console renders that as a dismissible notice under the answer rather than as a sentence inside it, so a storage outage does not become a permanent line in the transcript. The answer itself is delivered either way.
 
+### HTML reports
+
+A delivered HTML file may run its own scripts, so a report can draw charts. It is held in an opaque origin with no network: the preview grants `allow-scripts` but never `allow-same-origin`, and the bytes are served under `default-src 'none'`. Scripts run, but the page cannot read this app's cookies, call its API, or send what it is displaying anywhere.
+
+That is why a CDN is not an option, and why the agent inlines instead. ECharts ships in the image at `$DIGIBUDDY_VENDOR_ROOT/echarts.min.js`, pinned by version and checked by digest at build time; the `html-report` skill tells the agent to read it and paste it into the page. The result is one self-contained file that renders in the preview, opens offline, and survives being forwarded. Server frameworks have no role here — nothing is serving the deliverable.
+
+Because the library travels inside the file, a report starts at about a megabyte before any content, so the preview accepts up to 8 MB of text.
+
 | Variable | Description |
 | --- | --- |
 | `DIGIBUDDY_BLOB_SERVICE_URI` | Blob service endpoint |

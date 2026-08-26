@@ -464,6 +464,15 @@ class HttpConfigStore:
         path = artifact_path(artifact_id, filename, owner)
         parts = path.split("/", 3)
         if len(parts) != 4:
+            # The console addresses artifacts by owner, so the flat layout that
+            # predates sign-in has nowhere to go here. Say so: otherwise a turn
+            # writes a deliverable, the upload refuses, and the only trace is a
+            # count of files that failed for no stated reason.
+            logger.warning(
+                "Config API cannot store an artifact without an owner; "
+                "the console addresses artifacts by owner (%s)",
+                filename,
+            )
             return False
         _, owner_segment, artifact_segment, name_segment = parts
         try:

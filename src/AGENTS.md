@@ -69,6 +69,7 @@ Guidance:
   - Do NOT use `<style>` blocks, CSS classes, `float`, `position`, `flexbox`, or `grid` — Outlook strips them.
 - **Attachment strategy**: Only plain-text files (.txt, .md, .csv, .log) are sent as direct email attachments. ALL binary files (PDF, images, Office docs, archives, etc.) in `--attach` are **automatically** uploaded to Azure Blob Storage with elegant download links in the email body. The tool retries this pre-send staging once automatically before it gives up.
 - Do not run `pip install` — all Python libraries are already available.
+- **HTML deliverables**: A delivered HTML file is rendered in a sandbox with **no network** — no CDN, no external stylesheet, no remote font or image, no `fetch`. A page that links `cdn.jsdelivr.net` renders blank. Everything the page needs must be inside the file. ECharts is in the image at `$DIGIBUDDY_VENDOR_ROOT/echarts.min.js`; read it and inline it into a `<script>` block. Use the **html-report** skill for reports, dashboards and any visual page. Server frameworks (Express, Vite, Next) have no role: the deliverable is one static file with no process behind it.
 
 ## Guidelines
 - Always fetch live pricing data before quoting costs

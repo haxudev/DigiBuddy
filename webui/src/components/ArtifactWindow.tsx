@@ -11,7 +11,11 @@ type Props = {
   onClose: () => void;
 };
 
-const MAX_TEXT_PREVIEW_BYTES = 2 * 1024 * 1024;
+// A report carries its charting library inside it, because the sandbox it is
+// rendered in has no network to fetch one from. ECharts alone is over a
+// megabyte, so the old two-megabyte ceiling refused exactly the deliverables
+// this preview exists for.
+const MAX_TEXT_PREVIEW_BYTES = 8 * 1024 * 1024;
 
 function kindLabel(artifact: Artifact): string {
   if (artifact.kind === "link") return artifact.language.toUpperCase() || "FILE";
@@ -247,7 +251,13 @@ export default function ArtifactWindow({ artifacts, onClose }: Props) {
                   <iframe
                     className={styles.frame}
                     title={selected.title}
-                    sandbox=""
+                    // A report is charts and tables, so the preview has to run
+                    // the page's own scripts. `allow-scripts` without
+                    // `allow-same-origin` keeps the document in an opaque
+                    // origin: it can draw, and it can reach neither this app's
+                    // cookies and storage nor its API. Granting both together
+                    // would be the same as not sandboxing at all.
+                    sandbox="allow-scripts"
                     srcDoc={previewContent}
                   />
                 ) : previewKind === "markdown" && !showSource ? (

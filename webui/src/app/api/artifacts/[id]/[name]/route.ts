@@ -72,7 +72,13 @@ export async function GET(
         "Content-Disposition": contentDisposition(name, inline),
         "Content-Length": String(payload.byteLength),
         "Content-Security-Policy":
-          "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:",
+          // `sandbox` puts the file in an opaque origin, so it can never read
+          // this app's cookies or call its API however it was opened. Within
+          // that origin a report has to run its own scripts to draw charts,
+          // but `default-src 'none'` still denies it the network: no CDN, and
+          // no way to send what it is displaying anywhere. A deliverable has
+          // to carry everything it needs.
+          "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:",
         "Content-Type": CONTENT_TYPES[extension] || "application/octet-stream",
         "Cross-Origin-Resource-Policy": "same-origin",
         "X-Content-Type-Options": "nosniff",

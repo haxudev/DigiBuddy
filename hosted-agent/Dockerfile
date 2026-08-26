@@ -37,6 +37,22 @@ RUN cd /app/codex \
 COPY src /opt/digibuddy
 RUN cd /opt/digibuddy && npm ci --omit=dev
 
+# Browser libraries an HTML deliverable can inline. A delivered report is
+# rendered in a sandbox with no network at all -- no CDN, deliberately, because
+# a page that can fetch is a page that can send what it is displaying
+# somewhere. So the library has to travel inside the file, and the file cannot
+# be built unless the library is already in the image. Pinned by version and
+# checked by digest for the same reason the Python runtime is pinned: a rebuild
+# must not quietly change what production ships.
+ENV DIGIBUDDY_VENDOR_ROOT=/opt/digibuddy/vendor
+RUN mkdir -p "$DIGIBUDDY_VENDOR_ROOT" \
+    && curl -fsSL https://registry.npmjs.org/echarts/-/echarts-6.1.0.tgz -o /tmp/echarts.tgz \
+    && echo "681aff88cc1038c3fa941a3a53d1b177a52250b05335efc607d6105ae13be481  /tmp/echarts.tgz" | sha256sum -c - \
+    && tar -xzf /tmp/echarts.tgz -C /tmp package/dist/echarts.min.js \
+    && mv /tmp/package/dist/echarts.min.js "$DIGIBUDDY_VENDOR_ROOT/echarts.min.js" \
+    && rm -rf /tmp/echarts.tgz /tmp/package \
+    && echo "b66b25aeb4df84e33199dc21694014d336d222cbd9deb0e5a7c14bd6aa0d0fd0  $DIGIBUDDY_VENDOR_ROOT/echarts.min.js" | sha256sum -c -
+
 COPY hosted-agent /app/hosted-agent
 
 RUN useradd --create-home --shell /bin/bash agent \
