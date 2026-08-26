@@ -35,6 +35,7 @@ services:
       CODEX_APPROVAL_POLICY: never
       CODEX_SANDBOX: workspace-write
       CODEX_NETWORK_ACCESS: "true"
+      AZURE_CLIENT_ID: ${AGENT_DIGIBUDDY_CODEX_INSTANCE_IDENTITY_CLIENT_ID}
       DIGIBUDDY_CONFIG_URI: https://digibuddyprodeus2.blob.core.windows.net/digibuddy-config
       DIGIBUDDY_CONFIG_API: https://digibuddy-webui.gentlemeadow-add1d43f.eastus2.azurecontainerapps.io/api/runtime
       DIGIBUDDY_CONFIG_API_SECRET: ${DIGIBUDDY_CONFIG_API_SECRET}
