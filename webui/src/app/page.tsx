@@ -14,6 +14,7 @@ import AgentCapabilities from "@/components/AgentCapabilities";
 import ArtifactWindow from "@/components/ArtifactWindow";
 import ActivityTrail from "@/components/ActivityTrail";
 import AskUserCard from "@/components/AskUserCard";
+import CopyButton from "@/components/CopyButton";
 import Markdown from "@/components/Markdown";
 import SessionSidebar from "@/components/SessionSidebar";
 import SignIn from "@/components/SignIn";
@@ -49,13 +50,28 @@ import {
 } from "@/lib/mentions";
 import {
   commandQuery,
+  commandSkills,
+  exceedsSkillLimit,
+  isCommandSelected,
   leadingCommand,
   matchCommands,
+  MAX_COMMAND_SKILLS,
   resolveCommand,
   stripCommand,
+  toggleCommand,
   type SkillCommand,
 } from "@/lib/skill-commands";
 import { splitMessage } from "@/lib/ask-user";
+import {
+  dropSession,
+  finishRun,
+  forSession,
+  isRunning as sessionIsRunning,
+  runState,
+  setForSession,
+  startRun,
+  type RunStates,
+} from "@/lib/session-runs";
 import {
   deliveryFocus,
   shouldOpenDeliverables,
@@ -92,6 +108,17 @@ const EFFORT_LABELS: Record<string, string> = {
 
 /** Stable empty list, so a menu with nothing in it does not rerender the page. */
 const EMPTY_COMMANDS: SkillCommand[] = [];
+
+/**
+ * Stable empties for the per-session stores.
+ *
+ * Identity matters here: these feed `useMemo` dependencies and component
+ * props, and a fresh `[]` per render would rerender the transcript on every
+ * keystroke.
+ */
+const EMPTY_ACTIVITY: ActivityEntry[] = [];
+const EMPTY_SELECTION: SkillCommand[] = [];
+const EMPTY_TURN_COMMANDS: Record<string, string[]> = {};
 
 /** What the composer will accept, matching the formats Codex can open. */
 const ATTACHMENT_ACCEPT =
@@ -138,11 +165,36 @@ function toStoredMessages(messages: Message[]): StoredMessage[] {
     .filter((message) => message.content.trim());
 }
 
+/**
+ * An answer as plain text, for the clipboard.
+ *
+ * Structured questions are rendered as a card rather than as their fenced JSON,
+ * so copying the raw message would hand over a block of markup the reader never
+ * saw. The question is copied instead, which is what was on screen.
+ */
+function copyableAnswer(cleaned: string, messageId: string): string {
+  return splitMessage(cleaned, messageId)
+    .map((segment) =>
+      segment.kind === "ask" ? segment.request.question : segment.text,
+    )
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 export default function Home() {
   const [selectedId, setSelectedId] = useState("");
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState("");
-  const [isRunning, setIsRunning] = useState(false);
+  /**
+   * Which conversations have a turn in flight, keyed by session id.
+   *
+   * A run belongs to its conversation, not to the page. The console used to
+   * hold a single `isRunning` next to a single agent, which forced switching
+   * sessions to abort whatever was running -- clicking away from a question
+   * killed the answer to it.
+   */
+  const [runs, setRuns] = useState<RunStates>({});
   const [profiles, setProfiles] = useState<ProfileCapabilities[]>([]);
   // `null` while the answer is unknown, so the console does not flash a
   // sign-in screen at someone who is already signed in.
@@ -153,7 +205,10 @@ export default function Home() {
     rejected: boolean;
     reason: string;
   } | null>(null);
-  const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  /** Thinking and tool rows, per conversation, so a switch does not lose them. */
+  const [activityBySession, setActivityBySession] = useState<
+    Record<string, ActivityEntry[]>
+  >({});
   const [attachments, setAttachments] = useState<TurnAttachment[]>([]);
   const [reasoningEffort, setReasoningEffort] = useState("");
   /**
@@ -185,17 +240,24 @@ export default function Home() {
   });
   /** Deliveries the runtime could not save, dismissed by the reader. */
   const [dismissedFailures, setDismissedFailures] = useState<string[]>([]);
-  /** When the current turn was sent, so the wait can be counted honestly. */
-  const [runStartedAt, setRunStartedAt] = useState(0);
   /**
-   * The skill chosen for the next message.
+   * The skills chosen for the next message, per conversation.
    *
    * One message, not the conversation. A skill is markdown the model reads on
    * demand, so unlike the agent it can be chosen per turn -- and pretending
    * otherwise would either lie about the scope or force a new conversation for
    * every command.
+   *
+   * Several at once, because a turn may legitimately need more than one: the
+   * runtime accepts up to `MAX_COMMAND_SKILLS`, and a curated command already
+   * bundles two or three. Keyed by session so an armed skill stays with the
+   * conversation it was armed in.
    */
-  const [pendingCommand, setPendingCommand] = useState<SkillCommand | null>(null);
+  const [pendingBySession, setPendingBySession] = useState<
+    Record<string, SkillCommand[]>
+  >({});
+  /** Why a skill could not be added, said next to the chips rather than as an error. */
+  const [skillNotice, setSkillNotice] = useState("");
   const [pendingTurn, setPendingTurn] = useState<{
     sessionId: string;
     text: string;
@@ -205,7 +267,18 @@ export default function Home() {
   // squeezing it. The deliverable window is always an overlay.
   const [navOpen, setNavOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
-  const agentRef = useRef<HttpAgent | null>(null);
+  /**
+   * One live agent per conversation, kept for as long as the conversation is.
+   *
+   * This is deliberately not tied to which session is on screen. An effect that
+   * created the agent on `activeId` had to tear it down again on the way out,
+   * and tearing it down meant `abortRun()`: switching sessions killed the turn
+   * you had just sent. Agents are released when the conversation is deleted,
+   * when the signed-in account changes, and when the console unmounts.
+   */
+  const agentsRef = useRef(
+    new Map<string, { agent: HttpAgent; subscription: { unsubscribe(): void } }>(),
+  );
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -226,11 +299,14 @@ export default function Home() {
   const boundProfile = activeSession?.boundProfile ?? "";
 
   // Each session owns an agent so switching never mixes transcripts or reuses
-  // another session's previous response id.
-  useEffect(() => {
-    if (!activeId) return;
-    const session = getSession(activeId);
-    if (!session) return;
+  // another session's previous response id. The agent outlives the view: it is
+  // created on demand and only released when its conversation goes away.
+  const ensureAgent = useCallback((sessionId: string): HttpAgent | null => {
+    if (!sessionId) return null;
+    const existing = agentsRef.current.get(sessionId);
+    if (existing) return existing.agent;
+    const session = getSession(sessionId);
+    if (!session) return null;
 
     const agent = new HttpAgent({
       url: "/api/agent",
@@ -238,7 +314,6 @@ export default function Home() {
       initialMessages: session.messages.map((message) => ({ ...message })),
       initialState: { previousResponseId: session.previousResponseId },
     });
-    agentRef.current = agent;
 
     const subscription = agent.subscribe({
       onCustomEvent: ({ event }) => {
@@ -247,7 +322,16 @@ export default function Home() {
         if (event.name !== ACTIVITY_EVENT_NAME) return;
         if (!isActivityEvent(event.value)) return;
         const activityEvent = event.value;
-        setActivity((current) => reduceActivity(current, activityEvent));
+        setActivityBySession((current) =>
+          setForSession(
+            current,
+            sessionId,
+            reduceActivity(
+              forSession(current, sessionId, EMPTY_ACTIVITY),
+              activityEvent,
+            ),
+          ),
+        );
       },
       onMessagesChanged: ({ messages: nextMessages }) => {
         const stored = toStoredMessages(nextMessages as Message[]);
@@ -258,7 +342,7 @@ export default function Home() {
           .map((message) => extractEffectiveProfile(message.content))
           .filter((entry) => entry !== null)
           .pop();
-        updateSession(activeId, (item) => ({
+        updateSession(sessionId, (item) => ({
           ...item,
           messages: stored,
           boundProfile: reported ? reported.profile : item.boundProfile,
@@ -272,19 +356,48 @@ export default function Home() {
             ? String((state as Record<string, unknown>).previousResponseId ?? "")
             : "";
         if (!responseId) return;
-        updateSession(activeId, (item) => ({
+        updateSession(sessionId, (item) => ({
           ...item,
           previousResponseId: responseId,
         }));
       },
     });
 
-    return () => {
-      agent.abortRun();
-      subscription.unsubscribe();
-      if (agentRef.current === agent) agentRef.current = null;
-    };
-  }, [activeId]);
+    agentsRef.current.set(sessionId, { agent, subscription });
+    return agent;
+  }, []);
+
+  /** Stop and forget one conversation's agent, for when it is deleted. */
+  const releaseAgent = useCallback((sessionId: string) => {
+    const held = agentsRef.current.get(sessionId);
+    if (!held) return;
+    held.agent.abortRun();
+    held.subscription.unsubscribe();
+    agentsRef.current.delete(sessionId);
+  }, []);
+
+  const releaseAllAgents = useCallback(() => {
+    for (const sessionId of [...agentsRef.current.keys()]) releaseAgent(sessionId);
+  }, [releaseAgent]);
+
+  // Opening a conversation gives it an agent; leaving it does not take it away.
+  useEffect(() => {
+    ensureAgent(activeId);
+  }, [activeId, ensureAgent, sessions]);
+
+  // Every agent holds an open request, so the console must let go of them when
+  // it goes away.
+  useEffect(() => () => releaseAllAgents(), [releaseAllAgents]);
+
+  const isRunning = sessionIsRunning(runs, activeId);
+  const runStartedAt = runState(runs, activeId).startedAt;
+  const activity = forSession(activityBySession, activeId, EMPTY_ACTIVITY);
+  const pendingCommands = forSession(pendingBySession, activeId, EMPTY_SELECTION);
+  const turnCommands = activeSession?.turnCommands ?? EMPTY_TURN_COMMANDS;
+  const runningIds = useMemo(
+    () => Object.keys(runs).filter((sessionId) => runs[sessionId].running),
+    [runs],
+  );
 
   // Conversations are namespaced per account, so the store has to know which
   // account this is before anything reads or writes it.
@@ -303,6 +416,11 @@ export default function Home() {
             },
       )
       .then((me) => {
+        // The anonymous namespace may already have handed out an agent bound to
+        // a thread that is not this account's, so those are dropped before the
+        // store is repointed rather than left to answer into someone else's
+        // conversation.
+        releaseAllAgents();
         setSessionOwner(me.signedIn ? String(me.owner ?? "") : "");
         setIdentity({
           signedIn: Boolean(me.signedIn),
@@ -324,7 +442,7 @@ export default function Home() {
         }),
       );
     return () => controller.abort();
-  }, []);
+  }, [releaseAllAgents]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -411,9 +529,43 @@ export default function Home() {
   const commandOpen = command !== null && !dismissed;
   const mentionOpen = mention !== null && !dismissed;
 
+  /**
+   * Arm or disarm a skill for the next message in this conversation.
+   *
+   * Choosing the same command again takes it back off, so the keystroke that
+   * armed it is also the one that undoes it. A command that would push the turn
+   * past what the runtime carries is refused with a reason rather than accepted
+   * and silently trimmed on arrival.
+   */
   function chooseCommand(entry: SkillCommand) {
-    setPendingCommand(entry);
     setPrompt(stripCommand(prompt));
+    if (exceedsSkillLimit(pendingCommands, entry)) {
+      setSkillNotice(
+        `A message can load at most ${MAX_COMMAND_SKILLS} skills. Remove one before adding ${entry.title}.`,
+      );
+      return;
+    }
+    setSkillNotice("");
+    setPendingBySession((current) =>
+      setForSession(
+        current,
+        activeId,
+        toggleCommand(forSession(current, activeId, EMPTY_SELECTION), entry),
+      ),
+    );
+  }
+
+  function removeCommand(name: string) {
+    setSkillNotice("");
+    setPendingBySession((current) =>
+      setForSession(
+        current,
+        activeId,
+        forSession(current, activeId, EMPTY_SELECTION).filter(
+          (entry) => entry.name !== name,
+        ),
+      ),
+    );
   }
 
   const menuItems: SuggestionItem[] = useMemo(() => {
@@ -423,7 +575,7 @@ export default function Home() {
         title: entry.title,
         description: entry.description || entry.hint,
         token: `/${entry.name}`,
-        current: entry.name === pendingCommand?.name,
+        current: isCommandSelected(pendingCommands, entry.name),
       }));
     }
     if (mentionOpen) {
@@ -442,7 +594,7 @@ export default function Home() {
     commandOpen,
     mentionMatches,
     mentionOpen,
-    pendingCommand,
+    pendingCommands,
     requestedProfile,
   ]);
 
@@ -525,30 +677,59 @@ export default function Home() {
     [dismissedFailures, messages],
   );
 
+  /**
+   * Send one turn, in a named conversation.
+   *
+   * The session is a parameter rather than "whichever is on screen", because
+   * the two are no longer the same thing: a turn keeps running while the reader
+   * looks at another conversation, and `@agent` starts a new conversation and
+   * sends into it before the view has caught up.
+   */
   const send = useCallback(
-    async (value: string, profileOverride = "", withCommand?: SkillCommand | null) => {
-      const agent = agentRef.current;
+    async (
+      sessionId: string,
+      value: string,
+      profileOverride = "",
+      withCommands?: SkillCommand[],
+    ) => {
       const text = value.trim();
-      if (!text || isRunning) return;
+      if (!text) return;
+      if (sessionIsRunning(runs, sessionId)) return;
+      const agent = ensureAgent(sessionId);
       if (!agent) {
         setError("The conversation is still loading. Try sending again.");
         return;
       }
+      const session = getSession(sessionId);
 
       setError("");
-      setActivity([]);
-      setRunStartedAt(Date.now());
-      setIsRunning(true);
-      agent.addMessage({ id: crypto.randomUUID(), role: "user", content: text });
+      setSkillNotice("");
+      setActivityBySession((current) => setForSession(current, sessionId, []));
+      setRuns((current) => startRun(current, sessionId, Date.now()));
+
+      // The id is minted here rather than left to the agent, so the skills this
+      // turn was sent with can be recorded against the message they belong to.
+      const messageId = crypto.randomUUID();
+      const chosen =
+        withCommands ?? forSession(pendingBySession, sessionId, EMPTY_SELECTION);
+      agent.addMessage({ id: messageId, role: "user", content: text });
+      if (chosen.length > 0) {
+        updateSession(sessionId, (item) => ({
+          ...item,
+          turnCommands: {
+            ...item.turnCommands,
+            [messageId]: chosen.map((entry) => entry.name),
+          },
+        }));
+      }
 
       // Files belong to the turn that sends them, so the tray empties as soon
       // as the request is on its way.
       const files = attachments;
       setAttachments([]);
-      // So does the skill. It was chosen for this message, and leaving it set
-      // would silently apply it to the next one too.
-      const chosen = withCommand === undefined ? pendingCommand : withCommand;
-      setPendingCommand(null);
+      // So do the skills. They were chosen for this message, and leaving them
+      // set would silently apply them to the next one too.
+      setPendingBySession((current) => dropSession(current, sessionId));
 
       try {
         await agent.runAgent({
@@ -556,12 +737,18 @@ export default function Home() {
             // A bound conversation keeps its agent whatever the picker shows,
             // because the runtime will keep it regardless.
             connection: {
-              profile: profileOverride || boundProfile || requestedProfile,
+              profile:
+                profileOverride ||
+                session?.boundProfile ||
+                session?.requestedProfile ||
+                "",
             },
             attachments: files,
             reasoningEffort,
-            skills: chosen?.skills ?? [],
-            command: chosen?.name ?? "",
+            skills: commandSkills(chosen),
+            // The runtime's directive cites one command by name; the full set
+            // of skills travels in `skills`.
+            command: chosen[0]?.name ?? "",
           },
         });
       } catch (runError) {
@@ -569,17 +756,22 @@ export default function Home() {
           runError instanceof Error ? runError.message : "Agent request failed",
         );
       } finally {
-        setActivity(settleActivity);
-        setIsRunning(false);
+        setActivityBySession((current) =>
+          setForSession(
+            current,
+            sessionId,
+            settleActivity(forSession(current, sessionId, EMPTY_ACTIVITY)),
+          ),
+        );
+        setRuns((current) => finishRun(current, sessionId));
       }
     },
     [
       attachments,
-      boundProfile,
-      isRunning,
-      pendingCommand,
+      ensureAgent,
+      pendingBySession,
       reasoningEffort,
-      requestedProfile,
+      runs,
     ],
   );
 
@@ -587,14 +779,14 @@ export default function Home() {
     if (
       !pendingTurn ||
       pendingTurn.sessionId !== activeId ||
-      !agentRef.current ||
-      isRunning
+      !agentsRef.current.has(activeId) ||
+      sessionIsRunning(runs, activeId)
     ) {
       return;
     }
     setPendingTurn(null);
-    void send(pendingTurn.text, pendingTurn.profile);
-  }, [activeId, isRunning, pendingTurn, send]);
+    void send(pendingTurn.sessionId, pendingTurn.text, pendingTurn.profile);
+  }, [activeId, pendingTurn, runs, send]);
 
   async function addFiles(list: FileList | null) {
     const files = Array.from(list ?? []);
@@ -628,9 +820,29 @@ export default function Home() {
         chooseCommand(resolved);
         return;
       }
+      // `/command message` sends with that skill on top of anything already
+      // armed, because the chips and the typed token are the same choice made
+      // two ways.
+      if (
+        !isCommandSelected(pendingCommands, resolved.name) &&
+        exceedsSkillLimit(pendingCommands, resolved)
+      ) {
+        setSkillNotice(
+          `A message can load at most ${MAX_COMMAND_SKILLS} skills. Remove one before adding ${resolved.title}.`,
+        );
+        return;
+      }
       setError("");
+      setSkillNotice("");
       setPrompt("");
-      void send(invoked.message, "", resolved);
+      void send(
+        activeId,
+        invoked.message,
+        "",
+        isCommandSelected(pendingCommands, resolved.name)
+          ? pendingCommands
+          : [...pendingCommands, resolved],
+      );
       return;
     }
     const addressed = leadingMention(prompt);
@@ -662,31 +874,27 @@ export default function Home() {
           requestedProfile: resolved.name,
         }));
       }
-      void send(addressed.message, resolved.name);
+      void send(activeId, addressed.message, resolved.name);
       return;
     }
-    if (!activeId || !agentRef.current) {
+    if (!activeId) {
       setError("The conversation is still loading. Try sending again.");
       return;
     }
     const value = prompt;
     setPrompt("");
-    void send(value);
+    void send(activeId, value);
   }
 
   function selectSession(sessionId: string) {
     setSelectedId(sessionId);
     setError("");
+    setSkillNotice("");
     setNavOpen(false);
     setPanelOpen(false);
-    // Activity describes one run, so it never follows the reader to another
-    // session.
-    setActivity([]);
-    setRunStartedAt(0);
-    // Neither does an armed skill. Each conversation runs its own agent, and a
-    // skill that agent cannot reach would be dropped by the runtime — leaving a
-    // chip that promises something the next message would not do.
-    setPendingCommand(null);
+    // Activity, the run and any armed skill stay with the conversation they
+    // belong to. They used to be cleared here, because there was only one of
+    // each -- which is the same reason switching used to abort the run.
   }
 
   function createNewSession(withProfile = ""): string {
@@ -697,6 +905,12 @@ export default function Home() {
   }
 
   function deleteSession(sessionId: string) {
+    // The agent holds an open request against a thread that is about to stop
+    // existing, so this is the one place a run is deliberately cut short.
+    releaseAgent(sessionId);
+    setRuns((current) => dropSession(current, sessionId));
+    setActivityBySession((current) => dropSession(current, sessionId));
+    setPendingBySession((current) => dropSession(current, sessionId));
     const remaining = removeSession(sessions, sessionId);
     replaceSessions(remaining);
     if (sessionId === activeId) selectSession(remaining[0]?.id ?? "");
@@ -719,6 +933,7 @@ export default function Home() {
         <SessionSidebar
           sessions={sessions}
           activeId={activeId}
+          runningIds={runningIds}
           onSelect={selectSession}
           onCreate={() => createNewSession()}
           onRename={(sessionId, title) =>
@@ -789,12 +1004,34 @@ export default function Home() {
             messages.map((message) =>
               message.role === "user" ? (
                 <article className={styles.userMessage} key={message.id}>
-                  <small>You</small>
+                  <div className={styles.messageHeader}>
+                    <small>You</small>
+                    <CopyButton value={message.content} label="Copy your message" />
+                  </div>
+                  {/* The skills this turn was sent with. They never entered the
+                      message text, so without this the transcript would not
+                      record that a skill was applied at all. */}
+                  {(turnCommands[message.id] ?? []).length > 0 && (
+                    <ul className={styles.messageSkills}>
+                      {turnCommands[message.id].map((name) => (
+                        <li key={name}>/{name}</li>
+                      ))}
+                    </ul>
+                  )}
                   <p>{message.content}</p>
                 </article>
               ) : (
                 <article className={styles.agentMessage} key={message.id}>
-                  <small>GTMBuddy</small>
+                  <div className={styles.messageHeader}>
+                    <small>GTMBuddy</small>
+                    <CopyButton
+                      value={copyableAnswer(
+                        stripProfileMetadata(stripArtifactMetadata(message.content)),
+                        message.id,
+                      )}
+                      label="Copy the agent's answer"
+                    />
+                  </div>
                   {splitMessage(
                     stripProfileMetadata(stripArtifactMetadata(message.content)),
                     message.id,
@@ -804,7 +1041,7 @@ export default function Home() {
                         key={segment.request.id}
                         request={segment.request}
                         disabled={isRunning}
-                        onAnswer={(answer) => void send(answer)}
+                        onAnswer={(answer) => void send(activeId, answer)}
                       />
                     ) : (
                       <Markdown key={`${message.id}-md-${index}`}>
@@ -874,6 +1111,11 @@ export default function Home() {
               items={menuItems}
               activeIndex={highlighted}
               status={commandsStatus}
+              note={
+                pendingCommands.length > 0
+                  ? `${pendingCommands.length} armed for the next message. Choose more to add them, or choose one again to remove it.`
+                  : "A message may load more than one skill."
+              }
               emptyMessage={
                 commands.length === 0
                   ? "This agent has no skills published yet."
@@ -906,22 +1148,29 @@ export default function Home() {
               onChoose={chooseSuggestion}
             />
           )}
-          {pendingCommand && (
+          {pendingCommands.length > 0 && (
             <ul className={styles.attachments}>
-              <li>
-                <span>
-                  /{pendingCommand.name}
-                  {pendingCommand.hint ? ` — ${pendingCommand.hint}` : ""}
-                </span>
-                <button
-                  type="button"
-                  aria-label={`Remove ${pendingCommand.title}`}
-                  onClick={() => setPendingCommand(null)}
-                >
-                  ×
-                </button>
-              </li>
+              {pendingCommands.map((entry) => (
+                <li key={entry.name}>
+                  <span>
+                    /{entry.name}
+                    {entry.hint ? ` — ${entry.hint}` : ""}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${entry.title}`}
+                    onClick={() => removeCommand(entry.name)}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
             </ul>
+          )}
+          {skillNotice && (
+            <p className={styles.skillNotice} role="status">
+              {skillNotice}
+            </p>
           )}
           {attachments.length > 0 && (
             <ul className={styles.attachments}>
@@ -992,16 +1241,16 @@ export default function Home() {
                 chooseSuggestion(highlighted);
                 return;
               }
-              // Backspace into an empty composer takes the skill back off,
-              // matching how the chip reads: it sits where a typed token was.
+              // Backspace into an empty composer takes the last skill back off,
+              // matching how the chips read: they sit where a typed token was.
               if (
                 event.key === "Backspace" &&
                 !prompt &&
-                pendingCommand &&
+                pendingCommands.length > 0 &&
                 !commandOpen
               ) {
                 event.preventDefault();
-                setPendingCommand(null);
+                removeCommand(pendingCommands[pendingCommands.length - 1].name);
                 return;
               }
               if (event.key === "Enter" && !event.shiftKey) {
@@ -1010,13 +1259,15 @@ export default function Home() {
               }
             }}
             placeholder={
-              pendingCommand
-                ? `Describe the outcome you need for ${pendingCommand.title}…`
-                : commandsStatus === "unavailable"
-                  ? "Describe the outcome you need…"
-                  : requestedProfile || boundProfile
-                    ? "Describe the outcome you need, or type / to load a skill…"
-                    : "Describe the outcome you need, or type @ for an agent and / for a skill…"
+              pendingCommands.length === 1
+                ? `Describe the outcome you need for ${pendingCommands[0].title}…`
+                : pendingCommands.length > 1
+                  ? `Describe the outcome you need for ${pendingCommands.length} skills…`
+                  : commandsStatus === "unavailable"
+                    ? "Describe the outcome you need…"
+                    : requestedProfile || boundProfile
+                      ? "Describe the outcome you need, or type / to load a skill…"
+                      : "Describe the outcome you need, or type @ for an agent and / for a skill…"
             }
             rows={3}
           />

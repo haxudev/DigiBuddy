@@ -1,9 +1,19 @@
+/*
+ * The console is a fixed viewport, not a document.
+ *
+ * `position: fixed` takes the shell out of flow, so the body has no height of
+ * its own and the page cannot scroll behind the app. An in-flow `100vh` block
+ * used to leave the body scrollable -- on mobile `100vh` is taller than the
+ * visible viewport -- and scrolling it pushed the whole layout off screen.
+ *
+ * Locking is done here rather than in `globals.css` because `/admin` and the
+ * sign-in screen are ordinary documents that must still scroll.
+ */
 .shell {
+  position: fixed;
+  inset: 0;
   display: grid;
   grid-template-columns: minmax(240px, 288px) minmax(0, 1fr);
-  height: 100vh;
-  /* Keeps the console genuinely full screen once mobile browser chrome hides. */
-  height: 100dvh;
   overflow: hidden;
   background: #f3f5f7;
   color: #182028;
@@ -86,6 +96,8 @@
   min-height: 0;
   padding: 30px clamp(20px, 4vw, 56px);
   overflow-y: auto;
+  /* Reaching the end of the transcript must not hand the scroll to the page. */
+  overscroll-behavior: contain;
 }
 
 .emptyState {
@@ -138,11 +150,51 @@
 .userMessage small,
 .agentMessage small {
   display: block;
-  margin-bottom: 5px;
   color: #68767c;
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
+}
+
+/*
+ * The speaker's name and the controls that act on the message.
+ *
+ * The copy button sits on the message boundary rather than inside the prose,
+ * so it never lands between an answer and the card or warning under it.
+ */
+.messageHeader {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+/* The skills a turn was sent with, shown above the message they applied to. */
+.messageSkills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+  list-style: none;
+}
+
+.messageSkills li {
+  padding: 2px 9px;
+  color: #176f65;
+  background: #dff0ec;
+  border: 1px solid #c3e2db;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+/* Why a skill could not be armed, said where the chips are rather than as an error. */
+.skillNotice {
+  padding: 0 4px;
+  color: #7a5210;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .userMessage p {

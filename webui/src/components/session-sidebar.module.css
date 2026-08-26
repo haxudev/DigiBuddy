@@ -75,8 +75,50 @@
 }
 
 .itemMeta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
   color: #8ba0a5;
   font-size: 11.5px;
+}
+
+/*
+ * A conversation that is still working while the reader is elsewhere.
+ *
+ * Runs are per conversation now, so more than one can be in flight at a time
+ * and the list is the only place that can say so.
+ */
+.running {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  color: #2db59d;
+  font-weight: 700;
+}
+
+.runningDot {
+  width: 6px;
+  height: 6px;
+  background: currentcolor;
+  border-radius: 50%;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .runningDot {
+    animation: none;
+  }
 }
 
 .itemDelete {

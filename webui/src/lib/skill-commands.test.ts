@@ -5,7 +5,11 @@ import type { Catalogue } from "./admin-config.ts";
 import {
   BUILTIN_COMMANDS,
   MAX_COMMANDS,
+  MAX_COMMAND_SKILLS,
   commandQuery,
+  commandSkills,
+  exceedsSkillLimit,
+  isCommandSelected,
   leadingCommand,
   matchCommands,
   normaliseCommands,
@@ -13,6 +17,7 @@ import {
   resolveCommands,
   stripCommand,
   titleFromName,
+  toggleCommand,
   type SkillCommand,
 } from "./skill-commands.ts";
 
@@ -341,4 +346,72 @@ test("the built-in command list is well formed", () => {
     assert.ok(entry.skills.length > 0);
     assert.ok(entry.title.length > 0);
   }
+});
+
+function armable(name: string, skills: string[]): SkillCommand {
+  return {
+    name,
+    title: titleFromName(name),
+    description: "",
+    skills,
+    hint: "",
+    enabled: true,
+    order: 0,
+  };
+}
+
+test("choosing a command twice takes it back off", () => {
+  const one = armable("one", ["a"]);
+  const two = armable("two", ["b"]);
+
+  const armed = toggleCommand(toggleCommand([], one), two);
+  assert.deepEqual(
+    armed.map((entry) => entry.name),
+    ["one", "two"],
+  );
+  assert.equal(isCommandSelected(armed, "one"), true);
+
+  const disarmed = toggleCommand(armed, one);
+  assert.deepEqual(
+    disarmed.map((entry) => entry.name),
+    ["two"],
+  );
+  assert.equal(isCommandSelected(disarmed, "one"), false);
+});
+
+test("overlapping bundles load a shared skill once", () => {
+  // Two curated commands may share a write-up skill. Naming it twice would say
+  // the same thing twice in the turn's directive.
+  const assess = armable("assess", ["interview", "report"]);
+  const audit = armable("audit", ["scan", "report"]);
+
+  assert.deepEqual(commandSkills([assess, audit]), [
+    "interview",
+    "report",
+    "scan",
+  ]);
+});
+
+test("a turn never asks for more skills than the runtime carries", () => {
+  const big = armable(
+    "big",
+    Array.from({ length: MAX_COMMAND_SKILLS }, (_, index) => `skill-${index}`),
+  );
+  const extra = armable("extra", ["one-more"]);
+
+  assert.equal(commandSkills([big]).length, MAX_COMMAND_SKILLS);
+  // Refused before the fact, so the console can say why instead of the runtime
+  // silently dropping the tail on arrival.
+  assert.equal(exceedsSkillLimit([big], extra), true);
+  assert.equal(commandSkills([big, extra]).length, MAX_COMMAND_SKILLS);
+});
+
+test("re-choosing an armed command is never over the limit", () => {
+  const big = armable(
+    "big",
+    Array.from({ length: MAX_COMMAND_SKILLS }, (_, index) => `skill-${index}`),
+  );
+
+  // It is already counted, so removing it cannot make the turn too large.
+  assert.equal(exceedsSkillLimit([big], big), false);
 });

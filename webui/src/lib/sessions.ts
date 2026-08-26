@@ -19,6 +19,17 @@ export type ChatSession = {
    */
   boundProfile: string;
   messages: StoredMessage[];
+  /**
+   * Which skills each user turn was sent with, keyed by message id.
+   *
+   * It lives on the session rather than on the message because `messages` is
+   * rebuilt wholesale from the agent's own list on every change, so anything
+   * hung off a message object would be thrown away on the next token.
+   *
+   * Presentation only: the runtime is told about skills through request
+   * metadata, and the message text is exactly what the user typed.
+   */
+  turnCommands: Record<string, string[]>;
   createdAt: number;
   updatedAt: number;
 };
@@ -66,6 +77,7 @@ export function createSession(
     requestedProfile: typeof requestedProfile === "string" ? requestedProfile : "",
     boundProfile: "",
     messages: [],
+    turnCommands: {},
     createdAt: now,
     updatedAt: now,
   };
@@ -132,6 +144,25 @@ function isStoredMessage(value: unknown): value is StoredMessage {
 }
 
 /**
+ * Read the per-message skill list, dropping anything that is not a list of
+ * names. Sessions stored before skills were recorded simply have none, which
+ * is why a missing field is an empty map rather than a rejected session.
+ */
+function parseTurnCommands(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const parsed: Record<string, string[]> = {};
+  for (const [id, names] of Object.entries(value as Record<string, unknown>)) {
+    if (!id || !Array.isArray(names)) continue;
+    const clean = names
+      .filter((name): name is string => typeof name === "string" && Boolean(name.trim()))
+      .map((name) => name.trim())
+      .filter((name, index, all) => all.indexOf(name) === index);
+    if (clean.length) parsed[id] = clean;
+  }
+  return parsed;
+}
+
+/**
  * Persisted sessions come from browser storage, which older builds or a user
  * may have corrupted, so every field is validated before it is trusted.
  */
@@ -172,6 +203,7 @@ export function parseSessions(raw: string | null): ChatSession[] {
       boundProfile:
         typeof value.boundProfile === "string" ? value.boundProfile : "",
       messages,
+      turnCommands: parseTurnCommands(value.turnCommands),
       createdAt: typeof value.createdAt === "number" ? value.createdAt : 0,
       updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : 0,
     });

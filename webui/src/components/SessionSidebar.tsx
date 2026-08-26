@@ -7,6 +7,14 @@ import styles from "./session-sidebar.module.css";
 type Props = {
   sessions: ChatSession[];
   activeId: string;
+  /**
+   * Conversations with a turn in flight.
+   *
+   * Runs no longer stop when the reader looks elsewhere, so the list has to
+   * say which ones are still working -- otherwise a conversation that answers
+   * while unattended looks like it did nothing.
+   */
+  runningIds: string[];
   onSelect: (sessionId: string) => void;
   onCreate: () => void;
   onRename: (sessionId: string, title: string) => void;
@@ -16,6 +24,7 @@ type Props = {
 export default function SessionSidebar({
   sessions,
   activeId,
+  runningIds,
   onSelect,
   onCreate,
   onRename,
@@ -83,6 +92,15 @@ export default function SessionSidebar({
                 >
                   <span className={styles.itemTitle}>{session.title}</span>
                   <span className={styles.itemMeta}>
+                    {runningIds.includes(session.id) && (
+                      <span
+                        className={styles.running}
+                        title="This conversation is still working"
+                      >
+                        <span className={styles.runningDot} aria-hidden="true" />
+                        Working
+                      </span>
+                    )}
                     {session.messages.length} messages
                   </span>
                 </button>

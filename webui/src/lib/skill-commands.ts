@@ -280,3 +280,64 @@ export function resolveCommand(
 export function stripCommand(composer: string): string {
   return composer.replace(/^\s*\/[\w-]*\s*/, "");
 }
+
+/**
+ * Add or remove a command from the set armed for the next message.
+ *
+ * A turn may load several skills -- the runtime's own ceiling is
+ * `MAX_TURN_SKILLS`, and a curated command already bundles two or three -- so
+ * the menu is a set rather than a single choice. Choosing an already-chosen
+ * command takes it back off, because the same keystroke that armed it is the
+ * obvious way to disarm it.
+ */
+export function toggleCommand(
+  selected: SkillCommand[],
+  entry: SkillCommand,
+): SkillCommand[] {
+  return selected.some((command) => command.name === entry.name)
+    ? selected.filter((command) => command.name !== entry.name)
+    : [...selected, entry];
+}
+
+export function isCommandSelected(
+  selected: SkillCommand[],
+  name: string,
+): boolean {
+  return selected.some((command) => command.name === name);
+}
+
+/**
+ * The skills a set of commands actually loads, in the order they were chosen.
+ *
+ * Commands overlap -- two bundles may share a write-up skill -- so duplicates
+ * collapse, and the result is capped at what one turn may carry. Truncating
+ * here rather than at the boundary means the console can say so, instead of the
+ * runtime silently dropping the tail.
+ */
+export function commandSkills(selected: SkillCommand[]): string[] {
+  const skills: string[] = [];
+  for (const command of selected) {
+    for (const skill of command.skills) {
+      if (skills.includes(skill)) continue;
+      skills.push(skill);
+      if (skills.length >= MAX_COMMAND_SKILLS) return skills;
+    }
+  }
+  return skills;
+}
+
+/**
+ * Whether adding this command would ask for more skills than a turn may carry.
+ *
+ * Asked before the fact, so the menu can refuse with a reason rather than
+ * accepting a chip whose skills would then be dropped.
+ */
+export function exceedsSkillLimit(
+  selected: SkillCommand[],
+  entry: SkillCommand,
+): boolean {
+  if (isCommandSelected(selected, entry.name)) return false;
+  const current = commandSkills(selected);
+  const added = entry.skills.filter((skill) => !current.includes(skill));
+  return current.length + added.length > MAX_COMMAND_SKILLS;
+}

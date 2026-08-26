@@ -1,0 +1,78 @@
+/*
+ * A quiet control that has to be discoverable.
+ *
+ * It rests at low contrast so it does not compete with the transcript, and
+ * comes fully forward on hover or keyboard focus. It is never `display: none`,
+ * because a control that only exists under a pointer cannot be reached by
+ * keyboard or touch.
+ */
+.button {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  height: 26px;
+  padding: 0 9px;
+  color: #5c6b71;
+  background: #fff;
+  border: 1px solid #dde5e7;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1;
+  opacity: 0.55;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.button:hover,
+.button:focus-visible {
+  background: #eef4f4;
+  opacity: 1;
+}
+
+.button:focus-visible {
+  outline: 2px solid #176f65;
+  outline-offset: 2px;
+}
+
+.button[data-state="copied"] {
+  color: #176f65;
+  background: #e3f3f0;
+  border-color: #bfe2db;
+  opacity: 1;
+}
+
+.button[data-state="failed"] {
+  color: #9e2f2f;
+  background: #fff5f4;
+  border-color: #f2cdc8;
+  opacity: 1;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
+}
+
+.text {
+  white-space: nowrap;
+}
+
+/* Reachable by assistive technology, invisible to everyone else. */
+.announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button {
+    transition: none;
+  }
+}

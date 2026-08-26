@@ -182,3 +182,57 @@ test("each account keeps its conversations in its own namespace", () => {
   assert.notEqual(a, sessionsStorageKey(""));
   assert.equal(sessionsStorageKey(""), SESSIONS_STORAGE_KEY);
 });
+
+test("a session stored before skills were recorded still loads", () => {
+  // Regression guard: `turnCommands` was added after these were written to
+  // browser storage, and a reader that demanded it would have discarded every
+  // conversation someone already had.
+  const legacy = JSON.stringify([
+    {
+      id: "one",
+      threadId: "thread-one",
+      title: "Legacy",
+      messages: [{ id: "m1", role: "user", content: "hello" }],
+    },
+  ]);
+
+  const [session] = parseSessions(legacy);
+
+  assert.deepEqual(session.turnCommands, {});
+});
+
+test("the skills a turn was sent with survive a round trip", () => {
+  const session = {
+    ...createSession(),
+    messages: [{ id: "m1", role: "user" as const, content: "assess Contoso" }],
+    turnCommands: { m1: ["agent-adoption-assessment", "deck-builder"] },
+  };
+
+  const [restored] = parseSessions(serializeSessions([session]));
+
+  assert.deepEqual(restored.turnCommands, {
+    m1: ["agent-adoption-assessment", "deck-builder"],
+  });
+});
+
+test("a corrupted skill record is dropped rather than trusted", () => {
+  const raw = JSON.stringify([
+    {
+      id: "one",
+      threadId: "thread-one",
+      title: "Broken",
+      messages: [],
+      turnCommands: {
+        m1: "not-a-list",
+        m2: [1, null, "  ", "kept", "kept"],
+        m3: [],
+      },
+    },
+  ]);
+
+  const [session] = parseSessions(raw);
+
+  // Only the entry that still says something usable survives, and it says it
+  // once: a repeat would render the same chip twice.
+  assert.deepEqual(session.turnCommands, { m2: ["kept"] });
+});
