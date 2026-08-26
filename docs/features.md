@@ -80,6 +80,8 @@ Model access, the MCP catalogue, and agent profiles are data, not image contents
 
 The runtime re-reads the store at turn boundaries. When the model settings or the selected profile change, it fingerprints the new configuration and restarts the Codex engine, so administrative changes take effect without a redeploy. Publishing `catalogue.json` from the runtime keeps the console from ever offering a capability the image does not contain.
 
+A read reached through the console runtime API waits 15 seconds and is retried up to three times. A read that gives up is not an error the caller can act on — it falls back to the packaged defaults — so a single slow read means the session quietly runs without whatever an administrator configured, including MCP servers they enabled. A cold agent container reaches a console that may itself be scaling from zero, and the previous three-second budget was routinely too short for that: every document timed out and the session was configured entirely from the image. A `404` is an answer rather than a fault, so a document that is simply absent is not asked for again.
+
 ## Agent Profiles
 
 A profile assembles a subset of the payload into a business-specific agent. One image serves every profile.

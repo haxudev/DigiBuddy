@@ -63,7 +63,13 @@ CONFIG_TTL_ENV = "DIGIBUDDY_CONFIG_TTL_SECONDS"
 
 BLOB_ARTIFACT_UPLOAD_ATTEMPTS = 3
 BLOB_ARTIFACT_UPLOAD_INITIAL_BACKOFF_SECONDS = 0.5
-HTTP_CONFIG_TIMEOUT_SECONDS = 3.0
+#: A cold agent container reaches a console that may itself be scaling from
+#: zero, and every read that gives up falls back to the packaged defaults --
+#: silently running the session without whatever an administrator configured.
+#: Waiting is cheap here because reads are cached for the whole turn.
+HTTP_CONFIG_TIMEOUT_SECONDS = 15.0
+HTTP_CONFIG_ATTEMPTS = 3
+HTTP_CONFIG_BACKOFF_SECONDS = 0.5
 HTTP_TOKEN_REFRESH_SKEW_SECONDS = 60.0
 RUNTIME_SECRET_HEADER = "X-DigiBuddy-Runtime-Secret"
 
@@ -351,6 +357,7 @@ class HttpConfigStore:
         credential: Any | None = None,
         opener: Any | None = None,
         timeout_seconds: float = HTTP_CONFIG_TIMEOUT_SECONDS,
+        sleep: Any | None = None,
     ):
         if urlparse(api_url).scheme != "https":
             raise RuntimeError(f"{CONFIG_API_ENV} must use HTTPS")
@@ -363,6 +370,7 @@ class HttpConfigStore:
         self._credential = credential
         self._opener = opener or urllib_request.build_opener(_NoRedirects)
         self._timeout = max(float(timeout_seconds), 0.1)
+        self._sleep = sleep or time.sleep
         self._token = ""
         self._token_expires_on = 0.0
 
@@ -530,13 +538,33 @@ class HttpConfigStore:
             headers=headers,
             method=method,
         )
-        response = self._opener.open(request, timeout=self._timeout)
-        try:
-            return response.read()
-        finally:
-            close = getattr(response, "close", None)
-            if callable(close):
-                close()
+        return self._open(request)
+
+    def _open(self, request: Any) -> bytes:
+        """Read the document, retrying a console that is not answering yet.
+
+        A failed read is not an error the caller can act on: it falls back to
+        the packaged defaults, so an administrator's configuration silently
+        does not apply for the whole session. One slow cold start should not
+        cost that.
+        """
+        for attempt in range(1, HTTP_CONFIG_ATTEMPTS + 1):
+            try:
+                response = self._opener.open(request, timeout=self._timeout)
+            except urllib_error.HTTPError:
+                raise
+            except OSError:
+                if attempt == HTTP_CONFIG_ATTEMPTS:
+                    raise
+                self._sleep(HTTP_CONFIG_BACKOFF_SECONDS * (2 ** (attempt - 1)))
+                continue
+            try:
+                return response.read()
+            finally:
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
+        raise RuntimeError("unreachable")
 
 
 class CachingConfigStore:

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from codex_adapter import config_store
 from codex_adapter.config_store import (
+    HTTP_CONFIG_TIMEOUT_SECONDS,
     BLOB_ARTIFACT_UPLOAD_ATTEMPTS,
     BLOB_ARTIFACT_UPLOAD_INITIAL_BACKOFF_SECONDS,
     BlobConfigStore,
@@ -293,7 +294,9 @@ class HttpConfigStoreTests(unittest.TestCase):
                         f"at https://x.test/a?token={secret}"
                     )
                 ]
+                * 3
             ),
+            sleep=lambda _seconds: None,
         )
 
         with self.assertLogs("codex_adapter.config_store", level="WARNING") as logs:
@@ -603,3 +606,61 @@ class HttpConfigStoreRedirectTests(unittest.TestCase):
                 None, None, 302, "Found", {}, "https://elsewhere.example/"
             )
         )
+
+
+class ColdConsoleTests(unittest.TestCase):
+    """A console that is still starting must not cost the session its config.
+
+    A read that gives up falls back to the packaged defaults, so whatever an
+    administrator configured -- an enabled MCP server, a profile, a skill
+    policy -- silently does not apply for the whole session, with nothing to
+    tell the user why.
+    """
+
+    def _store(self, responses):
+        opener = FakeOpener(responses)
+        store = HttpConfigStore(
+            "https://console.example/api/runtime/",
+            "",
+            secret="s" * 40,
+            credential=FakeCredential(),
+            opener=opener,
+            sleep=lambda _seconds: None,
+        )
+        return store, opener
+
+    def test_a_console_that_answers_late_is_waited_for(self):
+        store, opener = self._store(
+            [
+                urllib_error.URLError("timed out"),
+                urllib_error.URLError("timed out"),
+                b'{"model":"gpt-5.6"}',
+            ]
+        )
+
+        self.assertEqual(store.read("models.json"), {"model": "gpt-5.6"})
+        self.assertEqual(len(opener.calls), 3)
+
+    def test_a_console_that_never_answers_gives_up(self):
+        # Retrying forever would hold every turn open behind a dead console.
+        store, opener = self._store([urllib_error.URLError("timed out")] * 4)
+
+        with self.assertLogs("codex_adapter.config_store", level="WARNING"):
+            self.assertIsNone(store.read("models.json"))
+        self.assertEqual(len(opener.calls), 3)
+
+    def test_a_document_that_is_absent_is_not_asked_for_again(self):
+        # 404 is an answer, not a fault; retrying it just delays the turn.
+        store, opener = self._store(
+            [
+                urllib_error.HTTPError(
+                    "https://console.example/", 404, "Not Found", {}, None
+                )
+            ]
+        )
+
+        self.assertIsNone(store.read("models.json"))
+        self.assertEqual(len(opener.calls), 1)
+
+    def test_the_wait_outlasts_a_container_cold_start(self):
+        self.assertGreaterEqual(HTTP_CONFIG_TIMEOUT_SECONDS, 10.0)
