@@ -390,6 +390,72 @@ class McpCatalogueTests(unittest.TestCase):
 
             self.assertEqual(list(load_mcp_servers(configured, store)), ["admin"])
 
+    def test_curated_tools_run_without_an_approval_nobody_can_give(self):
+        """`approval_policy = never` turns a prompted tool into a dead tool."""
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory,
+                servers={
+                    "remote": {"url": "https://example.com/mcp"},
+                    "local": {"command": "python", "args": ["-m", "proxy"]},
+                },
+            )
+
+            servers = load_mcp_servers(configured)
+
+            self.assertEqual(servers["remote"]["default_tools_approval_mode"], "auto")
+            self.assertEqual(servers["local"]["default_tools_approval_mode"], "auto")
+
+    def test_a_server_may_ask_for_a_stricter_approval_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory,
+                servers={
+                    "guarded": {
+                        "url": "https://example.com/mcp",
+                        "tools_approval_mode": "Writes",
+                    }
+                },
+            )
+
+            self.assertEqual(
+                load_mcp_servers(configured)["guarded"][
+                    "default_tools_approval_mode"
+                ],
+                "writes",
+            )
+
+    def test_an_unknown_approval_mode_does_not_reach_codex(self):
+        """Codex rejects the whole config file on an unknown enum value."""
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory,
+                servers={
+                    "typo": {
+                        "url": "https://example.com/mcp",
+                        "tools_approval_mode": "always",
+                    }
+                },
+            )
+
+            self.assertEqual(
+                load_mcp_servers(configured)["typo"]["default_tools_approval_mode"],
+                "auto",
+            )
+
+
+    def test_no_obsolete_experimental_flag_reaches_the_config(self):
+        """Codex 0.149 dropped the flag and rejects unknown top-level keys."""
+        with tempfile.TemporaryDirectory() as directory:
+            configured = payload(
+                directory, servers={"remote": {"url": "https://example.com/mcp"}}
+            )
+
+            rendered = render_codex_config(configured)
+
+            self.assertIn("mcp_servers", rendered)
+            self.assertNotIn("experimental_use_rmcp_client", rendered)
+
 
 class InstructionsTests(unittest.TestCase):
     def test_only_allowed_skills_are_listed(self):
@@ -908,6 +974,7 @@ class PackActivationTests(unittest.TestCase):
             self.assertEqual(block["command"], "python")
             self.assertTrue(block["args"][0].endswith("pack-mcp/server.py"))
             self.assertEqual(block["env"]["PACK_MODE"], "safe")
+            self.assertEqual(block["default_tools_approval_mode"], "auto")
 
     def test_an_unapproved_mcp_server_renders_nothing(self):
         digest = "c" * 64

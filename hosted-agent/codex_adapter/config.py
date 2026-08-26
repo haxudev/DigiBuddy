@@ -62,6 +62,15 @@ _FALSE_VALUES = {"0", "false", "no", "off"}
 _NETWORK_CAPABLE_SANDBOX = "workspace-write"
 _FINGERPRINT_KEY = secrets.token_bytes(32)
 
+#: Codex refuses an MCP tool that needs approval when `approval_policy` is
+#: `never`, and this runtime has nobody to ask: every approval request the
+#: adapter receives is declined because a Responses turn has no interactive
+#: channel. A curated server whose tools are left at the default is therefore
+#: not "guarded", it is unreachable, so the catalogue's own admission decision
+#: is the authorization and its tools run unattended.
+_MCP_APPROVAL_MODES = frozenset({"auto", "prompt", "writes", "approve"})
+_DEFAULT_MCP_APPROVAL_MODE = "auto"
+
 
 def _feature_flag(name: str) -> bool:
     """A feature switch is off unless it is explicitly and legibly on."""
@@ -401,6 +410,22 @@ def _stdio_server_environment(
     return environment
 
 
+def _mcp_approval_mode(name: str, server: dict[str, Any]) -> str:
+    """Resolve one server's tool approval mode, defaulting to unattended."""
+    requested = str(server.get("tools_approval_mode", "")).strip().lower()
+    if not requested:
+        return _DEFAULT_MCP_APPROVAL_MODE
+    if requested not in _MCP_APPROVAL_MODES:
+        logger.warning(
+            "MCP server %s requested unknown approval mode %r; using %s",
+            name,
+            requested,
+            _DEFAULT_MCP_APPROVAL_MODE,
+        )
+        return _DEFAULT_MCP_APPROVAL_MODE
+    return requested
+
+
 def load_mcp_servers(
     settings: RuntimeSettings,
     store: ConfigStore | None = None,
@@ -466,6 +491,7 @@ def load_mcp_servers(
             entry["env"] = _stdio_server_environment(settings, resolved_env)
         else:
             continue
+        entry["default_tools_approval_mode"] = _mcp_approval_mode(name, server)
         resolved[name] = entry
     return resolved
 
@@ -528,6 +554,9 @@ def pack_mcp_servers(
         environment = declaration.get("env")
         if isinstance(environment, dict) and environment:
             entry["env"] = {str(key): str(value) for key, value in environment.items()}
+        entry["default_tools_approval_mode"] = _mcp_approval_mode(
+            skill.name, declaration if isinstance(declaration, dict) else {}
+        )
         servers[skill.name] = entry
     return servers
 
@@ -764,8 +793,6 @@ def render_codex_config(
             )
             continue
         servers[name] = server
-    if any("url" in server for server in servers.values()):
-        lines.insert(2, "experimental_use_rmcp_client = true")
     for name, server in servers.items():
         lines.extend(["", f"[mcp_servers.{json.dumps(name)}]"])
         lines.extend(
