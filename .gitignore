@@ -96,6 +96,7 @@ _sessions.json
 # Local Teams app manifests
 teams-app/manifest.local.json
 teams-app/manifest.*.local.json
+/deliverables/GTMBuddy-Teams-*.zip
 
 # Sample related gitnores
 infra/assets/.gitignore
