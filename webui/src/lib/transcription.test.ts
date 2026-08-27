@@ -2,11 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   TRANSCRIPTION_API_VERSION,
-  TRANSCRIPTION_MODEL,
+  TRANSCRIPTION_DEPLOYMENT,
   TranscriptionPayloadTooLargeError,
   isPcmWav,
   readLimitedBody,
-  transcriptionDefinition,
   transcriptionEndpoint,
   transcriptionText,
   transcribeWav,
@@ -19,39 +18,28 @@ function wavHeader(): Uint8Array {
   return bytes;
 }
 
-test("builds a fixed trusted Speech endpoint", () => {
+test("builds a fixed trusted Azure OpenAI transcription endpoint", () => {
   const endpoint = transcriptionEndpoint({
-    MAI_TRANSCRIBE_ENDPOINT:
-      "https://demo.cognitiveservices.azure.com/ignored?unsafe=true",
+    GPT_TRANSCRIBE_ENDPOINT:
+      "https://demo.openai.azure.com/ignored?unsafe=true",
   });
   assert.equal(
     endpoint.toString(),
-    `https://demo.cognitiveservices.azure.com/speechtotext/transcriptions:transcribe?api-version=${TRANSCRIPTION_API_VERSION}`,
+    `https://demo.openai.azure.com/openai/deployments/${TRANSCRIPTION_DEPLOYMENT}/audio/transcriptions?api-version=${TRANSCRIPTION_API_VERSION}`,
   );
   assert.throws(
     () =>
       transcriptionEndpoint({
-        MAI_TRANSCRIBE_ENDPOINT: "https://example.com",
+        GPT_TRANSCRIBE_ENDPOINT: "https://example.com",
       }),
-    /Cognitive Services/,
+    /Azure OpenAI/,
   );
 });
 
-test("uses MAI multilingual enhanced mode", () => {
-  assert.deepEqual(transcriptionDefinition(), {
-    enhancedMode: { enabled: true, model: TRANSCRIPTION_MODEL },
-  });
-});
-
-test("validates WAV headers and combines transcript channels", () => {
+test("validates WAV headers and reads the GPT transcript", () => {
   assert.equal(isPcmWav(wavHeader()), true);
   assert.equal(isPcmWav(new Uint8Array(44)), false);
-  assert.equal(
-    transcriptionText({
-      combinedPhrases: [{ text: " hello " }, { text: "世界" }],
-    }),
-    "hello\n世界",
-  );
+  assert.equal(transcriptionText({ text: " hello 世界 " }), "hello 世界");
 });
 
 test("stops reading a request body at the configured limit", async () => {
@@ -85,7 +73,7 @@ test("uses Cognitive Services managed identity without exposing a target", async
   let requested = "";
   const text = await transcribeWav(wavHeader(), {
     environment: {
-      MAI_TRANSCRIBE_ENDPOINT: "https://demo.cognitiveservices.azure.com",
+      GPT_TRANSCRIBE_ENDPOINT: "https://demo.openai.azure.com",
     },
     credential: {
       async getToken(value) {
@@ -100,15 +88,13 @@ test("uses Cognitive Services managed identity without exposing a target", async
         "Bearer managed-token",
       );
       const form = init?.body as FormData;
-      assert.deepEqual(
-        JSON.parse(String(form.get("definition"))),
-        transcriptionDefinition(),
-      );
-      return Response.json({ combinedPhrases: [{ text: "recognized" }] });
+      assert.equal(form.get("file") instanceof Blob, true);
+      assert.equal(form.has("definition"), false);
+      return Response.json({ text: "recognized" });
     },
   });
 
   assert.equal(scope, "https://cognitiveservices.azure.com/.default");
-  assert.match(requested, /transcriptions:transcribe/);
+  assert.match(requested, /gpt-transcribe\/audio\/transcriptions/);
   assert.equal(text, "recognized");
 });

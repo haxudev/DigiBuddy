@@ -1,7 +1,7 @@
 import { ManagedIdentityCredential } from "@azure/identity";
 
-export const TRANSCRIPTION_API_VERSION = "2025-10-15";
-export const TRANSCRIPTION_MODEL = "mai-transcribe-1.5";
+export const TRANSCRIPTION_API_VERSION = "2024-10-21";
+export const TRANSCRIPTION_DEPLOYMENT = "gpt-transcribe";
 export const MAX_TRANSCRIPTION_BYTES = 10 * 1024 * 1024;
 
 type Environment = Record<string, string | undefined>;
@@ -62,34 +62,26 @@ export async function readLimitedBody(
 export function transcriptionEndpoint(
   environment: Environment = process.env,
 ): URL {
-  const configured = environment.MAI_TRANSCRIBE_ENDPOINT?.trim();
+  const configured = environment.GPT_TRANSCRIBE_ENDPOINT?.trim();
   if (!configured) {
-    throw new Error("MAI_TRANSCRIBE_ENDPOINT is not configured.");
+    throw new Error("GPT_TRANSCRIBE_ENDPOINT is not configured.");
   }
 
   const endpoint = new URL(configured);
   if (
     endpoint.protocol !== "https:" ||
-    !endpoint.hostname.toLowerCase().endsWith(".cognitiveservices.azure.com")
+    !endpoint.hostname.toLowerCase().endsWith(".openai.azure.com")
   ) {
     throw new Error(
-      "MAI_TRANSCRIBE_ENDPOINT must be an HTTPS Azure Cognitive Services endpoint.",
+      "GPT_TRANSCRIBE_ENDPOINT must be an HTTPS Azure OpenAI endpoint.",
     );
   }
 
-  endpoint.pathname = "/speechtotext/transcriptions:transcribe";
+  endpoint.pathname =
+    `/openai/deployments/${TRANSCRIPTION_DEPLOYMENT}/audio/transcriptions`;
   endpoint.search = "";
   endpoint.searchParams.set("api-version", TRANSCRIPTION_API_VERSION);
   return endpoint;
-}
-
-export function transcriptionDefinition(): Record<string, unknown> {
-  return {
-    enhancedMode: {
-      enabled: true,
-      model: TRANSCRIPTION_MODEL,
-    },
-  };
 }
 
 export function isPcmWav(bytes: Uint8Array): boolean {
@@ -102,19 +94,8 @@ export function isPcmWav(bytes: Uint8Array): boolean {
 
 export function transcriptionText(payload: unknown): string {
   if (!payload || typeof payload !== "object") return "";
-  const combined = (payload as Record<string, unknown>).combinedPhrases;
-  if (!Array.isArray(combined)) return "";
-  return combined
-    .map((entry) =>
-      entry &&
-      typeof entry === "object" &&
-      typeof (entry as Record<string, unknown>).text === "string"
-        ? String((entry as Record<string, unknown>).text).trim()
-        : "",
-    )
-    .filter(Boolean)
-    .join("\n")
-    .trim();
+  const text = (payload as Record<string, unknown>).text;
+  return typeof text === "string" ? text.trim() : "";
 }
 
 function upstreamMessage(payload: unknown): string {
@@ -156,8 +137,7 @@ export async function transcribeWav(
   const form = new FormData();
   const audio = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(audio).set(bytes);
-  form.append("audio", new Blob([audio], { type: "audio/wav" }), "recording.wav");
-  form.append("definition", JSON.stringify(transcriptionDefinition()));
+  form.append("file", new Blob([audio], { type: "audio/wav" }), "recording.wav");
 
   const response = await (options.fetchImpl ?? fetch)(endpoint, {
     method: "POST",
