@@ -6,6 +6,10 @@ FOUNDRY_AGENT_VERSION=2
 CODEX_MODEL_NAME=gpt-5.6-sol
 AGENT_ENDPOINT_ALLOWLIST=services.ai.azure.com,openai.azure.com
 
+# Speech in Foundry Tools resource used by the hold-to-talk control. The WebUI
+# managed identity must have Cognitive Services User on this resource.
+MAI_TRANSCRIBE_ENDPOINT=https://your-speech-resource.cognitiveservices.azure.com
+
 # Optional: accept native members of one Entra tenant plus explicitly trusted
 # corporate B2B accounts. The app registration must emit `acct` and `upn`.
 AUTH_PROVIDERS=aad

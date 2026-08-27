@@ -1,0 +1,71 @@
+.button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: #33454a;
+  background: #eef4f4;
+  border: 1px solid #dde5e7;
+  border-radius: 50%;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.button svg {
+  width: 17px;
+  height: 17px;
+  fill: currentcolor;
+}
+
+.button:hover:not(:disabled) {
+  background: #e4eeee;
+}
+
+.button:focus-visible {
+  outline: 3px solid rgb(23 111 101 / 24%);
+  outline-offset: 2px;
+}
+
+.button[data-recording="true"] {
+  color: #fff;
+  background: #b33b3b;
+  border-color: #9d3030;
+  box-shadow: 0 0 0 5px rgb(179 59 59 / 16%);
+  animation: voice-pulse 1.4s ease-in-out infinite;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.status {
+  color: #66787d;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+@keyframes voice-pulse {
+  50% {
+    box-shadow: 0 0 0 9px rgb(179 59 59 / 8%);
+  }
+}
+
+@media (max-width: 560px) {
+  .status {
+    flex-basis: calc(100% - 84px);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button[data-recording="true"] {
+    animation: none;
+  }
+}

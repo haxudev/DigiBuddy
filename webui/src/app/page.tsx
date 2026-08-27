@@ -23,6 +23,7 @@ import SuggestionMenu, {
   type SuggestionItem,
   type SuggestionStatus,
 } from "@/components/SuggestionMenu";
+import VoiceInputButton from "@/components/VoiceInputButton";
 import {
   ACTIVITY_EVENT_NAME,
   isActivityEvent,
@@ -263,6 +264,9 @@ export default function Home() {
     text: string;
     profile: string;
   } | null>(null);
+  const pendingVoiceTurnsRef = useRef<
+    { id: string; sessionId: string; text: string }[]
+  >([]);
   // On phones and tablets the sidebar slides over the conversation instead of
   // squeezing it. The deliverable window is always an overlay.
   const [navOpen, setNavOpen] = useState(false);
@@ -691,6 +695,7 @@ export default function Home() {
       value: string,
       profileOverride = "",
       withCommands?: SkillCommand[],
+      detachedFromComposer = false,
     ) => {
       const text = value.trim();
       if (!text) return;
@@ -711,7 +716,10 @@ export default function Home() {
       // turn was sent with can be recorded against the message they belong to.
       const messageId = crypto.randomUUID();
       const chosen =
-        withCommands ?? forSession(pendingBySession, sessionId, EMPTY_SELECTION);
+        withCommands ??
+        (detachedFromComposer
+          ? EMPTY_SELECTION
+          : forSession(pendingBySession, sessionId, EMPTY_SELECTION));
       agent.addMessage({ id: messageId, role: "user", content: text });
       if (chosen.length > 0) {
         updateSession(sessionId, (item) => ({
@@ -725,11 +733,13 @@ export default function Home() {
 
       // Files belong to the turn that sends them, so the tray empties as soon
       // as the request is on its way.
-      const files = attachments;
-      setAttachments([]);
+      const files = detachedFromComposer ? [] : attachments;
+      if (!detachedFromComposer) setAttachments([]);
       // So do the skills. They were chosen for this message, and leaving them
       // set would silently apply them to the next one too.
-      setPendingBySession((current) => dropSession(current, sessionId));
+      if (!detachedFromComposer) {
+        setPendingBySession((current) => dropSession(current, sessionId));
+      }
 
       try {
         await agent.runAgent({
@@ -787,6 +797,17 @@ export default function Home() {
     setPendingTurn(null);
     void send(pendingTurn.sessionId, pendingTurn.text, pendingTurn.profile);
   }, [activeId, pendingTurn, runs, send]);
+
+  useEffect(() => {
+    const ready = pendingVoiceTurnsRef.current.find(
+      (turn) => !sessionIsRunning(runs, turn.sessionId),
+    );
+    if (!ready) return;
+    pendingVoiceTurnsRef.current = pendingVoiceTurnsRef.current.filter(
+      (turn) => turn.id !== ready.id,
+    );
+    void send(ready.sessionId, ready.text, "", EMPTY_SELECTION, true);
+  }, [runs, send]);
 
   async function addFiles(list: FileList | null) {
     const files = Array.from(list ?? []);
@@ -1292,6 +1313,20 @@ export default function Home() {
             >
               +
             </button>
+            <VoiceInputButton
+              contextId={activeId}
+              disabled={!activeId || isRunning}
+              onTranscript={(text, sessionId) => {
+                if (sessionIsRunning(runs, sessionId)) {
+                  pendingVoiceTurnsRef.current.push(
+                    { id: crypto.randomUUID(), sessionId, text },
+                  );
+                  return;
+                }
+                void send(sessionId, text, "", EMPTY_SELECTION, true);
+              }}
+              onError={(message) => setError(message)}
+            />
             <span className={styles.composerSpacer} />
             <select
               className={styles.effort}
