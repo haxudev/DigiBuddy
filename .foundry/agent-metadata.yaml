@@ -1,6 +1,6 @@
 defaultEnvironment: prod
 environments:
   prod:
-    projectEndpoint: https://haxuinternalfoundry.services.ai.azure.com/api/projects/haxuinternalproj
+    projectEndpoint: https://digibuddyfoundry.services.ai.azure.com/api/projects/digibuddyproj
     agentName: digibuddy-codex
     testCases: []

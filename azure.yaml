@@ -9,7 +9,7 @@ name: digibuddy
 services:
   ai-project:
     host: azure.ai.project
-    endpoint: https://haxuinternalfoundry.services.ai.azure.com/api/projects/haxuinternalproj
+    endpoint: https://digibuddyfoundry.services.ai.azure.com/api/projects/digibuddyproj
   digibuddy-codex:
     host: azure.ai.agent
     uses:
