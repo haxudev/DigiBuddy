@@ -29,7 +29,6 @@
       ],
       "mcp_servers": [
         "microsoft-learn",
-        "cloud-pricing",
         "foundry-iq"
       ]
     },

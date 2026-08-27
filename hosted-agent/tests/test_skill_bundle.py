@@ -185,6 +185,15 @@ class SkillBundleTests(unittest.TestCase):
         # Learn's endpoint is public; a scope would mint a token nobody wants.
         self.assertNotIn("MCP_HTTP_PROXY_SCOPE", server["env"])
 
+    def test_payload_mcp_has_no_placeholder_urls(self):
+        """A disabled placeholder still breaks every console catalogue read."""
+        config = json.loads((ROOT / "src" / "mcp.json").read_text(encoding="utf-8"))
+
+        for name, server in config["servers"].items():
+            url = server.get("url", "")
+            self.assertNotIn("<", url, name)
+            self.assertNotIn(">", url, name)
+
     def test_every_profile_can_reach_the_default_knowledge_base(self):
         profiles = json.loads(
             (ROOT / "src" / "profiles.json").read_text(encoding="utf-8")

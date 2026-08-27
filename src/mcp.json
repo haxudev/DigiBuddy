@@ -7,11 +7,6 @@
 				"MCP_HTTP_PROXY_URL": "https://learn.microsoft.com/api/mcp"
 			}
 		},
-		"cloud-pricing": {
-			"url": "https://<your-cloud-pricing-service>.azurewebsites.net/mcp",
-			"type": "http",
-			"enabled": false
-		},
 		"msxi-lake": {
 			"command": "python",
 			"args": ["-m", "mcp_http_proxy"],
