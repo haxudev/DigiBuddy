@@ -166,7 +166,9 @@ class CheckImageTest(unittest.TestCase):
 
     def test_a_matching_image_has_no_problems(self):
         payload, packaged = self._image(
-            {"pptx": BUILTIN, "seo": OFF, "superclarity": HIDDEN}, ["pptx"], ["superclarity"]
+            {"pptx": BUILTIN, "seo": OFF, "internal-helper": HIDDEN},
+            ["pptx"],
+            ["internal-helper"],
         )
         self.assertEqual(check_image(payload, packaged), [])
 

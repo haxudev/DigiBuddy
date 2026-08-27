@@ -18,7 +18,8 @@
         "pptx",
         "pdf",
         "xlsx",
-        "doc-coauthoring"
+        "doc-coauthoring",
+        "superclarity"
       ],
       "tools": [
         "cost_estimator",
@@ -47,7 +48,8 @@
         "marketing-email",
         "marketing-strategy-pmm",
         "pptx",
-        "docx"
+        "docx",
+        "superclarity"
       ],
       "tools": [
         "fetch_url",
@@ -92,7 +94,8 @@
         "agent-maturity-author",
         "docx",
         "pptx",
-        "pdf"
+        "pdf",
+        "superclarity"
       ],
       "tools": [
         "azure_blob",

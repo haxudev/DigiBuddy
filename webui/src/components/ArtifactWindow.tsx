@@ -4,12 +4,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Artifact } from "@/lib/artifacts";
 import { withScriptErrorReporter } from "@/lib/artifact-preview";
 import { artifactPreviewKind } from "@/lib/artifacts";
+import {
+  clampPanelWidth,
+  panelWidthFromPointer,
+  readPanelWidthFromWindow,
+  writePanelWidthToWindow,
+} from "@/lib/deliverables-panel";
 import Markdown from "./Markdown";
 import styles from "./artifact-panel.module.css";
 
 type Props = {
   artifacts: Artifact[];
   onClose: () => void;
+  /** The width currently installed on the shell grid track. */
+  width: number;
+  /** Measures the tracks the transcript and docked column actually share. */
+  getAvailableWidth: () => number | null;
+  /** Told to the shell, which owns the grid track the panel sits in. */
+  onWidthChange: (width: number) => void;
 };
 
 // A report carries its charting library inside it, because the sandbox it is
@@ -24,22 +36,38 @@ function kindLabel(artifact: Artifact): string {
 }
 
 /**
- * Deliverables live in a floating window rather than a permanent column: the
- * conversation keeps the full width until the reader opens something, and the
- * window can be dragged aside or expanded to fill the viewport for review.
+ * Deliverables live in a column of their own, level with the sessions sidebar
+ * and the conversation: a generated file is read next to the answer that
+ * produced it, not on top of it. The reader sizes the column by dragging its
+ * left edge, and can expand it over the viewport for a full-page review.
  */
-export default function ArtifactWindow({ artifacts, onClose }: Props) {
+export default function ArtifactWindow({
+  artifacts,
+  onClose,
+  width,
+  getAvailableWidth,
+  onWidthChange,
+}: Props) {
   const [selectedId, setSelectedId] = useState("");
   const [showSource, setShowSource] = useState(false);
   const [maximised, setMaximised] = useState(false);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [remotePreview, setRemotePreview] = useState<{
     id: string;
     loading: boolean;
     content: string;
     error: string;
   } | null>(null);
-  const dragRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const resizeRef = useRef<number | null>(null);
+
+  // The remembered width is read once the panel is on a client, because the
+  // server has no storage to read it from and rendering two different widths
+  // would be a hydration mismatch.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = readPanelWidthFromWindow(window);
+    const available = getAvailableWidth();
+    onWidthChange(available === null ? stored : clampPanelWidth(stored, available));
+  }, [getAvailableWidth, onWidthChange]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -49,33 +77,60 @@ export default function ArtifactWindow({ artifacts, onClose }: Props) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
-  const startDrag = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      // Dragging a maximised window would fight the full-viewport layout, and
-      // the title bar also carries buttons that must stay clickable.
-      if (maximised) return;
-      if ((event.target as HTMLElement).closest("button")) return;
-      dragRef.current = {
-        pointerId: event.pointerId,
-        x: event.clientX - offset.x,
-        y: event.clientY - offset.y,
-      };
-      event.currentTarget.setPointerCapture(event.pointerId);
+  const startResize = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    resizeRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, []);
+
+  const onResize = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (resizeRef.current !== event.pointerId) return;
+      const available = getAvailableWidth();
+      if (available === null) return;
+      const width = clampPanelWidth(
+        panelWidthFromPointer(event.clientX, window.innerWidth),
+        available,
+      );
+      onWidthChange(width);
     },
-    [maximised, offset],
+    [getAvailableWidth, onWidthChange],
   );
 
-  const onDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    setOffset({ x: event.clientX - drag.x, y: event.clientY - drag.y });
-  }, []);
+  const endResize = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (resizeRef.current !== event.pointerId) return;
+      resizeRef.current = null;
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      const available = getAvailableWidth();
+      if (available === null) return;
+      writePanelWidthToWindow(
+        typeof window === "undefined" ? null : window,
+        clampPanelWidth(
+          panelWidthFromPointer(event.clientX, window.innerWidth),
+          available,
+        ),
+      );
+    },
+    [getAvailableWidth],
+  );
 
-  const endDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (dragRef.current?.pointerId !== event.pointerId) return;
-    dragRef.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
-  }, []);
+  // A pointer is not the only way in: the handle is focusable so the width can
+  // be set from the keyboard too, which is the only way it is reachable at all
+  // for a reader who does not use one.
+  const nudgeWidth = useCallback(
+    (event: React.KeyboardEvent<HTMLElement>) => {
+      const step =
+        event.key === "ArrowLeft" ? 24 : event.key === "ArrowRight" ? -24 : 0;
+      if (step === 0) return;
+      event.preventDefault();
+      const available = getAvailableWidth();
+      if (available === null) return;
+      const nextWidth = clampPanelWidth(width + step, available);
+      onWidthChange(nextWidth);
+      writePanelWidthToWindow(typeof window === "undefined" ? null : window, nextWidth);
+    },
+    [getAvailableWidth, onWidthChange, width],
+  );
 
   // Follow the newest deliverable unless the user pinned an older one.
   const selected =
@@ -138,23 +193,21 @@ export default function ArtifactWindow({ artifacts, onClose }: Props) {
     <aside
       className={styles.panel}
       data-maximised={maximised ? "true" : "false"}
-      style={
-        maximised
-          ? undefined
-          : { transform: `translate(${offset.x}px, ${offset.y}px)` }
-      }
       aria-label="Deliverables"
     >
       <div
-        className={styles.header}
-        onPointerDown={startDrag}
-        onPointerMove={onDrag}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-      >
-        <span className={styles.grip} aria-hidden="true">
-          ⠿
-        </span>
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize deliverables"
+        tabIndex={0}
+        className={styles.resizer}
+        onPointerDown={startResize}
+        onPointerMove={onResize}
+        onPointerUp={endResize}
+        onPointerCancel={endResize}
+        onKeyDown={nudgeWidth}
+      />
+      <div className={styles.header}>
         <h2>Deliverables</h2>
         <span className={styles.count}>{artifacts.length}</span>
         <span className={styles.headerSpacer} />
@@ -162,7 +215,7 @@ export default function ArtifactWindow({ artifacts, onClose }: Props) {
           type="button"
           className={styles.headerButton}
           onClick={() => setMaximised((value) => !value)}
-          aria-label={maximised ? "Restore window" : "Maximise window"}
+          aria-label={maximised ? "Restore panel" : "Maximise panel"}
           title={maximised ? "Restore" : "Full screen"}
         >
           {maximised ? "❐" : "⛶"}

@@ -1,31 +1,71 @@
 /*
- * A floating window rather than a column: it only exists while the reader is
- * looking at a deliverable, and it can be dragged out of the way or expanded.
+ * A docked column, level with the sessions sidebar and the conversation.
+ *
+ * It used to float over the transcript, which forced a choice between reading
+ * the file and reading the answer that produced it. Here it is a grid track:
+ * the shell owns the width (`--deliverables-width`), the reader changes it by
+ * dragging the left edge, and maximising is the deliberate way to give one
+ * deliverable the whole viewport.
  */
 .panel {
-  position: fixed;
-  top: 84px;
-  right: 28px;
-  z-index: 40;
+  position: relative;
+  z-index: 20;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  width: min(460px, calc(100vw - 32px));
-  height: min(620px, calc(100dvh - 120px));
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
   background: #fff;
+  border-left: 1px solid #dde5e7;
+}
+
+/*
+ * Maximising has to leave the grid. Inside its track the panel can never be
+ * wider than the track, which is the one thing full screen is for. Keep the
+ * box itself unsized, too: the mobile drawer gives the panel an explicit width,
+ * and inset plus width is over-constrained enough that browsers drop the right
+ * edge instead of filling the viewport.
+ */
+.panel[data-maximised="true"] {
+  position: fixed;
+  inset: 16px;
+  z-index: 60;
+  width: auto;
+  height: auto;
   border: 1px solid #dde5e7;
   border-radius: 14px;
   box-shadow: 0 24px 60px rgb(22 38 45 / 20%);
 }
 
-.panel[data-maximised="true"] {
-  top: 16px;
-  right: 16px;
-  bottom: 16px;
-  left: 16px;
-  width: auto;
-  height: auto;
+/*
+ * The width handle, sitting on the column's left edge.
+ *
+ * Wider than it looks: the visible seam is one pixel, but a one-pixel target
+ * is not something a pointer can reliably hit, so the grab area is padded and
+ * pulled back over the border it controls.
+ */
+.resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  z-index: 1;
+  width: 7px;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resizer:hover,
+.resizer:focus-visible {
+  background: rgb(23 160 139 / 22%);
+  outline: none;
+}
+
+.panel[data-maximised="true"] .resizer {
+  display: none;
 }
 
 .header {
@@ -35,32 +75,13 @@
   padding: 12px 14px;
   background: #fbfcfc;
   border-bottom: 1px solid #e6ecee;
-  cursor: grab;
-  touch-action: none;
   user-select: none;
-}
-
-.header:active {
-  cursor: grabbing;
-}
-
-.panel[data-maximised="true"] .header {
-  cursor: default;
 }
 
 .header h2 {
   font-size: 13.5px;
   font-weight: 700;
   letter-spacing: -0.01em;
-}
-
-.grip {
-  color: #a9b7bb;
-  font-size: 13px;
-}
-
-.panel[data-maximised="true"] .grip {
-  visibility: hidden;
 }
 
 .headerSpacer {
@@ -255,4 +276,26 @@
   background: #17a08b;
   border-radius: 8px;
   font-weight: 600;
+}
+
+/*
+ * Too narrow for three columns, so the column becomes a drawer -- the mirror
+ * of the sessions sidebar, sliding in from the right over the conversation
+ * rather than squeezing it. The width handle goes with it: a drawer is sized
+ * by the viewport, not by the reader.
+ */
+@media (max-width: 860px) {
+  .panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    width: min(420px, 92vw);
+    box-shadow: -18px 0 44px rgb(22 38 45 / 22%);
+  }
+
+  .resizer {
+    display: none;
+  }
 }

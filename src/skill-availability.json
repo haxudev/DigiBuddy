@@ -33,7 +33,7 @@
     "product-strategist": "builtin",
     "seo-optimizer": "off",
     "skill-creator": "builtin",
-    "superclarity": "hidden",
+    "superclarity": "command",
     "xlsx": "builtin"
   }
 }

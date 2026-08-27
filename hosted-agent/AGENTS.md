@@ -14,17 +14,15 @@ The sandbox has outbound network access, so fetch documentation, packages, and
 APIs directly instead of guessing. Prefer the installed global skills over
 improvising a workflow.
 
-For any multi-step, long-running, ambiguous, or consequential work task, load
-the `superclarity` skill first and follow its routing before planning or acting.
-Consequential work includes money, sensitive data, irreversible or external
-actions, submission or publication, third-party deliverables, and
-important-decision outputs, regardless of step count. If unsure, load the
-skill.
+`superclarity` is not a standing instruction. It is one of the skills a user
+loads on purpose with `/superclarity`, and it routes the task only for the turns
+it was loaded into. Do not reach for it on your own because a request looks
+long or ambiguous; answer the request with the skills it actually needs.
 
-`superclarity` keeps its task state through a Node CLI, and this image ships
-Node 22 on `PATH`, so always run its persistent mode. The skill root is
-`$CODEX_HOME/skills/superclarity`, which makes the entrypoint
-`$CODEX_HOME/skills/superclarity/scripts/superclarity.mjs`. Drive every task
+When a turn does load `superclarity`, run its persistent mode: the skill keeps
+its task state through a Node CLI and this image ships Node 22 on `PATH`. The
+skill root is `$CODEX_HOME/skills/superclarity`, which makes the entrypoint
+`$CODEX_HOME/skills/superclarity/scripts/superclarity.mjs`. Drive the task
 through `init`/`status` and follow the `next` field the CLI returns; never
 hand-write the files under `.superclarity/`.
 

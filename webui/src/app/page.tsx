@@ -78,6 +78,12 @@ import {
   shouldOpenDeliverables,
   type DeliveryFocus,
 } from "@/lib/deliverables";
+import {
+  DEFAULT_PANEL_WIDTH,
+  clampPanelWidth,
+  deliverablesUseGridTrack,
+  sharedDeliverablesWidth,
+} from "@/lib/deliverables-panel";
 import type { ProfileCapabilities } from "@/lib/profile-capabilities";
 import { clampActive, isSuggestionKey, moveActive } from "@/lib/suggestions";
 import {
@@ -268,9 +274,18 @@ export default function Home() {
     { id: string; sessionId: string; text: string }[]
   >([]);
   // On phones and tablets the sidebar slides over the conversation instead of
-  // squeezing it. The deliverable window is always an overlay.
+  // squeezing it, and so does the deliverables column.
   const [navOpen, setNavOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+  /**
+   * Width of the deliverables column, owned here because it is a grid track.
+   *
+   * The panel is the thing that gets dragged, but the track it occupies is
+   * declared on the shell, so the number has to live above both. It starts at
+   * the default and the panel replaces it with the remembered one once it is
+   * on a client.
+   */
+  const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
   /**
    * One live agent per conversation, kept for as long as the conversation is.
    *
@@ -283,8 +298,40 @@ export default function Home() {
   const agentsRef = useRef(
     new Map<string, { agent: HttpAgent; subscription: { unsubscribe(): void } }>(),
   );
+  const shellRef = useRef<HTMLElement | null>(null);
+  const chatRef = useRef<HTMLElement | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const getDeliverablesAvailableWidth = useCallback(() => {
+    if (typeof window === "undefined") return null;
+    if (!deliverablesUseGridTrack(window.innerWidth)) return null;
+    const shell = shellRef.current;
+    const chat = chatRef.current;
+    if (!shell || !chat) return null;
+    return sharedDeliverablesWidth(
+      shell.getBoundingClientRect().right,
+      chat.getBoundingClientRect().left,
+    );
+  }, []);
+
+  /*
+   * The shell's third grid track is a fixed pixel value, so a remembered width
+   * from a large monitor can become impossible after the viewport shrinks.
+   * Re-clamping while the docked panel is open keeps the persisted preference
+   * and the live CSS variable inside the space left after the sessions column.
+   */
+  useEffect(() => {
+    if (!panelOpen) return;
+    function reclampPanelWidth() {
+      const available = getDeliverablesAvailableWidth();
+      if (available === null) return;
+      setPanelWidth((current) => clampPanelWidth(current, available));
+    }
+    reclampPanelWidth();
+    window.addEventListener("resize", reclampPanelWidth);
+    return () => window.removeEventListener("resize", reclampPanelWidth);
+  }, [getDeliverablesAvailableWidth, panelOpen]);
 
   // Sessions live in browser storage: the Responses API keeps each transcript
   // server side behind a response id, but the console needs its own history.
@@ -949,7 +996,17 @@ export default function Home() {
   }
 
   return (
-    <main className={styles.shell} data-nav={navOpen ? "open" : "closed"}>
+    <main
+      ref={shellRef}
+      className={styles.shell}
+      data-nav={navOpen ? "open" : "closed"}
+      data-deliverables={panelOpen ? "open" : "closed"}
+      style={
+        {
+          "--deliverables-panel-width": `${panelWidth}px`,
+        } as React.CSSProperties
+      }
+    >
       <div className={styles.navSlot}>
         <SessionSidebar
           sessions={sessions}
@@ -968,10 +1025,13 @@ export default function Home() {
         type="button"
         className={styles.backdrop}
         aria-label="Close navigation"
-        onClick={() => setNavOpen(false)}
+        onClick={() => {
+          setNavOpen(false);
+          setPanelOpen(false);
+        }}
       />
 
-      <section className={styles.chat}>
+      <section className={styles.chat} ref={chatRef}>
         <header className={styles.chatHeader}>
           <div>
             <button
@@ -985,16 +1045,15 @@ export default function Home() {
             {activeSession?.title ?? ""}
           </div>
           <div className={styles.headerActions}>
-            {artifacts.length > 0 && (
-              <button
-                type="button"
-                className={styles.deliverablesButton}
-                onClick={() => setPanelOpen(true)}
-                aria-label="Show deliverables"
-              >
-                ▤ {artifacts.length}
-              </button>
-            )}
+            <button
+              type="button"
+              className={styles.deliverablesButton}
+              onClick={() => setPanelOpen((open) => !open)}
+              aria-pressed={panelOpen}
+              aria-label={panelOpen ? "Hide deliverables" : "Show deliverables"}
+            >
+              ▤ {artifacts.length}
+            </button>
             <AgentCapabilities
               profiles={profiles}
               selected={boundProfile || requestedProfile}
@@ -1364,8 +1423,14 @@ export default function Home() {
         </form>
       </section>
 
-      {panelOpen && artifacts.length > 0 && (
-        <ArtifactWindow artifacts={artifacts} onClose={() => setPanelOpen(false)} />
+      {panelOpen && (
+        <ArtifactWindow
+          artifacts={artifacts}
+          onClose={() => setPanelOpen(false)}
+          width={panelWidth}
+          getAvailableWidth={getDeliverablesAvailableWidth}
+          onWidthChange={setPanelWidth}
+        />
       )}
     </main>
   );

@@ -13,10 +13,32 @@
   position: fixed;
   inset: 0;
   display: grid;
-  grid-template-columns: minmax(240px, 288px) minmax(0, 1fr);
+  grid-template-columns:
+    minmax(240px, 288px)
+    minmax(0, 1fr)
+    var(--deliverables-width, 0px);
   overflow: hidden;
   background: #f3f5f7;
   color: #182028;
+}
+
+/*
+ * Deliverables are a column, not a pop-up.
+ *
+ * They used to float over the conversation, which meant the reader chose
+ * between seeing the file and seeing the answer that produced it. As a third
+ * grid track the two sit side by side, and closing the panel collapses the
+ * track to nothing so the transcript is full width again -- which is why the
+ * width is a variable on the shell rather than on the panel: the track has to
+ * know it before the panel renders.
+ *
+ * The dragged width arrives as `--deliverables-panel-width`, a separate
+ * variable, because the console sets it inline: an inline custom property
+ * outranks every selector, so writing the track width directly would make
+ * "closed" and the narrow-screen drawer impossible to express here.
+ */
+.shell[data-deliverables="open"] {
+  --deliverables-width: var(--deliverables-panel-width, 460px);
 }
 
 /*
@@ -90,6 +112,13 @@
 
 .deliverablesButton:hover {
   background: #eef4f4;
+}
+
+/* The button is a switch now, so it has to say which way it is thrown. */
+.deliverablesButton[aria-pressed="true"] {
+  color: #10635a;
+  background: #def3ef;
+  border-color: #b9e2db;
 }
 
 .messages {
@@ -417,6 +446,26 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  /*
+   * There is no room for three columns, so the deliverables column becomes the
+   * mirror of the sessions drawer: it slides in from the right over the
+   * conversation instead of squeezing it, and shares the same backdrop.
+   */
+  .shell,
+  .shell[data-deliverables="open"] {
+    --deliverables-width: 0px;
+  }
+
+  .shell[data-deliverables="open"] .backdrop,
+  .shell[data-nav="open"] .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 15;
+    background: rgb(16 27 32 / 42%);
+    cursor: pointer;
+  }
+
   .navSlot {
     display: block;
     position: fixed;
@@ -436,15 +485,6 @@
   .navSlot > * {
     height: 100%;
     box-shadow: 18px 0 44px rgb(22 38 45 / 22%);
-  }
-
-  .shell[data-nav="open"] .backdrop {
-    display: block;
-    position: fixed;
-    inset: 0;
-    z-index: 15;
-    background: rgb(16 27 32 / 42%);
-    cursor: pointer;
   }
 
   .drawerButton {

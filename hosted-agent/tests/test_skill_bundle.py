@@ -98,13 +98,25 @@ class SkillBundleTests(unittest.TestCase):
         self.assertIn("haxudev/superclarity@", provenance)
         self.assertIn("haxudev/agent-maturity-assessment@", provenance)
 
-    def test_superclarity_is_the_default_workflow_entry(self):
-        instructions = (HOSTED_AGENT / "AGENTS.md").read_text(encoding="utf-8")
+    def test_superclarity_is_reached_only_when_a_turn_asks_for_it(self):
+        """No standing directive, and a `/` command rather than a hidden skill.
 
-        self.assertIn(
-            "load the `superclarity` skill first",
-            " ".join(instructions.split()),
+        Superclarity used to be the default route for anything multi-step,
+        which meant an ordinary question paid for a task ledger nobody asked
+        for. Both halves of that have to hold together: the instructions must
+        stop demanding it, and the availability must make it something a user
+        can actually choose.
+        """
+        instructions = " ".join(
+            (HOSTED_AGENT / "AGENTS.md").read_text(encoding="utf-8").split()
         )
+        availability = json.loads(
+            (ROOT / "src" / "skill-availability.json").read_text(encoding="utf-8")
+        )
+
+        self.assertNotIn("load the `superclarity` skill first", instructions)
+        self.assertIn("/superclarity", instructions)
+        self.assertEqual(availability["skills"]["superclarity"], "command")
 
     def test_agent_maturity_package_is_self_contained(self):
         package_root = VENDOR / "agent-maturity"

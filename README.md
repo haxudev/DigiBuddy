@@ -77,11 +77,11 @@ At startup the adapter concatenates `hosted-agent/AGENTS.md` with `src/AGENTS.md
 ### Bundled workflow and assessment skills
 
 The image contains immutable snapshots of Superclarity and Agent Maturity.
-Superclarity is the default entry for multi-step, ambiguous, or consequential
-work. It ships a Node CLI at
-`skills/superclarity/scripts/superclarity.mjs` that owns task state, so the
-image also carries a Node 22 runtime and the build fails if that CLI cannot be
-loaded. Agent Maturity includes its zero-dependency Python runtime and is
+Superclarity is not a default route: it is offered in the chat menu and runs
+only for the turns a user loads it into with `/superclarity`. It ships a Node
+CLI at `skills/superclarity/scripts/superclarity.mjs` that owns task state, so
+the image also carries a Node 22 runtime and the build fails if that CLI cannot
+be loaded. Agent Maturity includes its zero-dependency Python runtime and is
 registered as the local `agent-maturity` stdio MCP server.
 
 Azure startup does not clone repositories or install these tools. To update the
