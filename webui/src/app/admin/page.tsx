@@ -56,6 +56,8 @@ type McpServer = {
   enabled: boolean;
   bearer_token_env_var: string;
   description: string;
+  startup_timeout_sec?: number;
+  tool_timeout_sec?: number;
 };
 
 type Profile = {

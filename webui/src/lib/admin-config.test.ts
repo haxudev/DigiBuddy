@@ -107,6 +107,38 @@ test("mcp servers default to enabled", () => {
   assert.equal(servers.pricing.enabled, false);
 });
 
+test("mcp server timeouts survive an admin read and write", () => {
+  const { servers } = normaliseMcp({
+    servers: {
+      lake: {
+        command: "python",
+        startup_timeout_sec: 120,
+        tool_timeout_sec: 900,
+      },
+    },
+  });
+
+  assert.equal(servers.lake.startup_timeout_sec, 120);
+  assert.equal(servers.lake.tool_timeout_sec, 900);
+});
+
+test("mcp server timeouts outside runtime limits are rejected", () => {
+  assert.throws(
+    () =>
+      normaliseMcp({
+        servers: { lake: { command: "python", startup_timeout_sec: 301 } },
+      }),
+    ConfigValidationError,
+  );
+  assert.throws(
+    () =>
+      normaliseMcp({
+        servers: { lake: { command: "python", tool_timeout_sec: 0 } },
+      }),
+    ConfigValidationError,
+  );
+});
+
 test("absent profile selections keep every capability", () => {
   const { profiles } = normaliseProfiles({ profiles: [{ name: "full" }] });
 

@@ -194,6 +194,15 @@ class SkillBundleTests(unittest.TestCase):
             self.assertNotIn("<", url, name)
             self.assertNotIn(">", url, name)
 
+    def test_msxi_lake_has_a_cold_start_budget(self):
+        """A 30-second default drops a scaling connector for the whole session."""
+        config = json.loads((ROOT / "src" / "mcp.json").read_text(encoding="utf-8"))
+
+        self.assertGreaterEqual(
+            config["servers"]["msxi-lake"]["startup_timeout_sec"],
+            120,
+        )
+
     def test_every_profile_can_reach_the_default_knowledge_base(self):
         profiles = json.loads(
             (ROOT / "src" / "profiles.json").read_text(encoding="utf-8")

@@ -91,6 +91,10 @@ export type McpServer = {
   enabled: boolean;
   bearer_token_env_var: string;
   description: string;
+  /** Time Codex may spend starting a server before dropping it for the session. */
+  startup_timeout_sec?: number;
+  /** Time one MCP tool call may run before Codex cancels it. */
+  tool_timeout_sec?: number;
 };
 
 export type McpDocument = { servers: Record<string, McpServer>; schema_version?: number };
@@ -371,6 +375,28 @@ export function normaliseMcp(input: unknown): McpDocument {
         `MCP server ${key} command must be a bare executable name; put arguments in args.`,
       );
     }
+    const timeout = (
+      field: "startup_timeout_sec" | "tool_timeout_sec",
+      maximum: number,
+    ): number | undefined => {
+      const configured = server[field];
+      if (configured === undefined || configured === null || configured === "") {
+        return undefined;
+      }
+      if (
+        typeof configured !== "number" ||
+        !Number.isFinite(configured) ||
+        configured < 1 ||
+        configured > maximum
+      ) {
+        throw new ConfigValidationError(
+          `MCP server ${key} ${field} must be between 1 and ${maximum} seconds.`,
+        );
+      }
+      return configured;
+    };
+    const startupTimeout = timeout("startup_timeout_sec", 300);
+    const toolTimeout = timeout("tool_timeout_sec", 3600);
     normalised[key] = {
       url,
       command,
@@ -386,6 +412,10 @@ export function normaliseMcp(input: unknown): McpDocument {
       enabled: server.enabled !== false,
       bearer_token_env_var: text(server.bearer_token_env_var),
       description: text(server.description),
+      ...(startupTimeout === undefined
+        ? {}
+        : { startup_timeout_sec: startupTimeout }),
+      ...(toolTimeout === undefined ? {} : { tool_timeout_sec: toolTimeout }),
     };
   }
   return versioned({ servers: normalised });
