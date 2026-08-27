@@ -270,6 +270,15 @@ under `.azure/releases/`. Use `--fast` to skip local Docker validation,
 `--build-only` to stop after image publication, or `--skip-webui` for an
 intentional Agent-only release.
 
+> **Check the target before running it.** The script's built-in defaults name a
+> legacy environment (`haxuaifoundryaiservice` / `haeronclaw-*` / `haxureg`), so
+> running it unflagged publishes an Agent version into a *different* Foundry
+> project. Pass `--account-name`, `--project-name`, `--agent-name`, `--acr-name`
+> and the image repositories for the deployment you actually mean to release.
+> The Web UI rollout additionally assumes App Service (`az webapp`); a
+> deployment whose console runs on Container Apps must use `--skip-webui` and
+> roll the console out separately.
+
 ## Using the API
 
 The Hosted Agent speaks the Foundry Responses protocol `2.0.0`:

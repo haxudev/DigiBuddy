@@ -180,6 +180,13 @@ Foundry Agent 版本，更新 Web App，并在 `.azure/releases/` 写入不含�
 发布回执。`--fast` 仅跳过本地 Docker 验证，`--build-only` 只发布镜像，
 `--skip-webui` 用于明确的 Agent-only 发布。
 
+> **执行前请先确认目标环境。** 脚本内置默认值指向旧环境
+> （`haxuaifoundryaiservice` / `haeronclaw-*` / `haxureg`），不加参数直接运行会把
+> Agent 版本发布到**另一个** Foundry 项目。请按实际要发布的部署显式传入
+> `--account-name`、`--project-name`、`--agent-name`、`--acr-name` 及镜像仓库名。
+> 此外 Web UI 发布流程假定使用 App Service（`az webapp`）；若控制台运行在
+> Container Apps 上，需使用 `--skip-webui` 并单独发布控制台。
+
 ## 使用 API
 
 Hosted Agent 使用 Foundry Responses 协议 `2.0.0`：
