@@ -3,7 +3,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -27,6 +27,10 @@ def _install_responses_sdk_stub():
         "azure.ai.agentserver.responses",
         ModuleType("azure.ai.agentserver.responses"),
     )
+    activity = put(
+        "azure.ai.agentserver.activity",
+        ModuleType("azure.ai.agentserver.activity"),
+    )
 
     class ResponsesServerOptions:
         def __init__(self, **kwargs):
@@ -43,6 +47,27 @@ def _install_responses_sdk_stub():
         def run(self):
             return None
 
+    class FakeAgentApplication:
+        def __init__(self):
+            self.handlers = {}
+            self.error_handler = None
+
+        def activity(self, activity_type):
+            def register(func):
+                self.handlers[activity_type] = func
+                return func
+
+            return register
+
+        def error(self, func):
+            self.error_handler = func
+            return func
+
+    class ActivityAgentServerHost:
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.agent_app = FakeAgentApplication()
+
     class ResponseEventStream:
         def __init__(self, **_kwargs):
             pass
@@ -52,9 +77,11 @@ def _install_responses_sdk_stub():
     responses.ResponseEventStream = ResponseEventStream
     responses.ResponsesAgentServerHost = ResponsesAgentServerHost
     responses.ResponsesServerOptions = ResponsesServerOptions
+    activity.ActivityAgentServerHost = ActivityAgentServerHost
     azure.ai = ai
     ai.agentserver = agentserver
     agentserver.responses = responses
+    agentserver.activity = activity
     return added
 
 
@@ -83,6 +110,63 @@ class FakeContext:
 class FakeRuntime:
     def conversation_workspace(self, _previous_response_id, _response_id):
         return Path(".work/response-stream-test")
+
+
+class FakeActivityContext:
+    def __init__(self, text="ping", activity_id="activity-1"):
+        self.activity = SimpleNamespace(
+            id=activity_id,
+            text=text,
+            channel_id="msteams",
+            conversation=SimpleNamespace(id="conversation-1"),
+        )
+        self.sent = []
+
+    async def send_activity(self, value):
+        self.sent.append(value)
+
+
+class FakeStreamingResponse:
+    def __init__(self):
+        self.updates = []
+        self.chunks = []
+        self.ended = False
+
+    def queue_informative_update(self, value):
+        self.updates.append(value)
+
+    def queue_text_chunk(self, value):
+        self.chunks.append(value)
+
+    async def end_stream(self):
+        self.ended = True
+
+
+class FailingStreamingResponse(FakeStreamingResponse):
+    def __init__(self):
+        super().__init__()
+        self.reset_called = False
+
+    async def end_stream(self):
+        raise RuntimeError("Bot Connector unavailable")
+
+    def reset(self):
+        self.reset_called = True
+
+
+class CancelledStreamingResponse(FakeStreamingResponse):
+    def __init__(self):
+        super().__init__()
+        self._cancelled = False
+        self.reset_called = False
+
+    async def end_stream(self):
+        self.ended = True
+        self._cancelled = True
+
+    async def reset(self):
+        self.reset_called = True
+        self._cancelled = False
 
 
 class RecordingResponseEventStream:
@@ -429,3 +513,224 @@ class FailedTurnStreamTests(HandleResponseArtifactStreamTests):
         # Nothing to tell the user, and silence would look like a valid answer.
         with self.assertRaises(RuntimeError):
             self._run([RuntimeEvent("task.completed", {"status": "completed"})])
+
+
+class TeamsActivityBridgeTests(unittest.TestCase):
+    def test_one_host_registers_responses_and_teams_handlers(self):
+        self.assertIs(main.app.handler, main.handle_response)
+        self.assertIs(
+            main.teams_app.handlers["message"],
+            main.handle_activity_message,
+        )
+        self.assertIs(
+            main.teams_app.error_handler,
+            main.handle_activity_error,
+        )
+
+    def test_other_mentions_are_preserved_after_sdk_bot_cleanup(self):
+        activity = FakeActivityContext(
+            " <at>Alice</at> summarize this "
+        ).activity
+
+        self.assertEqual(
+            main._activity_prompt(activity),
+            "<at>Alice</at> summarize this",
+        )
+
+    def test_conversation_keys_are_stable_and_opaque(self):
+        first = FakeActivityContext().activity
+        same = FakeActivityContext("another message").activity
+        other = FakeActivityContext().activity
+        other.conversation.id = "conversation-2"
+
+        self.assertEqual(
+            main._activity_conversation_key(first),
+            main._activity_conversation_key(same),
+        )
+        self.assertNotEqual(
+            main._activity_conversation_key(first),
+            main._activity_conversation_key(other),
+        )
+        self.assertNotIn(
+            "conversation-1",
+            main._activity_conversation_key(first),
+        )
+
+    def test_activity_replies_join_streamed_and_completed_text(self):
+        async def scripted_turn_events(*_args, **_kwargs):
+            yield RuntimeEvent("assistant.message.delta", {"delta": "hello"})
+            yield RuntimeEvent(
+                "assistant.message.completed",
+                {"text": "hello from Teams"},
+            )
+
+        async def collect():
+            with mock.patch.object(
+                main,
+                "_turn_events",
+                scripted_turn_events,
+            ):
+                return await main._activity_reply("ping", "teams-key")
+
+        self.assertEqual(asyncio.run(collect()), "hello from Teams")
+
+    def test_a_teams_message_sends_the_codex_reply(self):
+        context = FakeActivityContext()
+
+        async def run():
+            with mock.patch.object(
+                main,
+                "_activity_reply",
+                mock.AsyncMock(return_value="pong"),
+            ) as reply:
+                await main.handle_activity_message(context, {})
+                return reply
+
+        reply = asyncio.run(run())
+        self.assertEqual(context.sent, ["pong"])
+        reply.assert_awaited_once_with(
+            "ping",
+            main._activity_conversation_key(context.activity),
+        )
+
+    def test_a_bare_mention_gets_a_useful_greeting(self):
+        # The M365 SDK removes the recipient mention before this handler runs.
+        context = FakeActivityContext("", activity_id="activity-2")
+
+        async def run():
+            with mock.patch.object(
+                main,
+                "_activity_reply",
+                mock.AsyncMock(return_value="How can I help?"),
+            ) as reply:
+                await main.handle_activity_message(context, {})
+                return reply
+
+        reply = asyncio.run(run())
+        self.assertEqual(context.sent, ["How can I help?"])
+        self.assertIn("Greet the user", reply.await_args.args[0])
+
+    def test_an_artifact_only_turn_is_still_a_successful_reply(self):
+        async def scripted_turn_events(*_args, **_kwargs):
+            yield RuntimeEvent(
+                ARTIFACT_EVENT,
+                {"artifacts": [{"id": "artifact"}], "failed": 0},
+            )
+
+        async def collect():
+            with mock.patch.object(
+                main,
+                "_turn_events",
+                scripted_turn_events,
+            ):
+                return await main._activity_reply("make it", "teams-key")
+
+        self.assertIn("generated files", asyncio.run(collect()))
+
+    def test_streaming_keeps_the_turn_alive_and_finishes_it(self):
+        context = FakeActivityContext(activity_id="activity-stream")
+        context.streaming_response = FakeStreamingResponse()
+
+        async def run():
+            with mock.patch.object(
+                main,
+                "_activity_reply",
+                mock.AsyncMock(return_value="pong"),
+            ):
+                await main.handle_activity_message(context, {})
+
+        asyncio.run(run())
+        self.assertTrue(context.streaming_response.updates)
+        self.assertEqual(context.streaming_response.chunks, ["pong"])
+        self.assertTrue(context.streaming_response.ended)
+        self.assertEqual(context.sent, [])
+
+    def test_a_silently_cancelled_stream_falls_back_to_an_ordinary_reply(self):
+        context = FakeActivityContext(activity_id="activity-cancelled-stream")
+        context.streaming_response = CancelledStreamingResponse()
+
+        async def run():
+            with mock.patch.object(
+                main,
+                "_activity_reply",
+                mock.AsyncMock(return_value="pong"),
+            ):
+                await main.handle_activity_message(context, {})
+
+        asyncio.run(run())
+        self.assertTrue(context.streaming_response.reset_called)
+        self.assertEqual(context.sent, ["pong"])
+
+    def test_a_completed_activity_retry_does_not_send_twice(self):
+        first = FakeActivityContext(activity_id="activity-retry")
+        retry = FakeActivityContext(activity_id="activity-retry")
+
+        async def run():
+            with mock.patch.object(
+                main,
+                "_activity_reply",
+                mock.AsyncMock(return_value="pong"),
+            ) as reply:
+                await main.handle_activity_message(first, {})
+                await main.handle_activity_message(retry, {})
+                return reply
+
+        reply = asyncio.run(run())
+        self.assertEqual(first.sent, ["pong"])
+        self.assertEqual(retry.sent, [])
+        self.assertEqual(reply.await_count, 1)
+
+    def test_a_delivery_retry_reuses_completed_work(self):
+        first = FakeActivityContext(activity_id="activity-delivery-retry")
+        first.streaming_response = FailingStreamingResponse()
+        first.send_activity = mock.AsyncMock(
+            side_effect=RuntimeError("Bot Connector unavailable")
+        )
+        retry = FakeActivityContext(activity_id="activity-delivery-retry")
+
+        async def run():
+            with mock.patch.object(
+                main,
+                "_activity_reply",
+                mock.AsyncMock(return_value="expensive result"),
+            ) as reply:
+                with self.assertRaisesRegex(
+                    main.ActivityDeliveryError,
+                    "rejected",
+                ):
+                    await main.handle_activity_message(first, {})
+                await main.handle_activity_message(retry, {})
+                return reply
+
+        reply = asyncio.run(run())
+        self.assertTrue(first.streaming_response.reset_called)
+        self.assertEqual(retry.sent, ["expensive result"])
+        self.assertEqual(reply.await_count, 1)
+
+    def test_same_activity_id_in_two_conversations_is_not_a_duplicate(self):
+        first = FakeActivityContext(activity_id="shared-activity-id")
+        second = FakeActivityContext(activity_id="shared-activity-id")
+        second.activity.conversation.id = "another-conversation"
+
+        async def run():
+            with mock.patch.object(
+                main,
+                "_activity_reply",
+                mock.AsyncMock(return_value="pong"),
+            ) as reply:
+                await main.handle_activity_message(first, {})
+                await main.handle_activity_message(second, {})
+                return reply
+
+        reply = asyncio.run(run())
+        self.assertEqual(first.sent, ["pong"])
+        self.assertEqual(second.sent, ["pong"])
+        self.assertEqual(reply.await_count, 2)
+
+    def test_delivery_errors_are_rethrown_for_connector_retry(self):
+        context = FakeActivityContext(activity_id="activity-hard-failure")
+        error = main.ActivityDeliveryError("delivery failed")
+
+        with self.assertRaises(main.ActivityDeliveryError):
+            asyncio.run(main.handle_activity_error(context, error))
+        self.assertEqual(context.sent, [])

@@ -27,6 +27,8 @@ services:
     protocols:
       - protocol: responses
         version: 2.0.0
+      - protocol: activity
+        version: 2.0.0
     # Teams and Microsoft 365 use the stable Activity endpoint, while the Web
     # UI and SDK clients keep using Responses. Both authorization schemes must
     # stay present: publishing with Shared scope adds BotServiceRbac, and Entra

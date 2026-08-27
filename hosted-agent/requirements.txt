@@ -1,4 +1,5 @@
 azure-ai-agentserver-responses==2.0.0
+azure-ai-agentserver-activity==1.0.0b3
 # Pinned deliberately, not transitively. `responses` only asks for
 # `core>=2.0.0`, so an unrelated rebuild picked up core 2.1.0, which refuses
 # every request in a hosted environment unless resilient tasks are enabled --
@@ -7,3 +8,11 @@ azure-ai-agentserver-responses==2.0.0
 # subsystem, which is its own upgrade; until then the runtime we ship is the
 # runtime we tested.
 azure-ai-agentserver-core==2.0.0
+# Teams delivery is part of the Hosted Agent process, so the M365 protocol
+# stack must be as reproducible as the Foundry server itself. Leaving these as
+# activity-package transitive ranges would let an unrelated image rebuild
+# change authentication or outbound Bot Connector behavior.
+microsoft-agents-hosting-core==1.5.0
+microsoft-agents-authentication-msal==1.5.0
+microsoft-agents-activity==1.5.0
+aiohttp==3.14.3

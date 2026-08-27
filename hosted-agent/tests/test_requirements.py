@@ -44,8 +44,10 @@ class AgentServerPinTests(unittest.TestCase):
     def test_the_server_core_is_pinned_and_not_left_to_resolution(self):
         pins = _pins()
 
+        self.assertIn("azure-ai-agentserver-activity", pins)
         self.assertIn("azure-ai-agentserver-core", pins)
         self.assertIn("azure-ai-agentserver-responses", pins)
+        self.assertIn("microsoft-agents-hosting-core", pins)
 
     def test_the_core_pin_predates_mandatory_resilient_tasks(self):
         version = _pins()["azure-ai-agentserver-core"]

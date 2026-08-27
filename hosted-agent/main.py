@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
+import hashlib
+import html
+import inspect
 import json
 import logging
 import re
@@ -14,6 +18,7 @@ from azure.ai.agentserver.responses import (
     ResponsesAgentServerHost,
     ResponsesServerOptions,
 )
+from azure.ai.agentserver.activity import ActivityAgentServerHost
 
 from codex_adapter import (
     CodexRuntime,
@@ -39,12 +44,34 @@ logger = logging.getLogger("digibuddy.hosted_agent")
 # framework replaces this process afterwards, and execve clears the flag.
 settings = load_settings()
 runtime = CodexRuntime(settings)
-app = ResponsesAgentServerHost(
+
+
+class DigiBuddyAgentServerHost(
+    ActivityAgentServerHost,
+    ResponsesAgentServerHost,
+):
+    """One Foundry process serving the Web UI and Microsoft Teams."""
+
+
+app = DigiBuddyAgentServerHost(
     options=ResponsesServerOptions(
         default_fetch_history_count=20,
         sse_keep_alive_interval_seconds=15,
     )
 )
+teams_app = app.agent_app
+
+_ACTIVITY_DEDUP_LIMIT = 512
+_activity_dedup_lock = asyncio.Lock()
+_activity_inflight: set[str] = set()
+_activity_completed: set[str] = set()
+_activity_completed_order: deque[str] = deque()
+_activity_pending_replies: dict[str, str] = {}
+_activity_pending_order: deque[str] = deque()
+
+
+class ActivityDeliveryError(RuntimeError):
+    """A completed Codex reply that Bot Connector has not accepted yet."""
 
 
 def _request_value(request: CreateResponse, name: str) -> Any:
@@ -220,6 +247,248 @@ def _profile_manifest(profile: dict[str, object]) -> str:
         separators=(",", ":"),
     )
     return f"\n\n<!-- digibuddy-profile:{payload} -->"
+
+
+def _activity_prompt(activity: Any) -> str:
+    """Text Teams sent after the M365 SDK removes the recipient mention."""
+    raw = _request_value(activity, "text")
+    return html.unescape(raw if isinstance(raw, str) else "").strip()
+
+
+def _activity_conversation_key(activity: Any) -> str:
+    """A stable, opaque Codex thread key for one Teams conversation."""
+    conversation = _request_value(activity, "conversation")
+    conversation_id = str(_request_value(conversation, "id") or "").strip()
+    channel_id = str(_request_value(activity, "channel_id") or "msteams").strip()
+    if not conversation_id:
+        conversation_id = str(_request_value(activity, "id") or "unknown").strip()
+    digest = hashlib.sha256(
+        f"{channel_id}\0{conversation_id}".encode("utf-8")
+    ).hexdigest()[:32]
+    return f"teams-{digest}"
+
+
+def _activity_event_key(activity: Any) -> str:
+    """An opaque key for suppressing Bot Connector retries."""
+    activity_id = str(_request_value(activity, "id") or "").strip()
+    if not activity_id:
+        return ""
+    return hashlib.sha256(
+        f"{_activity_conversation_key(activity)}\0{activity_id}".encode("utf-8")
+    ).hexdigest()
+
+
+async def _claim_activity(activity: Any) -> tuple[str, bool, str | None]:
+    """Claim a Teams activity once; missing IDs cannot be deduplicated."""
+    key = _activity_event_key(activity)
+    if not key:
+        return "", True, None
+    async with _activity_dedup_lock:
+        if key in _activity_inflight or key in _activity_completed:
+            return key, False, None
+        _activity_inflight.add(key)
+        reply = _activity_pending_replies.get(key)
+    return key, True, reply
+
+
+async def _cache_activity_reply(key: str, reply: str) -> None:
+    """Retain completed work until Bot Connector accepts the delivery."""
+    if not key:
+        return
+    async with _activity_dedup_lock:
+        if key not in _activity_pending_replies:
+            _activity_pending_order.append(key)
+        _activity_pending_replies[key] = reply
+        while len(_activity_pending_order) > _ACTIVITY_DEDUP_LIMIT:
+            expired = _activity_pending_order.popleft()
+            _activity_pending_replies.pop(expired, None)
+            if expired not in _activity_completed:
+                _activity_completed.add(expired)
+                _activity_completed_order.append(expired)
+        while len(_activity_completed_order) > _ACTIVITY_DEDUP_LIMIT:
+            _activity_completed.discard(_activity_completed_order.popleft())
+
+
+async def _complete_activity(key: str, *, successful: bool) -> None:
+    if not key:
+        return
+    async with _activity_dedup_lock:
+        _activity_inflight.discard(key)
+        # A failed delivery must remain retryable; only a reply the channel
+        # accepted is safe to remember as complete.
+        if not successful:
+            return
+        _activity_pending_replies.pop(key, None)
+        if key in _activity_completed:
+            return
+        _activity_completed.add(key)
+        _activity_completed_order.append(key)
+        while len(_activity_completed_order) > _ACTIVITY_DEDUP_LIMIT:
+            _activity_completed.discard(_activity_completed_order.popleft())
+
+
+async def _activity_reply(prompt: str, conversation_key: str) -> str:
+    """Run one Teams message through the same Codex thread as Responses."""
+    output = ""
+    failure = ""
+    artifacts = 0
+    artifact_failures = 0
+    async for event in _turn_events(
+        prompt,
+        previous_response_id=conversation_key,
+        response_id=conversation_key,
+        cancellation_signal=asyncio.Event(),
+        model=None,
+        profile=None,
+        reasoning_effort=None,
+        owner="",
+    ):
+        if event.type == "assistant.message.delta":
+            output += str(event.data.get("delta") or "")
+        elif event.type == "assistant.message.completed":
+            completed = str(event.data.get("text") or "")
+            output += completion_delta(output, completed)
+        elif event.type in {"turn.error", "task.failed"} and not event.data.get(
+            "will_retry"
+        ):
+            failure = str(event.data.get("message") or "") or failure
+        elif event.type == ARTIFACT_EVENT:
+            values = event.data.get("artifacts")
+            if isinstance(values, list):
+                artifacts += sum(isinstance(item, dict) for item in values)
+            failed = event.data.get("failed")
+            if isinstance(failed, int):
+                artifact_failures += failed
+    if output.strip():
+        return output.strip()
+    if artifacts:
+        return (
+            "The task completed and generated files. Open the DigiBuddy Web UI "
+            "when you need to preview or download them."
+        )
+    if artifact_failures:
+        return "The task completed, but its generated files could not be published."
+    if failure:
+        return _turn_failure_message(failure)
+    raise RuntimeError("Codex turn completed without assistant output")
+
+
+async def _activity_progress(stream: Any, finished: asyncio.Event) -> None:
+    """Keep a Teams streaming turn alive while Codex is still thinking."""
+    stream.queue_informative_update("Working on your request…")
+    while not finished.is_set():
+        try:
+            await asyncio.wait_for(finished.wait(), timeout=10)
+        except TimeoutError:
+            stream.queue_informative_update("Still working…")
+
+
+async def _reset_activity_stream(stream: Any) -> None:
+    """Stop SDK keepalive timers after a failed streamed delivery."""
+    reset = getattr(stream, "reset", None)
+    if callable(reset):
+        result = reset()
+        if inspect.isawaitable(result):
+            await result
+        return
+    end = getattr(stream, "end_stream", None)
+    if callable(end):
+        result = end()
+        if inspect.isawaitable(result):
+            await result
+
+
+@teams_app.activity("message")
+async def handle_activity_message(context: Any, _state: Any):
+    """Answer an inbound Teams message through the DigiBuddy runtime."""
+    activity_key, claimed, reply = await _claim_activity(context.activity)
+    if not claimed:
+        return
+
+    stream = None
+    progress = None
+    finished = asyncio.Event()
+    successful = False
+    try:
+        try:
+            stream = context.streaming_response
+            progress = asyncio.create_task(_activity_progress(stream, finished))
+        except Exception:  # noqa: BLE001 - channels may not support streaming
+            stream = None
+
+        prompt = _activity_prompt(context.activity)
+        if not prompt:
+            prompt = "Greet the user briefly and ask how you can help."
+        if reply is None:
+            reply = await _activity_reply(
+                prompt,
+                _activity_conversation_key(context.activity),
+            )
+            await _cache_activity_reply(activity_key, reply)
+        finished.set()
+        if progress is not None:
+            await progress
+        if stream is not None:
+            try:
+                stream.queue_text_chunk(reply)
+                await stream.end_stream()
+                # hosting-core 1.5.0 swallows Teams 403 /
+                # ContentStreamNotAllowed and marks the stream cancelled. It
+                # exposes no public delivery result, so inspect the pinned
+                # state before treating the reply as accepted.
+                if getattr(stream, "_cancelled", False):
+                    await _reset_activity_stream(stream)
+                    await context.send_activity(reply)
+            except Exception:
+                # Streaming is conversation-dependent in Teams. A group chat
+                # can reject it even though ordinary Bot Connector delivery is
+                # healthy, so retry the already-computed reply without
+                # rerunning Codex or its tools.
+                await _reset_activity_stream(stream)
+                try:
+                    await context.send_activity(reply)
+                except Exception as error:
+                    raise ActivityDeliveryError(
+                        "Bot Connector rejected the completed Teams reply"
+                    ) from error
+        else:
+            try:
+                await context.send_activity(reply)
+            except Exception as error:
+                raise ActivityDeliveryError(
+                    "Bot Connector rejected the completed Teams reply"
+                ) from error
+        successful = True
+    except Exception as error:
+        if stream is not None and not isinstance(error, ActivityDeliveryError):
+            try:
+                await _reset_activity_stream(stream)
+            except Exception:  # noqa: BLE001 - preserve the delivery failure
+                logger.warning("Could not reset failed Teams stream", exc_info=True)
+        raise
+    finally:
+        finished.set()
+        if progress is not None and not progress.done():
+            progress.cancel()
+            await asyncio.gather(progress, return_exceptions=True)
+        await _complete_activity(activity_key, successful=successful)
+
+
+@teams_app.error
+async def handle_activity_error(context: Any, error: BaseException):
+    """Log the detail server-side while keeping the Teams reply safe."""
+    logger.error(
+        "Teams activity handler failed",
+        exc_info=(type(error), error, error.__traceback__),
+    )
+    if isinstance(error, ActivityDeliveryError):
+        # The reply is cached by activity ID. Propagating leaves the inbound
+        # request failed, so Bot Connector retries and the handler resends that
+        # cache instead of repeating a potentially side-effecting Codex turn.
+        raise error
+    await context.send_activity(
+        "I could not complete that message. Please try again in a moment."
+    )
 
 
 @app.response_handler

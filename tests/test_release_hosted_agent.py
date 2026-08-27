@@ -1009,6 +1009,51 @@ class RetiredEnvironmentTests(unittest.TestCase):
         self.assertEqual(environment["DIGIBUDDY_ENABLE_PROFILE_CREDENTIALS"], "true")
 
 
+class VersionProtocolTests(unittest.TestCase):
+    def test_a_release_declares_responses_and_activity(self) -> None:
+        source = {
+            "definition": {
+                "container_configuration": {"image": "old"},
+                "protocol_versions": [
+                    {"protocol": "responses", "version": "1.0.0"},
+                    {"protocol": "a2a", "version": "1.0.0"},
+                ],
+            }
+        }
+
+        protocols = _clone_version_payload(source, "new")["definition"][
+            "protocol_versions"
+        ]
+
+        self.assertEqual(
+            {entry["protocol"]: entry["version"] for entry in protocols},
+            {
+                "a2a": "1.0.0",
+                "responses": "2.0.0",
+                "activity": "2.0.0",
+            },
+        )
+
+    def test_a_protocols_alias_is_normalised_without_conflicting_fields(self) -> None:
+        source = {
+            "definition": {
+                "container_configuration": {"image": "old"},
+                "protocols": [
+                    {"protocol": "responses", "version": "2.0.0"},
+                    {"protocol": "a2a", "version": "1.0.0"},
+                ],
+            }
+        }
+
+        definition = _clone_version_payload(source, "new")["definition"]
+
+        self.assertNotIn("protocols", definition)
+        self.assertEqual(
+            {entry["protocol"] for entry in definition["protocol_versions"]},
+            {"responses", "activity", "a2a"},
+        )
+
+
 def _readiness_runner(client):
     """A runner with only the pieces `_wait_for_http_ready` touches."""
     runner = ReleaseRunner.__new__(ReleaseRunner)

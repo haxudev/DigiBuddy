@@ -1114,6 +1114,38 @@ def _clone_version_payload(source_version: Mapping[str, Any], hosted_image: str)
         raise ReleaseError("Source version is missing definition.container_configuration.")
     definition["container_configuration"] = dict(container)
     definition["container_configuration"]["image"] = hosted_image
+    # The Web UI uses Responses and Teams uses Activity. Foundry routes by the
+    # version's declared protocols, not only by the stable endpoint flags, so a
+    # cloned version that inherits the old Responses-only list accepts publish
+    # configuration but never receives a Teams message.
+    protocols = (
+        definition.get("protocol_versions")
+        or definition.get("protocols")
+        or source_version.get("protocol_versions")
+        or source_version.get("protocols")
+    )
+    declared = [
+        copy.deepcopy(entry)
+        for entry in protocols
+        if isinstance(entry, Mapping)
+    ] if isinstance(protocols, Sequence) and not isinstance(
+        protocols, (str, bytes, bytearray)
+    ) else []
+    required_protocols = {
+        "responses": "2.0.0",
+        "activity": "2.0.0",
+    }
+    kept = [
+        entry
+        for entry in declared
+        if _string_value(entry.get("protocol")).lower() not in required_protocols
+    ]
+    kept.extend(
+        {"protocol": protocol, "version": version}
+        for protocol, version in required_protocols.items()
+    )
+    definition.pop("protocols", None)
+    definition["protocol_versions"] = kept
     removed = _scrub_retired_environment(definition)
     if removed:
         print(f"Dropped retired environment variables: {', '.join(sorted(set(removed)))}")
