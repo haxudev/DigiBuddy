@@ -27,6 +27,29 @@ services:
     protocols:
       - protocol: responses
         version: 2.0.0
+    # Teams and Microsoft 365 use the stable Activity endpoint, while the Web
+    # UI and SDK clients keep using Responses. Both authorization schemes must
+    # stay present: publishing with Shared scope adds BotServiceRbac, and Entra
+    # remains the boundary for direct Foundry access.
+    agentEndpoint:
+      protocols:
+        - responses
+        - activity
+      authorizationSchemes:
+        - type: Entra
+        - type: BotServiceRbac
+    activity:
+      useCase: simple
+      publish:
+        publishScope: shared
+        appVersion: 1.0.0
+        agentDisplayName: GTMBuddy
+        shortDescription: Microsoft GTM assistant for Azure and field workflows.
+        fullDescription: GTMBuddy helps Microsoft teams with Azure architecture, internal field guidance, ACR analysis, documents, and practical go-to-market workflows.
+        developerName: Microsoft GTM
+        developerWebsiteUrl: https://www.microsoft.com
+        privacyUrl: https://privacy.microsoft.com/privacystatement
+        termsOfUseUrl: https://www.microsoft.com/servicesagreement
     env:
       CODEX_MODEL_ENDPOINT: ${CODEX_MODEL_ENDPOINT}
       CODEX_MODEL_API_KEY: ${CODEX_MODEL_API_KEY}

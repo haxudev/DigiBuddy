@@ -79,6 +79,29 @@ docker run --rm -p 3000:3000 \
 
 The image listens on port `3000` and uses Next.js standalone output. Deploy it to Azure Web App for Containers or another OCI-compatible service. In production, restrict `AGENT_ENDPOINT_ALLOWLIST` to approved endpoint suffixes.
 
+## Publish the Hosted Agent to Teams
+
+The `agentEndpoint` and `activity.publish` blocks in `azure.yaml` preserve both
+the Responses endpoint used by the Web UI and the Activity endpoint used by
+Teams. The first publish needs an Azure Bot whose messaging endpoint is the
+agent's `activityProtocol` endpoint and whose `msaAppId` is the agent instance
+identity. Record an existing bot for `azd` before packaging or publishing:
+
+```bash
+azd env set AGENT_DIGIBUDDY_CODEX_BOT_NAME <bot-name>
+azd env set AGENT_DIGIBUDDY_CODEX_BOT_RESOURCE_GROUP <bot-resource-group>
+azd env set AGENT_DIGIBUDDY_CODEX_BOT_OWNED false
+azd ai agent endpoint update digibuddy-codex
+azd ai agent pack digibuddy-codex --scope personal
+azd ai agent publish digibuddy-codex --scope shared
+```
+
+`shared` creates an install link without tenant-admin approval. Use `tenant`
+for organization-wide discovery; that submission must be approved in the
+Microsoft 365 admin center. Increment `activity.publish.appVersion` before
+republishing user-facing metadata. Creating a new Hosted Agent version does not
+require republishing because Teams targets the stable agent endpoint.
+
 ## Enable the admin console
 
 Point the Web UI and the Hosted Agent at the same configuration store, then configure either dedicated administrator credentials or an Entra allowlist:
