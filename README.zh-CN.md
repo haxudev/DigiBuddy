@@ -30,6 +30,51 @@ DigiBuddy 将 Codex app-server 封装为 Microsoft Foundry Hosted Agent 内部�
 - **知识驱动的回答**：skills 提供内部知识库，优先于 Microsoft Learn MCP 工具进行查询，并附带来源引用。
 - **云定价与成本估算**：实时查询 Azure 零售价，并给出月度与年度预测。
 
+## 系统架构
+
+```mermaid
+flowchart TB
+    Browser["浏览器 · 聊天 / 管理"]
+    Teams["Microsoft Teams / Microsoft 365"]
+
+    subgraph WebUI["Web UI · 独立部署的容器"]
+        Web["Next.js 服务端<br/>AG-UI 代理 · 管理控制台 · 交付物服务"]
+    end
+
+    subgraph Foundry["Microsoft Foundry Hosted Agent"]
+        Adapter["Responses / Activity 适配器<br/>Profile 装配 · 事件流转换"]
+        Sessions["持久化 response / conversation ↔ Codex thread 映射"]
+        Codex["Codex app-server<br/>Agent 循环 · Shell · Git · 文件操作"]
+        Payload["Agent Payload · src/<br/>人设 · Skills · Python 工具 · MCP 配置"]
+        Workspace["会话工作目录<br/>生成文档与交付物"]
+        Adapter <--> Sessions
+        Adapter <-->|"stdio JSON-RPC"| Codex
+        Payload -.->|"指令与能力装配"| Codex
+        Codex <--> Workspace
+    end
+
+    Store[("私有共享存储<br/>Azure Blob / 本地目录<br/>配置 · 能力包 · 交付物")]
+    Model["模型端点<br/>Azure OpenAI / 已配置的提供方"]
+    MCP["本地 / 远程 MCP 服务<br/>Microsoft Learn · Foundry IQ · MSXI Lake · Agent Maturity"]
+    Services["通过 Payload 工具访问业务服务<br/>Microsoft Graph / M365 · Azure 定价 · Blob Storage"]
+
+    Browser <-->|"AG-UI / SSE · 同源 HTTPS"| Web
+    Web <-->|"Foundry Responses 2.0"| Adapter
+    Teams <-->|"Foundry Activity 2.0"| Adapter
+    Web <-->|"配置与交付物访问"| Store
+    Adapter <-->|"运行时存储 API · /api/runtime"| Web
+    Workspace -.->|"新增或变更文件"| Adapter
+    Codex <-->|"模型推理"| Model
+    Codex <-->|"MCP · 远程 HTTP 经 stdio 桥接"| MCP
+    Codex <-->|"通过 Shell 调用工具"| Services
+```
+
+- **请求链路**：浏览器调用同源 `/api/agent`，Next.js 服务端将 Foundry Responses 事件转换为 AG-UI 流；Teams 通过 Activity 适配器复用同一套 Codex 运行时。
+- **执行边界**：Foundry 托管 agent；适配器负责 profile 装配与会话映射，Codex 使用随镜像部署的 payload 和会话工作目录执行 agent 循环。
+- **配置与交付**：`/admin` 管理共享存储。运行时在每轮开始时读取配置，存储后端优先级依次为本地目录、`/api/runtime`（如图所示）、直接访问 Blob。生成的交付物持久化到私有存储，通过同源 `/api/artifacts/...` 路由预览和下载。
+
+会话流程、配置覆盖与安全边界详见[架构文档](docs/architecture.md)。
+
 ## 项目结构
 
 ```
