@@ -30,6 +30,51 @@ On top of the runtime, this repository ships an agent payload that turns Codex i
 - **Knowledge-backed responses**: skills supply an internal knowledge base consulted ahead of the Microsoft Learn MCP tools, with source citations.
 - **Cloud pricing and cost estimation**: live Azure retail pricing lookups plus monthly and annual projections.
 
+## Architecture
+
+```mermaid
+flowchart TB
+    Browser["Browser · Chat / Admin"]
+    Teams["Microsoft Teams / Microsoft 365"]
+
+    subgraph WebUI["Web UI · independently deployed container"]
+        Web["Next.js server<br/>AG-UI proxy · Admin console · Artifact delivery"]
+    end
+
+    subgraph Foundry["Microsoft Foundry Hosted Agent"]
+        Adapter["Responses / Activity adapters<br/>Profile assembly · Event streaming"]
+        Sessions["Persistent response / conversation ↔ Codex thread mapping"]
+        Codex["Codex app-server<br/>Agent loop · Shell · Git · File operations"]
+        Payload["Agent payload · src/<br/>Persona · Skills · Python tools · MCP config"]
+        Workspace["Session workspace<br/>Generated documents and artifacts"]
+        Adapter <--> Sessions
+        Adapter <-->|"stdio JSON-RPC"| Codex
+        Payload -.->|"Instructions and capabilities"| Codex
+        Codex <--> Workspace
+    end
+
+    Store[("Private shared store<br/>Azure Blob / local directory<br/>Config · Capability bundles · Artifacts")]
+    Model["Model endpoint<br/>Azure OpenAI / configured provider"]
+    MCP["Local / remote MCP servers<br/>Microsoft Learn · Foundry IQ · MSXI Lake · Agent Maturity"]
+    Services["Business services via payload tools<br/>Microsoft Graph / M365 · Azure pricing · Blob Storage"]
+
+    Browser <-->|"AG-UI / SSE · same-origin HTTPS"| Web
+    Web <-->|"Foundry Responses 2.0"| Adapter
+    Teams <-->|"Foundry Activity 2.0"| Adapter
+    Web <-->|"Configuration and artifact access"| Store
+    Adapter <-->|"Runtime store API · /api/runtime"| Web
+    Workspace -.->|"New or changed files"| Adapter
+    Codex <-->|"Model inference"| Model
+    Codex <-->|"MCP · remote HTTP via stdio bridge"| MCP
+    Codex <-->|"Shell-invoked tools"| Services
+```
+
+- **Request path:** the browser calls the same-origin `/api/agent`; the Next.js server converts Foundry Responses events into AG-UI streams. Teams uses the Activity adapter, sharing the same Codex runtime.
+- **Execution boundary:** Foundry hosts the agent; the adapter manages profiles and session mapping, while Codex runs the agent loop using the packaged payload and session workspace.
+- **Configuration and delivery:** `/admin` manages the shared store. The runtime reads configuration at turn boundaries; storage backend precedence is local directory, `/api/runtime` (shown above), then direct Blob access. Generated artifacts are persisted to private storage and previewed or downloaded through same-origin `/api/artifacts/...` routes.
+
+See [Architecture](docs/architecture.md) for session flow, configuration overlays, and security boundaries.
+
 ## Project Structure
 
 ```
