@@ -8,7 +8,7 @@ import {
   createAdminSession,
   requireAdmin,
   verifyAdminCredentials,
-} from "./admin-auth.ts";
+} from "../server/lib/admin-auth.ts";
 
 function principalHeader(payload: unknown): Headers {
   return new Headers({

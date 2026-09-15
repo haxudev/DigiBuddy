@@ -19,7 +19,7 @@
  * `command` — or an older runtime's silence — becomes a menu row.
  */
 
-import type { Catalogue, CatalogueSkill } from "./admin-config.ts";
+import type { Catalogue, CatalogueSkill } from "../server/lib/admin-config.ts";
 
 /** A skill directory name, matching the registry and the runtime. */
 export const COMMAND_NAME = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;

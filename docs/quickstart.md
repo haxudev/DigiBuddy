@@ -77,7 +77,7 @@ docker run --rm -p 3000:3000 \
   digibuddy-webui
 ```
 
-The image listens on port `3000` and uses Next.js standalone output. Deploy it to Azure Web App for Containers or another OCI-compatible service. In production, restrict `AGENT_ENDPOINT_ALLOWLIST` to approved endpoint suffixes.
+The image listens on port `3000`: the independent TypeScript BFF serves the Vite-built React SPA and same-origin `/api/*`. Deploy it behind Easy Auth on Azure Web App for Containers or another OCI-compatible service; block direct BFF ingress and strip caller-supplied identity headers. In production, restrict `AGENT_ENDPOINT_ALLOWLIST` to approved endpoint suffixes.
 
 ## Publish the Hosted Agent to Teams
 

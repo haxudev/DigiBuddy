@@ -3,7 +3,18 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    {
+      name: "browser-server-boundary",
+      enforce: "pre",
+      load(id) {
+        if (id.includes("/src/server/") || id.includes("/node_modules/@azure/")) {
+          throw new Error("Server-only code cannot be imported by the SPA.");
+        }
+      },
+    },
+    react(),
+  ],
   // Runtime configuration and credentials belong exclusively to the BFF.
   envPrefix: [],
   resolve: {

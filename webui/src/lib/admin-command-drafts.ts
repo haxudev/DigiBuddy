@@ -7,7 +7,7 @@ export type CommandDraft = CommandOverride & {
 };
 
 export function createLocalCommandDraft(
-  id = crypto.randomUUID(),
+  id: string = crypto.randomUUID(),
 ): CommandDraft {
   return {
     name: "",

@@ -1,29 +1,14 @@
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { register } from "node:module";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 
-import type { JsonDocument } from "./admin-config.ts";
-import { CATALOGUE_DOCUMENT, PROFILES_DOCUMENT } from "./admin-config.ts";
+import type { JsonDocument } from "../server/lib/admin-config.ts";
+import { CATALOGUE_DOCUMENT, PROFILES_DOCUMENT } from "../server/lib/admin-config.ts";
 import type { SkillCommand } from "./skill-commands.ts";
 
-const srcUrl = new URL("../", import.meta.url).href;
-const aliasLoader = `
-export async function resolve(specifier, context, nextResolve) {
-  if (specifier.startsWith("@/")) {
-    return {
-      url: new URL(specifier.slice(2) + ".ts", ${JSON.stringify(srcUrl)}).href,
-      shortCircuit: true,
-    };
-  }
-  return nextResolve(specifier, context);
-}
-`;
-register(`data:text/javascript,${encodeURIComponent(aliasLoader)}`, import.meta.url);
-
-const commandsRoute = await import("../app/api/commands/route.ts");
-const profilesRoute = await import("../app/api/profiles/route.ts");
+const commandsRoute = await import("../server/routes/commands/route.ts");
+const profilesRoute = await import("../server/routes/profiles/route.ts");
 
 type CommandsResponse = {
   status: "ready" | "unavailable";

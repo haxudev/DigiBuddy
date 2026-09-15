@@ -4,7 +4,7 @@ layout: home
 hero:
   name: DigiBuddy
   text: Codex runtime on Microsoft Foundry Hosted Agent
-  tagline: A coding agent with a Responses 2.0 adapter and a containerized Next.js + React + AG-UI client.
+  tagline: A coding agent with a Responses 2.0 adapter and a containerized Vite + React + AG-UI SPA and BFF.
   actions:
     - theme: brand
       text: Quickstart
@@ -19,7 +19,7 @@ features:
   - title: Codex execution engine
     details: Run repository analysis, shell commands, Git operations, tests, and file edits through Codex app-server.
   - title: AG-UI web client
-    details: Use an independent Next.js and React client that securely proxies Foundry Responses streams into AG-UI events.
+    details: Use a static React client and independent TypeScript BFF that proxies Foundry Responses streams into AG-UI events.
   - title: Portable containers
     details: Deploy the Hosted Agent through Foundry and the Web UI to Web App for Containers or any OCI-compatible service.
   - title: Admin console
@@ -42,7 +42,7 @@ Deploy the coding runtime with `azure.yaml`, then connect the standalone `webui/
 - Configurable model endpoint, key, and deployment name
 - Admin console for model access, remote MCP servers, and agent profiles
 - Agent profiles that assemble skills and tools per business use case
-- Next.js + React + AG-UI client
+- Vite + React + AG-UI client and TypeScript BFF
 - Generic container deployment for the Web UI
 
 ## Development Workflow

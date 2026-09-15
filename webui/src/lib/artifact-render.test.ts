@@ -32,7 +32,7 @@ test("a delivered report never gets this app's origin", () => {
 test("a delivered report cannot reach the network", () => {
   // Denying the network is what makes running its scripts safe: a page that
   // can fetch is a page that can send what it is displaying somewhere.
-  const csp = source("app/api/artifacts/[id]/[name]/route.ts");
+  const csp = source("server/routes/artifacts/[id]/[name]/route.ts");
   assert.match(csp, /sandbox allow-scripts/);
   assert.match(csp, /default-src 'none'/);
   assert.match(csp, /script-src 'unsafe-inline'/);

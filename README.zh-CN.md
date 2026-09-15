@@ -4,7 +4,7 @@
 
 > 在 Microsoft Foundry Hosted Agent 中运行的 Codex Coding Agent。
 
-DigiBuddy 将 Codex app-server 封装为 Microsoft Foundry Hosted Agent 内部的 Coding Agent Runtime / 执行引擎。它对外提供 Foundry Responses 协议 `2.0.0`，并附带一个独立的、可容器化部署的 Next.js + React + AG-UI Web UI。
+DigiBuddy 将 Codex app-server 封装为 Microsoft Foundry Hosted Agent 内部的 Coding Agent Runtime / 执行引擎。它对外提供 Foundry Responses 协议 `2.0.0`，并附带一个可容器化部署的 Vite + React + AG-UI 静态 Web UI 和独立 TypeScript BFF。
 
 在该运行时之上，本仓库还提供了一份 agent payload，将 Codex 变成 **DigiBuddy** —— 一位 Microsoft 领域专家 agent，帮助开发者、架构师与业务用户处理 Azure 定价、文档、内部知识、邮件流程、SharePoint 内容以及各类交付物的生成。
 
@@ -16,7 +16,7 @@ DigiBuddy 将 Codex app-server 封装为 Microsoft Foundry Hosted Agent 内部�
 - 在运行时配置模型 endpoint、密钥与模型名称
 - 通过 Web UI 管理控制台统一管理模型接入、远程 MCP 工具与 agent profile
 - 用 profile 装配面向不同业务的 agent，无需重新构建镜像
-- 通过独立的 Next.js + React + AG-UI 应用连接
+- 通过 Vite + React + AG-UI SPA 和同源 BFF 连接
 - 将 Web UI 部署到 Web App for Containers 或任意兼容 OCI 的宿主
 
 ## Agent 能力
@@ -38,7 +38,7 @@ flowchart TB
     Teams["Microsoft Teams / Microsoft 365"]
 
     subgraph WebUI["Web UI · 独立部署的容器"]
-        Web["Next.js 服务端<br/>AG-UI 代理 · 管理控制台 · 交付物服务"]
+        Web["静态 React SPA + TypeScript BFF<br/>AG-UI 代理 · 管理控制台 · 交付物服务"]
     end
 
     subgraph Foundry["Microsoft Foundry Hosted Agent"]
@@ -69,7 +69,7 @@ flowchart TB
     Codex <-->|"通过 Shell 调用工具"| Services
 ```
 
-- **请求链路**：浏览器调用同源 `/api/agent`，Next.js 服务端将 Foundry Responses 事件转换为 AG-UI 流；Teams 通过 Activity 适配器复用同一套 Codex 运行时。
+- **请求链路**：浏览器调用同源 `/api/agent`，TypeScript BFF 将 Foundry Responses 事件转换为 AG-UI 流；Teams 通过 Activity 适配器复用同一套 Codex 运行时。
 - **执行边界**：Foundry 托管 agent；适配器负责 profile 装配与会话映射，Codex 使用随镜像部署的 payload 和会话工作目录执行 agent 循环。
 - **配置与交付**：`/admin` 管理共享存储。运行时在每轮开始时读取配置，存储后端优先级依次为本地目录、`/api/runtime`（如图所示）、直接访问 Blob。生成的交付物持久化到私有存储，通过同源 `/api/artifacts/...` 路由预览和下载。
 
@@ -85,7 +85,7 @@ hosted-agent/                 # Responses 适配器与 Codex 执行运行时
 ├── AGENTS.md                 # 运行时护栏
 └── codex_adapter/            # Codex stdio JSON-RPC 客户端、配置、profile、session 映射
 
-webui/                        # 独立的 Next.js + React + AG-UI 应用，含 /admin 管理控制台
+webui/                        # Vite + React SPA 和 TypeScript BFF，含 /admin 管理控制台
 
 src/                          # Agent payload，构建时打入镜像 /opt/digibuddy
 ├── AGENTS.md                 # DigiBuddy 人设与能力目录

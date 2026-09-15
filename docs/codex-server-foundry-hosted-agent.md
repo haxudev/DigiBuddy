@@ -18,7 +18,7 @@ Microsoft Foundry Hosted Agent 负责 Agent Service / Runtime 层，Codex 负责
                     Your Multi-Tenant Agent Platform
 ┌─────────────────────────────────────────────────────────────┐
 │                                                             │
-│  Next.js / React Web UI                                    │
+│  Vite / React SPA + TypeScript BFF                            │
 │       │                                                     │
 │       │ AG-UI / Responses                                  │
 │       ▼                                                     │
@@ -244,7 +244,7 @@ docker build
 
 ```text
 Web UI
-  Next.js + React + TypeScript
+  Vite + React + TypeScript SPA / BFF
           │
         AG-UI
           │

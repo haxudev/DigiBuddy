@@ -21,7 +21,7 @@ import {
   normaliseSkills,
   preserveSecret,
   redactDocument,
-} from "./admin-config.ts";
+} from "../server/lib/admin-config.ts";
 
 test("model overlay drops plaintext endpoints", () => {
   assert.throws(

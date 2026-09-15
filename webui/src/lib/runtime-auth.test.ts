@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
 
-import { ConfigValidationError } from "./admin-config.ts";
+import { ConfigValidationError } from "../server/lib/admin-config.ts";
 import {
   PayloadTooLargeError,
   RUNTIME_AUDIENCE_ENV,
@@ -15,7 +15,7 @@ import {
   runtimeArtifactPath,
   runtimeBundlePath,
   runtimeWritableDocument,
-} from "./runtime-auth.ts";
+} from "../server/lib/runtime-auth.ts";
 
 const TENANT = "72f988bf-86f1-41af-91ab-2d7cd011db47";
 const OID = "11111111-2222-3333-4444-555555555555";
