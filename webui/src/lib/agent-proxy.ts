@@ -1,5 +1,7 @@
 import { ManagedIdentityCredential } from "@azure/identity";
 import type { Message } from "@ag-ui/core";
+import { REASONING_EFFORTS, type ReasoningEffort, type TurnAttachment } from "./agent-contract.ts";
+export { REASONING_EFFORTS, type ReasoningEffort, type TurnAttachment } from "./agent-contract.ts";
 
 export type ConnectionSettings = {
   endpoint: string;
@@ -306,16 +308,6 @@ export function responseErrorMessage(payload: unknown): string {
   return "";
 }
 
-export const REASONING_EFFORTS = [
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-] as const;
-
-export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
-
 /** Matches the cap the hosted agent enforces when it writes uploads to disk. */
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
@@ -329,13 +321,6 @@ export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
  */
 const SKILL_REQUEST_NAME = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
 const MAX_TURN_SKILLS = 8;
-
-export type TurnAttachment = {
-  filename: string;
-  mimeType: string;
-  /** A `data:` URL, which is what `FileReader.readAsDataURL` produces. */
-  data: string;
-};
 
 /**
  * Read the per-turn knobs the composer sends alongside the message. Anything

@@ -31,7 +31,7 @@ import {
   settleActivity,
   type ActivityEntry,
 } from "@/lib/activity";
-import { REASONING_EFFORTS, type TurnAttachment } from "@/lib/agent-proxy";
+import { REASONING_EFFORTS, type TurnAttachment } from "@/lib/agent-contract";
 import {
   deliveryFailures,
   extractArtifacts,

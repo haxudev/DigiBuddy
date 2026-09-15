@@ -2,8 +2,11 @@
   "name": "webui",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
+    "dev:spa": "vite",
+    "build:spa": "vite build",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -19,6 +22,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.18.3",
     "rehype-raw": "^7.0.0",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1"
@@ -27,8 +31,12 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.1.1",
     "eslint": "^9",
     "eslint-config-next": "16.3.2",
-    "typescript": "^5"
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "typescript": "^5",
+    "typescript-eslint": "^8.70.0",
+    "vite": "^8.3.0"
   }
 }

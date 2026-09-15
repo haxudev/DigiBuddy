@@ -6,7 +6,6 @@ import {
   useEffect,
   useState,
 } from "react";
-import Link from "next/link";
 import {
   commandDraftKey,
   createLocalCommandDraft,
@@ -17,7 +16,7 @@ import {
 import {
   CREDENTIAL_SLOTS,
   type CredentialStatus,
-} from "@/lib/credentials";
+} from "@/lib/credential-types";
 import {
   buildAdminSkillGroups,
   buildAssignableCapabilities,
@@ -263,7 +262,7 @@ function AdminLoginMask({
             </button>
           </form>
         )}
-        <Link href="/">Back to chat</Link>
+        <a href="/">Back to chat</a>
       </section>
     </main>
   );
@@ -982,7 +981,7 @@ export default function Admin() {
             <button type="button" onClick={() => void signOut()}>
               Sign out
             </button>
-            <Link href="/">Back to chat</Link>
+            <a href="/">Back to chat</a>
           </div>
         </header>
 
