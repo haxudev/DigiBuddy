@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
-import { normaliseSkills, ConfigValidationError } from "./admin-config.ts";
+import { normaliseSkills, ConfigValidationError } from "../server/lib/admin-config.ts";
 import {
   MAX_ENTRIES,
   SkillBundleError,
@@ -11,8 +11,8 @@ import {
   nameFromFile,
   type ExplodedBundle,
   type ExplodedCapability,
-} from "./skill-bundle.ts";
-import { readDirectory, readEntry } from "./zip.ts";
+} from "../server/lib/skill-bundle.ts";
+import { readDirectory, readEntry } from "../server/lib/zip.ts";
 import { zip } from "./zip-fixture.test-helper.ts";
 
 test("a bundle rooted at one directory names itself", () => {

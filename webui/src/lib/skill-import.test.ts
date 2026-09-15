@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ConfigConflictError, ConfigValidationError } from "./admin-config.ts";
-import { SkillBundleError, explodeBundle } from "./skill-bundle.ts";
-import { readDirectory, readEntry } from "./zip.ts";
+import { ConfigConflictError, ConfigValidationError } from "../server/lib/admin-config.ts";
+import { SkillBundleError, explodeBundle } from "../server/lib/skill-bundle.ts";
+import { readDirectory, readEntry } from "../server/lib/zip.ts";
 import {
   deployBundle,
   fetchArchive,
   previewBundle,
   writeRegistry,
-} from "./skill-import.ts";
+} from "../server/lib/skill-import.ts";
 import { zip } from "./zip-fixture.test-helper.ts";
 
 /** Read an exploded bundle back into a `path -> { body, mode }` map. */

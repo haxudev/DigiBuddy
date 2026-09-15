@@ -4,7 +4,7 @@
 
 > Codex coding runtime on Microsoft Foundry Hosted Agent.
 
-DigiBuddy packages Codex app-server as the Coding Agent Runtime / Execution Engine inside Microsoft Foundry Hosted Agent. It exposes the Foundry Responses protocol `2.0.0` and includes an independent Next.js + React + AG-UI Web UI for container deployment.
+DigiBuddy packages Codex app-server as the Coding Agent Runtime / Execution Engine inside Microsoft Foundry Hosted Agent. It exposes the Foundry Responses protocol `2.0.0` and includes a Vite + React + AG-UI static Web UI with an independent TypeScript BFF for container deployment.
 
 On top of the runtime, this repository ships an agent payload that turns Codex into **DigiBuddy** — a Microsoft expert agent that helps developers, architects, and business users work with Azure pricing, documentation, internal knowledge, email workflows, SharePoint content, and generated deliverables.
 
@@ -16,7 +16,7 @@ On top of the runtime, this repository ships an agent payload that turns Codex i
 - Configure model endpoint, key, and model name at runtime
 - Administer models, remote MCP servers, and agent profiles from a Web UI console
 - Assemble business-specific agents from profiles without rebuilding the image
-- Connect through a standalone Next.js + React + AG-UI application
+- Connect through a Vite + React + AG-UI SPA and same-origin BFF
 - Deploy the Web UI to Web App for Containers or any OCI-compatible host
 
 ## Agent Capabilities
@@ -38,7 +38,7 @@ flowchart TB
     Teams["Microsoft Teams / Microsoft 365"]
 
     subgraph WebUI["Web UI · independently deployed container"]
-        Web["Next.js server<br/>AG-UI proxy · Admin console · Artifact delivery"]
+        Web["Static React SPA + TypeScript BFF<br/>AG-UI proxy · Admin console · Artifact delivery"]
     end
 
     subgraph Foundry["Microsoft Foundry Hosted Agent"]
@@ -69,7 +69,7 @@ flowchart TB
     Codex <-->|"Shell-invoked tools"| Services
 ```
 
-- **Request path:** the browser calls the same-origin `/api/agent`; the Next.js server converts Foundry Responses events into AG-UI streams. Teams uses the Activity adapter, sharing the same Codex runtime.
+- **Request path:** the browser calls the same-origin `/api/agent`; the TypeScript BFF converts Foundry Responses events into AG-UI streams. Teams uses the Activity adapter, sharing the same Codex runtime.
 - **Execution boundary:** Foundry hosts the agent; the adapter manages profiles and session mapping, while Codex runs the agent loop using the packaged payload and session workspace.
 - **Configuration and delivery:** `/admin` manages the shared store. The runtime reads configuration at turn boundaries; storage backend precedence is local directory, `/api/runtime` (shown above), then direct Blob access. Generated artifacts are persisted to private storage and previewed or downloaded through same-origin `/api/artifacts/...` routes.
 
@@ -85,7 +85,7 @@ hosted-agent/                 # Responses adapter and Codex execution runtime
 ├── AGENTS.md                 # Runtime guardrails
 └── codex_adapter/            # Codex stdio JSON-RPC client, config, profiles, session map
 
-webui/                        # Standalone Next.js + React + AG-UI application, incl. /admin console
+webui/                        # Vite + React SPA and TypeScript BFF, incl. /admin console
 
 src/                          # Agent payload, baked into the image at /opt/digibuddy
 ├── AGENTS.md                 # DigiBuddy persona and capability catalogue

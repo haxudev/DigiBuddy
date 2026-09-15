@@ -12,7 +12,7 @@ import {
   responseTexts,
   turnInput,
   turnOptions,
-} from "./agent-proxy.ts";
+} from "../server/lib/agent-proxy.ts";
 
 test("allows Microsoft Foundry endpoints", () => {
   const endpoint = assertAllowedEndpoint(

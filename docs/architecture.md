@@ -5,10 +5,10 @@
 DigiBuddy is a Microsoft Foundry Hosted Agent with Codex app-server as its coding execution engine.
 
 ```text
-Next.js / React Web UI
+Vite / React static SPA
         │ AG-UI
         ▼
-Next.js server proxy
+TypeScript BFF (same-origin /api)
         │ Responses protocol 2.0
         ▼
 Microsoft Foundry Hosted Agent
@@ -41,14 +41,14 @@ hosted-agent/
     ├── events.py              # Codex event conversion
     └── session_map.py         # Response-to-thread persistence
 
-webui/                         # Independent Next.js + React + AG-UI app
-├── src/app/api/agent/route.ts # Server-side Foundry proxy
-├── src/app/api/admin/config/  # Admin configuration API
-├── src/app/api/profiles/      # Public profile list for the chat picker
-├── src/app/admin/             # Admin console
-├── src/lib/admin-config.ts    # Configuration schema and store clients
-├── src/lib/admin-auth.ts      # Easy Auth administrator guard
-├── src/lib/agent-proxy.ts     # Validation and response helpers
+webui/                         # Vite + React + AG-UI SPA and independent BFF
+├── src/server/routes/agent/   # Server-side Foundry proxy
+├── src/server/routes/admin/   # Admin configuration API
+├── src/server/routes/profiles/ # Public profile list for the chat picker
+├── src/pages/admin/           # Admin console
+├── src/server/lib/admin-config.ts # Configuration schema and store clients
+├── src/server/lib/admin-auth.ts # Easy Auth administrator guard
+├── src/server/lib/agent-proxy.ts # Validation and response helpers
 └── Dockerfile                 # Generic OCI / Web App for Containers image
 
 src/                           # Agent payload: persona, skills, tools, mcp.json
@@ -60,6 +60,12 @@ src/                           # Agent payload: persona, skills, tools, mcp.json
 ```
 
 The `src/` tree is copied into the image at `/opt/digibuddy` and surfaced to Codex through `DIGIBUDDY_PAYLOAD_ROOT`, `DIGIBUDDY_SKILLS_ROOT`, and `DIGIBUDDY_TOOLS_ROOT`.
+
+The WebUI build keeps `dist/` (public static SPA) separate from `build/` (BFF).
+The non-root BFF serves port `3000` behind Easy Auth; its identity headers must
+only come from that trusted ingress. The browser has no server environment
+variables or storage/Foundry credentials and continues to call same-origin
+`/api/*`. See the [WebUI README](https://github.com/haxudev/DigiBuddy/blob/main/webui/README.md) for local proxy and build commands.
 
 ## Session and streaming flow
 

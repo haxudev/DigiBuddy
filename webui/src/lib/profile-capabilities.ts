@@ -7,7 +7,7 @@
  * runtime-published catalogue rather than against the profile alone.
  */
 
-import type { Catalogue, McpDocument, ProfileDocument } from "./admin-config";
+import type { Catalogue, McpDocument, ProfileDocument } from "../server/lib/admin-config.ts";
 
 export type ProfileCapabilities = {
   name: string;

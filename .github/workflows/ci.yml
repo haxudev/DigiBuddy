@@ -51,14 +51,14 @@ jobs:
 
       - run: npm ci
 
-      # Types, behaviour, style and a real build. The build matters because a
-      # route can typecheck and still fail to compile under the App Router.
-      # `typecheck` runs `next typegen` first: `LayoutProps` and friends are
-      # generated into `.next/types`, which a clean checkout does not have.
+      # Check both the browser SPA and independent BFF, including HTTP/SSE contracts.
       - run: npm run typecheck
       - run: npm test
       - run: npm run lint
       - run: npm run build
+
+      - name: Build the SPA and BFF image
+        run: docker build -t digibuddy-webui-ci:${{ github.sha }} .
 
   image:
     name: Hosted agent image

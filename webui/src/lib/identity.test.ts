@@ -7,7 +7,7 @@ import {
   optionalPrincipal,
   ownerKey,
   requirePrincipal,
-} from "./identity.ts";
+} from "../server/lib/identity.ts";
 
 function header(payload: Record<string, unknown>): Headers {
   return new Headers({

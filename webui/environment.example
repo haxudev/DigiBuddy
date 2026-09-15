@@ -1,3 +1,9 @@
+# Server-side only. For local development copy to .env.local and run dev:api
+# separately from Vite (npm run dev). Never use VITE_* for these values.
+PORT=3000
+# Bind locally by default; the production container sets HOST=0.0.0.0.
+HOST=127.0.0.1
+
 FOUNDRY_AGENT_ENDPOINT=https://your-foundry-endpoint/responses
 FOUNDRY_AGENT_API_KEY=
 FOUNDRY_AUTH_MODE=bearer
@@ -41,6 +47,8 @@ DIGIBUDDY_RUNTIME_SHARED_SECRET=
 
 # Comma-separated Entra object IDs or sign-in names allowed to use /admin.
 # The console expects Easy Auth in front of it, supplying x-ms-client-principal.
+# Production ingress must strip caller-supplied identity headers and block
+# direct access to the BFF; /.auth/* remains owned by Easy Auth, not the SPA.
 # An empty list denies everyone.
 ADMIN_PRINCIPAL_IDS=
 
@@ -52,3 +60,7 @@ ADMIN_PASSWORD_HASH=
 ADMIN_SESSION_SECRET=
 # Local development only; ignored when NODE_ENV=production.
 # ADMIN_ALLOW_ANONYMOUS=true
+
+# Skill URL imports are disabled unless explicitly allowed. HTTPS/public IPs only;
+# every redirect is checked against this list again.
+# SKILL_IMPORT_ALLOWED_HOSTS=codeload.github.com

@@ -298,7 +298,6 @@ export default function ArtifactWindow({
                     </a>
                   </div>
                 ) : previewKind === "image" ? (
-                  // eslint-disable-next-line @next/next/no-img-element
                   <img src={selected.url} alt={selected.title} className={styles.image} />
                 ) : previewKind === "pdf" ? (
                   <iframe

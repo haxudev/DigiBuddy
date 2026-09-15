@@ -9,7 +9,7 @@ import {
   transcriptionEndpoint,
   transcriptionText,
   transcribeWav,
-} from "./transcription.ts";
+} from "../server/lib/transcription.ts";
 
 function wavHeader(): Uint8Array {
   const bytes = new Uint8Array(44);

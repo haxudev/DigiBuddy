@@ -21,7 +21,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 const COMPONENTS = join(import.meta.dirname, "..", "components");
-const PAGE = join(import.meta.dirname, "..", "app", "page.tsx");
+const PAGE = join(import.meta.dirname, "..", "pages", "chat", "page.tsx");
 
 function read(path: string): string {
   return readFileSync(path, "utf-8");

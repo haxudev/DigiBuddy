@@ -6,7 +6,7 @@
  * for reasons unrelated to what the test is about.
  */
 
-import { crc32 } from "./zip.ts";
+import { crc32 } from "../server/lib/zip.ts";
 
 const REGULAR = 0o100644;
 const EXECUTABLE = 0o100755;

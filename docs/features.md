@@ -7,7 +7,7 @@ DigiBuddy deploys to Microsoft Foundry as a Hosted Agent with `azd up`. Foundry 
 - **Protocol**: Foundry Responses `2.0.0`
 - **Execution engine**: Codex app-server, driven over stdio JSON-RPC
 - **Sandbox**: `workspace-write`, rooted at `/workspace`
-- **Web UI**: an independent Next.js + React + AG-UI container that proxies to the agent
+- **Web UI**: a Vite + React + AG-UI SPA and independent TypeScript BFF that proxies to the agent
 
 ## Agent Payload
 

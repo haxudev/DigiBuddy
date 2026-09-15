@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ProfileDocument } from "./admin-config.ts";
+import type { ProfileDocument } from "../server/lib/admin-config.ts";
 import {
   defaultProfileCapabilities,
   describeProfiles,

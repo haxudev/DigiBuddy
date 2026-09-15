@@ -1,0 +1,300 @@
+import {
+  EventType,
+  RunAgentInputSchema,
+  type BaseEvent,
+} from "@ag-ui/core";
+import {
+  NotSignedInError,
+  ownerKey,
+  requirePrincipal,
+} from "../../lib/identity.ts";
+import {
+  OUTPUT_ITEM_SEPARATOR,
+  agentRequestBody,
+  latestUserText,
+  resolveAuthHeaders,
+  resolveConnection,
+  responseErrorMessage,
+  responseText,
+  responseTextDelta,
+  responseTexts,
+  turnInput,
+  turnOptions,
+} from "../../lib/agent-proxy.ts";
+import {
+  ACTIVITY_EVENT_NAME,
+  activityFromUpstream,
+  type ActivityEvent,
+} from "../../../lib/activity.ts";
+
+const encoder = new TextEncoder();
+const KEEP_ALIVE_INTERVAL_MS = 15_000;
+
+function sse(event: BaseEvent): Uint8Array {
+  return encoder.encode(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+function keepAlive(): Uint8Array {
+  return encoder.encode(": keep-alive\n\n");
+}
+
+function upstreamError(payload: unknown, status: number): Error {
+  const message = responseErrorMessage(payload);
+  if (message) return new Error(message);
+  return new Error(`Hosted Agent request failed with HTTP ${status}.`);
+}
+
+export async function POST(request: Request) {
+  // Before the stream opens, so an unauthenticated caller gets a status rather
+  // than a run that starts and immediately errors.
+  let owner: string;
+  try {
+    owner = ownerKey(requirePrincipal(request.headers));
+  } catch (error) {
+    if (error instanceof NotSignedInError) {
+      return Response.json({ error: error.message }, { status: 403 });
+    }
+    throw error;
+  }
+
+  let rawInput: unknown;
+  try {
+    rawInput = await request.json();
+  } catch {
+    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
+  }
+
+  const parsed = RunAgentInputSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return Response.json({ error: "Invalid AG-UI request." }, { status: 400 });
+  }
+  const input = parsed.data;
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let streamOpen = true;
+      const enqueue = (value: Uint8Array) => {
+        if (!streamOpen) return;
+        try {
+          controller.enqueue(value);
+        } catch {
+          streamOpen = false;
+        }
+      };
+      const keepAliveTimer = setInterval(() => {
+        enqueue(keepAlive());
+      }, KEEP_ALIVE_INTERVAL_MS);
+      let messageId = "";
+      let currentItemId = "";
+      let messageStarted = false;
+      let assistantText = "";
+      let previousResponseId =
+        input.state &&
+        typeof input.state === "object" &&
+        typeof input.state.previousResponseId === "string"
+          ? input.state.previousResponseId
+          : "";
+
+      const emit = (event: BaseEvent) => enqueue(sse(event));
+      const endMessage = () => {
+        if (!messageId) return;
+        emit({ type: EventType.TEXT_MESSAGE_END, messageId });
+        messageId = "";
+      };
+      // Each assistant output item is a reply of its own, so it gets its own
+      // message id and therefore its own frame in the transcript.
+      const emitText = (delta: string, itemId: string = currentItemId) => {
+        if (!delta) return;
+        if (!messageId || itemId !== currentItemId) {
+          if (messageId) {
+            endMessage();
+            assistantText += OUTPUT_ITEM_SEPARATOR;
+          }
+          currentItemId = itemId;
+          messageId = crypto.randomUUID();
+          emit({
+            type: EventType.TEXT_MESSAGE_START,
+            messageId,
+            role: "assistant",
+          });
+          messageStarted = true;
+        }
+        assistantText += delta;
+        emit({
+          type: EventType.TEXT_MESSAGE_CONTENT,
+          messageId,
+          delta,
+        });
+      };
+      // Thinking and tool activity travel as AG-UI custom events. Using the
+      // standard tool-call events instead would append rows to the message
+      // list, which is what the console persists and mines for deliverables.
+      const emitActivity = (activity: ActivityEvent) =>
+        emit({
+          type: EventType.CUSTOM,
+          name: ACTIVITY_EVENT_NAME,
+          value: activity,
+        } as BaseEvent);
+      emit({
+        type: EventType.RUN_STARTED,
+        threadId: input.threadId,
+        runId: input.runId,
+      });
+
+      try {
+        const connection = resolveConnection(input.forwardedProps);
+        const { attachments, reasoningEffort, skills, command } = turnOptions(
+          input.forwardedProps,
+        );
+        const body = agentRequestBody({
+          connection,
+          input: turnInput(latestUserText(input.messages), attachments),
+          previousResponseId,
+          reasoningEffort,
+          // Files this turn generates belong to whoever asked for them.
+          owner,
+          skills,
+          command,
+        });
+
+        const headers: Record<string, string> = {
+          Accept: "text/event-stream",
+          "Content-Type": "application/json",
+          ...(await resolveAuthHeaders(connection)),
+        };
+
+        const upstream = await fetch(connection.endpoint, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          cache: "no-store",
+          signal: request.signal,
+        });
+        if (!upstream.ok) {
+          const payload = await upstream.json().catch(() => null);
+          throw upstreamError(payload, upstream.status);
+        }
+
+        const contentType = upstream.headers.get("content-type") || "";
+        if (!contentType.includes("text/event-stream")) {
+          const payload = await upstream.json();
+          const responseId =
+            payload && typeof payload.id === "string" ? payload.id : "";
+          responseTexts(payload).forEach((text, index) =>
+            emitText(text, `output-${index}`),
+          );
+          if (responseId) previousResponseId = responseId;
+        } else {
+          if (!upstream.body) throw new Error("Hosted Agent returned no stream.");
+          const reader = upstream.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+
+          while (true) {
+            const { value, done } = await reader.read();
+            buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+            const blocks = buffer.split(/\r?\n\r?\n/);
+            buffer = blocks.pop() || "";
+
+            for (const block of blocks) {
+              const data = block
+                .split(/\r?\n/)
+                .filter((line) => line.startsWith("data:"))
+                .map((line) => line.slice(5).trimStart())
+                .join("\n");
+              if (!data || data === "[DONE]") continue;
+
+              const event = JSON.parse(data) as Record<string, unknown>;
+              const eventType = String(event.type || "");
+              const response =
+                event.response && typeof event.response === "object"
+                  ? (event.response as Record<string, unknown>)
+                  : {};
+              if (
+                (eventType === "response.created" ||
+                  eventType === "response.completed") &&
+                typeof response.id === "string"
+              ) {
+                previousResponseId = response.id;
+              }
+              const activity = activityFromUpstream(event);
+              if (activity) emitActivity(activity);
+
+              if (eventType === "response.output_text.delta") {
+                const delta = typeof event.delta === "string" ? event.delta : "";
+                const itemId =
+                  typeof event.item_id === "string"
+                    ? event.item_id
+                    : typeof event.output_index === "number"
+                      ? `output-${event.output_index}`
+                      : currentItemId;
+                emitText(delta, itemId);
+              }
+              if (eventType === "response.completed") {
+                const completedText = responseText(response);
+                const delta = responseTextDelta(assistantText, response);
+                if (!delta && completedText && completedText !== assistantText) {
+                  console.warn(
+                    "Hosted Agent completed text diverged from its streamed prefix.",
+                  );
+                }
+                emitText(delta);
+              }
+              if (eventType === "error" || eventType === "response.failed") {
+                throw upstreamError(event, upstream.status);
+              }
+            }
+            if (done) break;
+          }
+        }
+
+        if (!messageStarted) {
+          throw new Error("Hosted Agent completed without assistant output.");
+        }
+        endMessage();
+        emit({
+          type: EventType.STATE_SNAPSHOT,
+          snapshot: {
+            ...(input.state && typeof input.state === "object" ? input.state : {}),
+            previousResponseId,
+          },
+        });
+        emit({
+          type: EventType.RUN_FINISHED,
+          threadId: input.threadId,
+          runId: input.runId,
+          outcome: { type: "success" },
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Agent request failed";
+        endMessage();
+        emitActivity({ kind: "error", id: crypto.randomUUID(), message });
+        emit({
+          type: EventType.RUN_ERROR,
+          message,
+          code: "UPSTREAM_ERROR",
+        });
+      } finally {
+        clearInterval(keepAliveTimer);
+        if (streamOpen) {
+          streamOpen = false;
+          try {
+            controller.close();
+          } catch {
+            // The downstream client already disconnected.
+          }
+        }
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Cache-Control": "no-cache, no-store",
+      "Content-Type": "text/event-stream; charset=utf-8",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}

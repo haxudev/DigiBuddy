@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { Catalogue, CatalogueSkill } from "./admin-config.ts";
+import type { Catalogue, CatalogueSkill } from "../server/lib/admin-config.ts";
 import {
   BUILTIN_COMMANDS,
   MAX_COMMANDS,

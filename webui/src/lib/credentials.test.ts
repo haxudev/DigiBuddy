@@ -8,13 +8,13 @@ import {
   ConfigValidationError,
   CREDENTIALS_DOCUMENT,
   buildConfigStore,
-} from "./admin-config.ts";
+} from "../server/lib/admin-config.ts";
 import {
   applyCredentialChange,
   credentialStatuses,
   parseCredentials,
   readCredentialStatuses,
-} from "./credentials.ts";
+} from "../server/lib/credentials.ts";
 
 function withStore(run: (store: ReturnType<typeof buildConfigStore>) => Promise<void>) {
   const directory = mkdtempSync(join(tmpdir(), "digibuddy-credentials-"));

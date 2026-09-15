@@ -1,17 +1,58 @@
 # DigiBuddy Web UI
 
-Standalone Next.js, React, and AG-UI client for the DigiBuddy Codex Hosted Agent.
+React + TypeScript + React Router static SPA, built with Vite, and an independent
+TypeScript Hono BFF for the DigiBuddy Codex Hosted Agent.
 
 ## Local development
 
 ```bash
 npm ci
+cp environment.example .env.local
+npm run dev:api
+```
+
+In another terminal:
+
+```bash
 npm run dev
 ```
 
-Open `http://localhost:3000`. The chat window carries no connection settings. The Responses endpoint, key, model, and optional Foundry agent reference come from the variables listed in `environment.example` or from the `/admin` control plane.
+Use Node 22.23.2 or newer within Node 22. Open `http://localhost:5173` (chat) or
+`http://localhost:5173/admin`. Vite proxies `/api/*` and `/.auth/*` to the local BFF
+on `127.0.0.1:3000`; it does not emulate Easy Auth. For local-only anonymous
+development, opt into `ADMIN_ALLOW_ANONYMOUS=true` in `.env.local` (ignored in
+production). The chat window carries no connection settings. The Responses
+endpoint, key, model, and optional Foundry agent reference come from the
+server-side variables listed in `environment.example` or the `/admin` control plane.
 
-The browser speaks AG-UI only to `/api/agent`. The Next.js route validates the endpoint, keeps server-configured keys out of browser responses, invokes the Foundry Responses API, and translates its stream into AG-UI events.
+The browser speaks AG-UI only to `/api/agent`. The BFF validates the endpoint,
+keeps server-configured keys out of browser responses, invokes the Foundry
+Responses API, and translates its stream into AG-UI events. The Node HTTP adapter
+streams without compression or buffering and propagates disconnects upstream.
+
+### Build and boundaries
+
+`npm run build` produces `dist/` (static browser files) and `build/server/index.js`
+(the BFF, with its server-side libraries). `npm start` serves both on port `3000`.
+Run production behind HTTPS/Easy Auth with `NODE_ENV=production`; only `/` and
+`/admin` receive SPA history fallback, never an unknown API or `/.auth` path.
+
+Pages live in `src/pages`, reusable components in `src/components`, browser-safe
+logic in `src/lib`, and API handlers/server-only libraries in `src/server`.
+Vite rejects server-library imports into the browser and exposes no environment
+variables, including `VITE_*`. Never put Foundry keys, managed identity tokens,
+storage credentials, or admin/runtime secrets in browser configuration or
+Docker build arguments; inject them into the BFF at runtime.
+
+Production ingress **must** be Easy Auth (or the existing trusted authentication
+front door), strip caller-supplied `x-ms-client-principal`, and prevent direct
+access to the BFF. Changing frameworks does not authenticate this header.
+`/.auth/*` stays platform-owned. Do not enable cross-origin API access.
+
+Validation: `npm run typecheck`, `npm test`, `npm run lint`, `npm run build`,
+and `docker build -t digibuddy-webui .`. API contracts use the existing Node
+test runner; runtime/API changes also require
+`python3 -m unittest discover -s tests` from `hosted-agent/`.
 
 Set `AUTH_REQUIRE_CORPORATE_ACCOUNT=true` with `AUTH_TENANT_ID` and `AUTH_ALLOWED_UPN_DOMAINS` to accept native Microsoft Entra work accounts. Corporate B2B accounts can be admitted with matching `AUTH_ALLOWED_HOME_TENANT_IDS` and `AUTH_ALLOWED_EMAIL_DOMAINS`; this allows trusted employee accounts represented as `#EXT#` in the resource tenant while still rejecting Hotmail and untrusted guests. Authorisation reads the issuing tenant, the `idp` claim, and the verified sign-in address — never the Easy Auth provider label, which is `bearer` on Container Apps and `aad` on App Service.
 
@@ -110,7 +151,10 @@ docker run --rm -p 3000:3000 \
   digibuddy-webui
 ```
 
-The image listens on port `3000` and uses Next.js standalone output. It can run on Azure Web App for Containers or any OCI-compatible container service.
+The non-root image listens on port `3000`, runs the BFF, and serves only the
+compiled SPA as public files; server code and configuration are not static
+assets. It can run on Azure Web App for Containers or any OCI-compatible
+container service behind the trusted authentication ingress described above.
 
 For production, place secrets in the hosting platform configuration, leave the UI key field blank, and restrict `AGENT_ENDPOINT_ALLOWLIST` to approved endpoint suffixes.
 

@@ -8,7 +8,7 @@ import {
   type ConfigStore,
   type DocumentName,
   type JsonDocument,
-} from "./admin-config.ts";
+} from "../server/lib/admin-config.ts";
 import {
   commandPatch,
   commandRevision,
@@ -16,7 +16,7 @@ import {
   removeCommandOverride,
   upsertCommandOverride,
   writeCommands,
-} from "./admin-commands.ts";
+} from "../server/lib/admin-commands.ts";
 
 class MemoryStore implements ConfigStore {
   document: JsonDocument | null = null;

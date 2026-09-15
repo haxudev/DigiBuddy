@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import { Link } from "react-router-dom";
 import type { ProfileCapabilities } from "@/lib/profile-capabilities";
 import styles from "./agent-capabilities.module.css";
 
@@ -172,7 +172,7 @@ export default function AgentCapabilities({
           )}
 
           <footer className={styles.footer}>
-            <Link href="/admin">Administer the runtime</Link>
+            <Link to="/admin">Administer the runtime</Link>
           </footer>
         </div>
       )}

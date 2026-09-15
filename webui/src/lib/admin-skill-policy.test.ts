@@ -8,14 +8,14 @@ import {
   type ConfigStore,
   type DocumentName,
   type JsonDocument,
-} from "./admin-config.ts";
+} from "../server/lib/admin-config.ts";
 import {
   readSkillPolicyVersioned,
   skillPolicyPatch,
   skillPolicyRevision,
   toggleSkillPolicy,
   writeSkillPolicy,
-} from "./admin-skill-policy.ts";
+} from "../server/lib/admin-skill-policy.ts";
 
 class MemoryStore implements ConfigStore {
   document: JsonDocument | null = null;

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { JsonDocument } from "./admin-config.ts";
-import { resolveUserCommands } from "./user-commands.ts";
+import type { JsonDocument } from "../server/lib/admin-config.ts";
+import { resolveUserCommands } from "../server/lib/user-commands.ts";
 
 function catalogue(skills: string[]): JsonDocument {
   return {
