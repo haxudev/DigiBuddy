@@ -549,7 +549,24 @@ export function redactDocument(
   name: DocumentName,
   document: JsonDocument | null,
 ): JsonDocument | null {
-  if (!document || name !== MODELS_DOCUMENT) return document;
+  if (!document) return document;
+  if (name === CREDENTIALS_DOCUMENT) {
+    const credentials = Array.isArray(document.credentials) ? document.credentials : [];
+    return {
+      credentials: credentials.map((value) => {
+        const entry = record(value);
+        // Allowlist status fields so even unexpected stored fields stay private.
+        return {
+          profile: text(entry.profile),
+          slot: text(entry.slot),
+          is_set: typeof entry.value === "string" && entry.value.length > 0,
+          updated_at: text(entry.updated_at),
+          updated_by: text(entry.updated_by),
+        };
+      }),
+    };
+  }
+  if (name !== MODELS_DOCUMENT) return document;
   const { api_key: apiKey, ...rest } = document as ModelsDocument;
   return { ...rest, api_key_set: Boolean(text(apiKey)) };
 }

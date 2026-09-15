@@ -58,6 +58,7 @@ test("all 17 paths and 31 methods retain automatic OPTIONS, Allow, HEAD and 405"
     }
     const unsupported = await app.request(concrete, { method: "PROPFIND" });
     assert.equal(unsupported.status, 405, concrete);
+    assert.equal(unsupported.headers.get("allow"), allowed.join(", "), concrete);
     assert.equal(await unsupported.text(), "");
     const head = await fetch(base + concrete, { method: "HEAD" });
     const get = await fetch(base + concrete);
@@ -134,9 +135,11 @@ test("only known SPA GET/HEAD routes fall back; static content cannot shadow API
   for (const path of ["/", "/admin", "/admin/"]) {
     const get = await fetch(base + path);
     assert.equal(get.status, 200, path);
+    assert.equal(get.headers.get("cache-control"), "no-cache", path);
     assert.equal(await get.text(), "<html>SPA fixture</html>");
     const head = await fetch(base + path, { method: "HEAD" });
     assert.equal(head.status, 200);
+    assert.equal(head.headers.get("cache-control"), "no-cache", path);
     assert.equal(await head.text(), "");
     assert.equal((await fetch(base + path, { method: "POST" })).status, 404);
   }
@@ -280,6 +283,7 @@ test("production administrator cookies, redacted config, credential rotation and
   const password = randomBytes(24).toString("hex");
   const salt = randomBytes(16);
   const digest = scryptSync(password, salt, 32, { N: 1024, r: 8, p: 1 });
+  const runtimeSecret = randomBytes(32).toString("hex");
   environment(t, {
     NODE_ENV: "production",
     DIGIBUDDY_CONFIG_DIR: directory,
@@ -287,6 +291,7 @@ test("production administrator cookies, redacted config, credential rotation and
     ADMIN_USERNAME: "fixture-admin",
     ADMIN_PASSWORD_HASH: `scrypt$1024$8$1$${salt.toString("base64url")}$${digest.toString("base64url")}`,
     ADMIN_SESSION_SECRET: randomBytes(32).toString("hex"),
+    DIGIBUDDY_RUNTIME_SHARED_SECRET: runtimeSecret,
   });
   const modelKey = randomBytes(24).toString("hex");
   const credential = randomBytes(24).toString("hex");
@@ -317,6 +322,17 @@ test("production administrator cookies, redacted config, credential rotation and
   assert.equal(config.status, 200);
   assert.equal(config.headers.get("cache-control"), "no-store");
   assert.equal(configText.includes(modelKey), false);
+  const savedModel = await fetch(base + "/api/admin/config", {
+    method: "PUT", headers,
+    body: JSON.stringify({
+      document: "models.json",
+      value: { model: "fixture-updated", api_key: modelKey },
+    }),
+  });
+  assert.equal(savedModel.status, 200);
+  const savedModelText = await savedModel.text();
+  assert.equal(savedModelText.includes(modelKey), false);
+  assert.equal(JSON.parse(savedModelText).value.api_key_set, true);
   const rotated = await fetch(base + "/api/admin/credentials", {
     method: "PUT", headers,
     body: JSON.stringify({ profile: "digibuddy", slot: "graph_client_secret", value: credential }),
@@ -328,6 +344,30 @@ test("production administrator cookies, redacted config, credential rotation and
   assert.equal(statuses.status, 200);
   assert.equal(statusText.includes(credential), false);
   assert.equal(statusText.includes('"is_set":true'), true);
+  const allConfig = await fetch(base + "/api/admin/config", { headers });
+  assert.equal(allConfig.status, 200);
+  const allConfigText = await allConfig.text();
+  assert.equal(allConfigText.includes(credential), false);
+  assert.equal(allConfigText.includes(modelKey), false);
+  assert.deepEqual(
+    JSON.parse(allConfigText)["credentials.json"].credentials,
+    JSON.parse(statusText).credentials,
+  );
+  const rejectedCredentialWrite = await fetch(base + "/api/admin/config", {
+    method: "PUT", headers,
+    body: JSON.stringify({
+      document: "credentials.json",
+      value: { credentials: [{ profile: "digibuddy", slot: "graph_client_secret", value: credential }] },
+    }),
+  });
+  assert.equal(rejectedCredentialWrite.status, 400);
+  assert.equal((await rejectedCredentialWrite.text()).includes(credential), false);
+  const runtimeCredentials = await fetch(base + "/api/runtime/documents/credentials.json", {
+    headers: { "x-digibuddy-runtime-secret": runtimeSecret },
+  });
+  assert.equal(runtimeCredentials.status, 200);
+  assert.equal(runtimeCredentials.headers.get("cache-control"), "no-store");
+  assert.equal((await runtimeCredentials.json()).credentials[0].value, credential);
   const logout = await fetch(base + "/api/admin/session", { method: "DELETE", headers });
   assert.match(logout.headers.getSetCookie()[0], /Max-Age=0; Secure$/);
   assert.equal((await fetch(base + "/api/admin/session", {

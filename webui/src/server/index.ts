@@ -1,12 +1,14 @@
-import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.ts";
+import { loadLocalEnvironment } from "./environment.ts";
 
-const staticRoot = resolve(process.cwd(), "dist");
+loadLocalEnvironment();
+const staticRoot = fileURLToPath(new URL("../../dist/", import.meta.url));
 const app = createApp({ staticRoot });
 
 serve({
   fetch: app.fetch,
   port: Number(process.env.PORT || 3000),
-  hostname: process.env.HOST || "0.0.0.0",
+  hostname: process.env.HOST || "127.0.0.1",
 });

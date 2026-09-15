@@ -48,7 +48,10 @@ function route<Params extends Record<string, string>>(
           headers: { Allow: [...allowed].sort().join(", ") },
         });
       }
-      return new Response(null, { status: 405 });
+      return new Response(null, {
+        status: 405,
+        headers: { Allow: [...allowed].sort().join(", ") },
+      });
     },
   };
 }
@@ -87,8 +90,11 @@ export function createApp({ staticRoot }: { staticRoot?: string } = {}) {
   app.all("/.auth/*", () => new Response(null, { status: 404 }));
   app.all("/.auth", () => new Response(null, { status: 404 }));
   if (staticRoot) {
-    app.on(["GET", "HEAD"], "*", serveStatic({ root: staticRoot }));
-    const index = serveStatic({ root: staticRoot, path: "index.html" });
+    const onFound = (path: string, context: Context) => {
+      if (path.endsWith(".html")) context.header("Cache-Control", "no-cache");
+    };
+    app.on(["GET", "HEAD"], "*", serveStatic({ root: staticRoot, onFound }));
+    const index = serveStatic({ root: staticRoot, path: "index.html", onFound });
     app.get("/", index);
     app.get("/admin", index);
   }

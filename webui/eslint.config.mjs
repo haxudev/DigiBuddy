@@ -9,7 +9,7 @@ const eslintConfig = defineConfig([
     plugins: { "react-hooks": reactHooks },
     rules: reactHooks.configs.recommended.rules,
   },
-  globalIgnores([".next/**", "out/**", "build/**", "dist/**", "next-env.d.ts"]),
+  globalIgnores(["build/**", "dist/**"]),
 ]);
 
 export default eslintConfig;

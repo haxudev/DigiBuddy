@@ -80,6 +80,32 @@ test("a blank key keeps the stored one", () => {
   assert.equal(next.api_key, "stored");
 });
 
+test("credential config reads expose only status metadata without mutating stored values", () => {
+  const stored = {
+    credentials: [{
+      profile: "digibuddy",
+      slot: "graph_client_secret",
+      value: "fixture-credential-value",
+      updated_at: "2026-01-01T00:00:00Z",
+      updated_by: "fixture-admin",
+      extra: { sensitive: "fixture-extra-value" },
+    }],
+    extra: "fixture-document-value",
+  };
+  assert.deepEqual(redactDocument("credentials.json", stored), {
+    credentials: [{
+      profile: "digibuddy",
+      slot: "graph_client_secret",
+      is_set: true,
+      updated_at: "2026-01-01T00:00:00Z",
+      updated_by: "fixture-admin",
+    }],
+  });
+  assert.equal(stored.credentials[0].value, "fixture-credential-value");
+  assert.deepEqual(redactDocument("credentials.json", {}), { credentials: [] });
+  assert.equal(redactDocument("credentials.json", null), null);
+});
+
 test("mcp servers must be named safely and use https", () => {
   assert.throws(
     () => normaliseMcp({ servers: { "bad name": { url: "https://a.example" } } }),
